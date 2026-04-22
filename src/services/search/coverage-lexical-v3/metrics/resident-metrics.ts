@@ -122,6 +122,8 @@ export function buildResidentBaseMetrics(
 		input.hanRoute.bodyWitnessPositionEncodingByBlockId.byteLength +
 		input.hanRoute.bodyWitnessPositionStartByBlockId.byteLength;
 	const idPayloadBytes =
+		input.familyLexicon.shardLocalFamilySlotByFamilyId.byteLength +
+		input.familyLexicon.familyIdByShardLocalFamilySlot.byteLength +
 		input.familyLexicon.familyStringIds.byteLength +
 		input.familyLexicon.familyFlagsByFamilyId.byteLength +
 		input.metadataContainers.identityFamiliesByDoc.byteLength +

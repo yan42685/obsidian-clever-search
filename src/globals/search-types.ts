@@ -7,6 +7,7 @@ import type { HybridAvailabilityReason } from "src/services/obsidian/user-data/s
 import { FileUtil } from "src/utils/file-util";
 import { getInstance } from "src/utils/my-lib";
 export type IndexedDocument = {
+  docRef?: DocRef;
   path: string;
   generation?: number;
   size?: number;
@@ -28,6 +29,18 @@ export type BaseIndexedFileRef = {
   path: string;
   generation: number;
   size?: number;
+  docRef?: DocRef;
+};
+
+export type DocRef = number;
+export type FamilyRef = number;
+export type BlockOrdinal = number;
+export type Generation = number;
+
+export type BlockRef = {
+  docRef: DocRef;
+  generation: Generation;
+  blockOrdinal: BlockOrdinal;
 };
 
 export type InFileDataSource = {
@@ -91,6 +104,20 @@ export type HybridSearchIssueKind =
 export type HybridNoticeContext =
   | "default"
   | "lexical_auto_fallback";
+
+export type FileItemFreshnessState =
+  | "fresh"
+  | "stale_grace"
+  | "lexical_only";
+
+export type FileItemFreshnessReason =
+  | "none"
+  | "embedding_wait_interval"
+  | "embedding_updating"
+  | "embedding_failed"
+  | "shadow_missing";
+
+export type FileItemSnapshotSource = "live" | "shadow";
 
 export class SearchResult {
   sourcePath: string;
@@ -189,6 +216,12 @@ export class FileItem extends Item {
   folderWeakHighlightRanges?: HighlightRange[];
   subItems: FileSubItem[]; // for markdown viewType
   nativeSubItemsReady: boolean;
+  freshnessState: FileItemFreshnessState;
+  freshnessReason: FileItemFreshnessReason;
+  snapshotGeneration?: number;
+  snapshotSource: FileItemSnapshotSource;
+  bannerKey?: LocaleKey | null;
+  bannerMessage?: string | null;
   // TODO: impl this
   previewContent: any; // for non-markdown viewType
   // TODO: store the view type rather than relying on obsidian api
@@ -226,6 +259,12 @@ export class FileItem extends Item {
     this.subItems = subItems;
     this.previewContent = previewContent;
     this.nativeSubItemsReady = nativeSubItemsReady;
+    this.freshnessState = "fresh";
+    this.freshnessReason = "none";
+    this.snapshotGeneration = undefined;
+    this.snapshotSource = "live";
+    this.bannerKey = null;
+    this.bannerMessage = null;
     this.basenameHighlightRanges = basenameHighlightRanges;
     this.folderHighlightRanges = folderHighlightRanges;
     this.basenameWeakHighlightRanges = basenameWeakHighlightRanges;

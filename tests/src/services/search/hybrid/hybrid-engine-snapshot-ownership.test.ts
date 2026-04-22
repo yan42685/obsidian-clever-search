@@ -74,6 +74,8 @@ import { HybridEngine } from "src/services/search/hybrid/hybrid-engine";
 
 type HybridChunkRow = {
   id?: number;
+  docRef?: number;
+  generation?: number;
   filePath: string;
   chunkIndex: number;
   startOffset: number;
@@ -86,6 +88,7 @@ type HybridChunkRow = {
 };
 
 type HybridVectorRow = {
+  docRef?: number;
   filePath: string;
   chunkCount: number;
   precision: "int8" | "float16";
@@ -95,14 +98,29 @@ type HybridVectorRow = {
 
 type HybridIndexedFileRefRow = {
   path: string;
+  docRef?: number;
   generation: number;
   state?: string;
+  chunkCount?: number;
+  vectorPrecision?: "int8" | "float16" | null;
+  indexedAt?: number;
+  lastIncrementalEmbedAt?: number;
 };
 
 type HybridSnapshotRow = {
+  docRef?: number;
   filePath: string;
   plainText: string;
   generation?: number;
+};
+
+type DocRegistryRow = {
+  docRef: number;
+  path: string;
+  deleted: boolean;
+  liveGeneration: number;
+  contentFingerprint?: string;
+  updatedAt: number;
 };
 
 function createChunkTable(initialRows: HybridChunkRow[] = []) {
@@ -204,6 +222,86 @@ function createKeyedTable<
   };
 }
 
+function createDocRegistryStore(initialRows: DocRegistryRow[] = []) {
+  const rows = new Map<string, DocRegistryRow>(
+    initialRows.map((row) => [row.path, { ...row }]),
+  );
+  let nextDocRef =
+    initialRows.reduce((max, row) => Math.max(max, row.docRef), 0) + 1;
+
+  return {
+    rows,
+    async ensureEntry(params: {
+      docRef?: number;
+      path: string;
+      generation?: number;
+      deleted?: boolean;
+      contentFingerprint?: string;
+    }) {
+      const existing = rows.get(params.path);
+      const nextRow: DocRegistryRow = existing
+        ? {
+            ...existing,
+            deleted: params.deleted ?? existing.deleted,
+            liveGeneration: params.generation ?? existing.liveGeneration,
+            contentFingerprint:
+              params.contentFingerprint ?? existing.contentFingerprint,
+            updatedAt: Date.now(),
+          }
+        : {
+            docRef: params.docRef ?? nextDocRef++,
+            path: params.path,
+            deleted: params.deleted ?? false,
+            liveGeneration: params.generation ?? 0,
+            contentFingerprint: params.contentFingerprint,
+            updatedAt: Date.now(),
+          };
+      if (params.docRef !== undefined && params.docRef >= nextDocRef) {
+        nextDocRef = params.docRef + 1;
+      }
+      rows.set(nextRow.path, nextRow);
+      return { ...nextRow };
+    },
+    async movePath(
+      oldPath: string,
+      newPath: string,
+      options?: {
+        generation?: number;
+        contentFingerprint?: string;
+      },
+    ) {
+      const existing = rows.get(oldPath);
+      if (!existing) {
+        return undefined;
+      }
+      rows.delete(oldPath);
+      const nextRow: DocRegistryRow = {
+        ...existing,
+        path: newPath,
+        deleted: false,
+        liveGeneration: options?.generation ?? existing.liveGeneration,
+        contentFingerprint:
+          options?.contentFingerprint ?? existing.contentFingerprint,
+        updatedAt: Date.now(),
+      };
+      rows.set(newPath, nextRow);
+      return { ...nextRow };
+    },
+    async markDeleted(path: string, generation?: number) {
+      const existing = rows.get(path);
+      if (!existing) {
+        return;
+      }
+      rows.set(path, {
+        ...existing,
+        deleted: true,
+        liveGeneration: generation ?? existing.liveGeneration,
+        updatedAt: Date.now(),
+      });
+    },
+  };
+}
+
 function createEngineHarness() {
   const chunkTable = createChunkTable();
   const snapshotTable = createKeyedTable<HybridSnapshotRow, "filePath">(
@@ -216,6 +314,7 @@ function createEngineHarness() {
   const indexedRefTable = createKeyedTable<HybridIndexedFileRefRow, "path">(
     "path",
   );
+  const docRegistry = createDocRegistryStore();
   const hnswTable = createKeyedTable<{ id: number; data?: Blob }, "id">("id");
   const artifactStateTable = createKeyedTable<
     { id: string; engine: string; artifact: string; dirtyAt: number; reason?: string | null },
@@ -256,7 +355,13 @@ function createEngineHarness() {
           if (file.text === undefined) {
             continue;
           }
+          const docRegistryEntry = await docRegistry.ensureEntry({
+            path: file.path,
+            generation: file.generation,
+            deleted: false,
+          });
           await snapshotTable.put({
+            docRef: docRegistryEntry.docRef,
             filePath: file.path,
             plainText: file.text,
             generation: file.generation,
@@ -271,8 +376,22 @@ function createEngineHarness() {
       return await indexedRefTable.toArray();
     }),
     putHybridIndexedFileRef: jest.fn(
-      async (ref: { path: string; generation?: number; state?: string }) => {
-        await indexedRefTable.put(ref as any);
+      async (ref: {
+        path: string;
+        docRef?: number;
+        generation?: number;
+        state?: string;
+      }) => {
+        const docRegistryEntry = await docRegistry.ensureEntry({
+          docRef: ref.docRef,
+          path: ref.path,
+          generation: ref.generation,
+          deleted: false,
+        });
+        await indexedRefTable.put({
+          ...(ref as any),
+          docRef: ref.docRef ?? docRegistryEntry.docRef,
+        } as any);
         if (ref.state !== "pending") {
           await fileSnapshotStore.notifyHybridIndexedRefsChanged([ref.path]);
         }
@@ -285,6 +404,20 @@ function createEngineHarness() {
     clearHybridIndexedFileRefs: jest.fn(async () => {
       await indexedRefTable.clear();
       await fileSnapshotStore.notifyHybridIndexedRefsChanged();
+    }),
+    ensureDocRegistryEntry: jest.fn(async (params: {
+      docRef?: number;
+      path: string;
+      generation?: number;
+      deleted?: boolean;
+      contentFingerprint?: string;
+    }) => await docRegistry.ensureEntry(params)),
+    moveDocRegistryPath: jest.fn(async (oldPath: string, newPath: string, options?: {
+      generation?: number;
+      contentFingerprint?: string;
+    }) => await docRegistry.movePath(oldPath, newPath, options)),
+    markDocRegistryDeleted: jest.fn(async (path: string, generation?: number) => {
+      await docRegistry.markDeleted(path, generation);
     }),
     notifyHybridIndexedRefsChanged: jest.fn(async (filePaths?: readonly string[]) => {
       const paths =
@@ -336,6 +469,7 @@ function createEngineHarness() {
     hnswTable,
     artifactStateTable,
     fileSnapshotStore,
+    docRegistry,
   };
 }
 
@@ -364,7 +498,7 @@ describe("HybridEngine shared snapshot ownership", () => {
   });
 
   test("deleteFile removes only hybrid-private state and preserves shared snapshots", async () => {
-    const { engine, chunkTable, snapshotTable, shadowTable, vectorTable, indexedRefTable, fileSnapshotStore } =
+    const { engine, chunkTable, snapshotTable, shadowTable, vectorTable, indexedRefTable, fileSnapshotStore, docRegistry } =
       createEngineHarness();
 
     chunkTable.rows.push(
@@ -538,12 +672,14 @@ describe("HybridEngine shared snapshot ownership", () => {
     expect(chunkTable.rows).toEqual([]);
     expect(await vectorTable.get("docs/empty.md")).toBeUndefined();
     expect(await snapshotTable.get("docs/empty.md")).toEqual({
+      docRef: 1,
       filePath: "docs/empty.md",
       plainText: "\n\n",
       generation: 410,
     });
     expect(await indexedRefTable.get("docs/empty.md")).toEqual({
       path: "docs/empty.md",
+      docRef: 1,
       generation: 410,
       state: "ready",
       chunkCount: 0,
@@ -554,7 +690,7 @@ describe("HybridEngine shared snapshot ownership", () => {
   });
 
   test("moveFile rewrites only hybrid-private rows and leaves shared snapshots untouched", async () => {
-    const { engine, chunkTable, snapshotTable, shadowTable, vectorTable, indexedRefTable, fileSnapshotStore } =
+    const { engine, chunkTable, snapshotTable, shadowTable, vectorTable, indexedRefTable, fileSnapshotStore, docRegistry } =
       createEngineHarness();
 
     chunkTable.rows.push(
@@ -613,6 +749,7 @@ describe("HybridEngine shared snapshot ownership", () => {
     });
     await indexedRefTable.put({
       path: "docs/old.md",
+      docRef: 7,
       generation: 300,
       state: "ready",
     });
@@ -642,7 +779,15 @@ describe("HybridEngine shared snapshot ownership", () => {
     expect(await indexedRefTable.get("docs/new.md")).toEqual(
       expect.objectContaining({
         path: "docs/new.md",
+        docRef: 7,
         generation: 300,
+      }),
+    );
+    expect(docRegistry.rows.get("docs/new.md")).toEqual(
+      expect.objectContaining({
+        docRef: 7,
+        path: "docs/new.md",
+        deleted: false,
       }),
     );
     expect(await snapshotTable.get("docs/old.md")).toEqual({
@@ -665,5 +810,3 @@ describe("HybridEngine shared snapshot ownership", () => {
     ]);
   });
 });
-
-

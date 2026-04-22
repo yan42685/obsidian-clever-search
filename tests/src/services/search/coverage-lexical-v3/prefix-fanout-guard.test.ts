@@ -90,6 +90,7 @@ function createCandidateRecall(
 		.map((block) => block.blockId);
 	return {
 		docId,
+		liveDocSlot: docId,
 		matchedIdentityUnitIndices: options.identity ?? [],
 		matchedRouteUnitIndices: options.route ?? [],
 		matchedHeadingUnitIndices: options.heading ?? [],

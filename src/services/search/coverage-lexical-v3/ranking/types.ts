@@ -49,6 +49,7 @@ export type RealizedQueryUnitFamily = Readonly<{
 	queryUnitText: string;
 	querySurfaceGroupIndex: number | null;
 	familyId: number;
+	shardLocalFamilySlot: number;
 	familyText: string;
 	matchKind: V3QueryFamilyMatchKind;
 	editDistance: 0 | 1;

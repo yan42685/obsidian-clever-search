@@ -1,167 +1,13 @@
-import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
-import type { V3QueryAnalysis } from "src/services/search/coverage-lexical-v3/query/analysis";
+﻿import type { V3QueryAnalysis } from "src/services/search/coverage-lexical-v3/query/analysis";
 import type { V3CandidateDocRecall } from "src/services/search/coverage-lexical-v3/recall";
 import type { EvidencePackingProfile } from "src/services/search/coverage-lexical-v3/ranking";
 import { buildV3DirectSubitems } from "src/services/search/coverage-lexical-v3/direct-subitems";
-
-function createResidentBaseForBlockCounts(
-	blockCountsByDoc: readonly number[],
-): ResidentBase {
-	let blockStart = 0;
-	const bodyBlockStartByDocId: number[] = [];
-	const bodyBlockCountByDocId: number[] = [];
-	const docIdByBlockId: number[] = [];
-	const blockOrdinalByBlockId: number[] = [];
-	for (let docId = 0; docId < blockCountsByDoc.length; docId += 1) {
-		bodyBlockStartByDocId.push(blockStart);
-		bodyBlockCountByDocId.push(blockCountsByDoc[docId]);
-		for (let ordinal = 0; ordinal < blockCountsByDoc[docId]; ordinal += 1) {
-			docIdByBlockId.push(docId);
-			blockOrdinalByBlockId.push(ordinal);
-			blockStart += 1;
-		}
-	}
-	return {
-		version: 1,
-		stringArena: {
-			text: "",
-			offsets: new Uint32Array(),
-			lengths: new Uint32Array(),
-			count: 0,
-		},
-		docTable: {
-			docCount: blockCountsByDoc.length,
-			pathStringIds: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			generationByDocId: new Float64Array(blockCountsByDoc.map((_, index) => 100 + index)),
-			identityStartByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			identityCountByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			routeStartByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			routeCountByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			headingStartByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			headingCountByDocId: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			bodyBlockStartByDocId: new Uint32Array(bodyBlockStartByDocId),
-			bodyBlockCountByDocId: new Uint32Array(bodyBlockCountByDocId),
-		},
-		familyLexicon: {
-			familyCount: 0,
-			familyStringIds: new Uint32Array(),
-			familyFlagsByFamilyId: new Uint8Array(),
-		},
-		metadataContainers: {
-			identityFamiliesByDoc: new Uint32Array(),
-			routeFamiliesByDoc: new Uint32Array(),
-			headingFamiliesByDoc: new Uint32Array(),
-			identityPostings: {
-				postingStarts: new Uint32Array(),
-				docIds: new Uint32Array(),
-			},
-			routePostings: {
-				postingStarts: new Uint32Array(),
-				docIds: new Uint32Array(),
-			},
-			headingPostings: {
-				postingStarts: new Uint32Array(),
-				docIds: new Uint32Array(),
-			},
-		},
-		bodyFamilyPosting: {
-			familyIds: new Uint32Array(),
-			postingStarts: new Uint32Array(),
-			docIds: new Uint32Array(),
-			docPostingStarts: new Uint32Array(),
-			blockIds: new Uint32Array(),
-		},
-		bodyBlocks: {
-			blockCount: blockStart,
-			docIdByBlockId: new Uint32Array(docIdByBlockId),
-			blockOrdinalByBlockId: new Uint32Array(blockOrdinalByBlockId),
-			exactTapeStartByBlockId: new Uint32Array(Array.from({ length: blockStart }, () => 0)),
-			exactTapeCountByBlockId: new Uint32Array(Array.from({ length: blockStart }, () => 0)),
-		},
-		exactTapes: {
-			familyIds: new Uint32Array(),
-			positionEncodingByBlockId: new Uint8Array(),
-			positionStartByBlockId: new Uint32Array(),
-			positionDeltaU8Tape: new Uint8Array(),
-			positionDeltaU16Tape: new Uint16Array(),
-			positionDeltaU32Tape: new Uint32Array(),
-		},
-		hanRoute: {
-			bigramIds: new Uint32Array(),
-			bodyBigramIds: new Uint32Array(),
-			metadataPostingStarts: new Uint32Array(),
-			metadataDocIds: new Uint32Array(),
-			bodyPostingStarts: new Uint32Array(),
-			bodyBlockIds: new Uint32Array(),
-			identityWitnessStartByDocId: new Uint32Array(),
-			identityWitnessStringIds: new Uint32Array(),
-			routeWitnessStartByDocId: new Uint32Array(),
-			routeWitnessStringIds: new Uint32Array(),
-			headingWitnessStartByDocId: new Uint32Array(),
-			headingWitnessStringIds: new Uint32Array(),
-			bodyWitnessOccurrenceStartByBlockId: new Uint32Array(),
-			bodyWitnessOccurrenceStringIds: new Uint32Array(),
-			bodyWitnessPositionEncodingByBlockId: new Uint8Array(),
-			bodyWitnessPositionStartByBlockId: new Uint32Array(),
-			bodyWitnessPositionDeltaU8Tape: new Uint8Array(),
-			bodyWitnessPositionDeltaU16Tape: new Uint16Array(),
-			bodyWitnessPositionDeltaU32Tape: new Uint32Array(),
-		},
-		metrics: {
-			docArenaBytes: 0,
-			stringArenaBytes: 0,
-			stringArenaPathBytes: 0,
-			stringArenaFamilyBytes: 0,
-			stringArenaIdentityWitnessBytes: 0,
-			stringArenaRouteWitnessBytes: 0,
-			stringArenaHeadingWitnessBytes: 0,
-			stringArenaBodyWitnessBytes: 0,
-			stringArenaMultiSourceBytes: 0,
-			stringArenaUnattributedBytes: 0,
-			familyLexiconBytes: 0,
-			metadataContainerBytes: 0,
-			headingBytes: 0,
-			familyPostingBytes: 0,
-			familyPostingTermIdsBytes: 0,
-			familyPostingPostingStartsBytes: 0,
-			familyPostingBlockIdsBytes: 0,
-			familyPostingSingletonTermIdsBytes: 0,
-			familyPostingSingletonBlockIdsBytes: 0,
-			familyPostingPairTermIdsBytes: 0,
-			familyPostingPairFirstBlockIdsBytes: 0,
-			familyPostingPairSecondBlockIdsBytes: 0,
-			familyPostingSmallTermIdsBytes: 0,
-			familyPostingSmallPostingStartsBytes: 0,
-			familyPostingSmallBlockIdsBytes: 0,
-			familyPostingDeltaTermIdsBytes: 0,
-			familyPostingDeltaTapeStartsBytes: 0,
-			familyPostingDeltaPostingTapeBytes: 0,
-			bodyBlockBytes: 0,
-			exactTapeBytes: 0,
-			hanRouteBytes: 0,
-			hanRouteSharedBigramIdsBytes: 0,
-			hanRouteMetadataHanPostingsBytes: 0,
-			hanRouteMetadataHanPostingStartsBytes: 0,
-			hanRouteMetadataHanDocIdsBytes: 0,
-			hanRouteBodyHanPostingsBytes: 0,
-			hanRouteBodyBigramIdsBytes: 0,
-			hanRouteBodyHanPostingStartsBytes: 0,
-			hanRouteBodyHanBodyBlockIdsBytes: 0,
-			hanRouteMetadataWitnessBytes: 0,
-			hanRouteBodyWitnessBytes: 0,
-			scaffoldBytes: 0,
-			countBytes: 0,
-			idPayloadBytes: 0,
-			stringPayloadBytes: 0,
-			auxiliaryBytes: 0,
-			residentBytes: 0,
-			indexedSurfaceUtf8Bytes: 0,
-			rawMarkdownUtf8Bytes: 0,
-			"residentBytes / indexedSurfaceUtf8Bytes": 0,
-			"residentBytes / rawMarkdownUtf8Bytes": 0,
-		},
-	};
-}
+import {
+	createMinimalCandidate as createBaseCandidate,
+	createMinimalCandidateRecall,
+	createMinimalResidentBaseForBlockCounts as createResidentBaseForBlockCounts,
+	createRealizedFamily as createBaseRealizedFamily,
+} from "./test-fixtures";
 
 function createQueryAnalysis(params: {
 	queryText: string;
@@ -187,93 +33,39 @@ function createQueryAnalysis(params: {
 }
 
 function createCandidate(overrides: Partial<EvidencePackingProfile>): EvidencePackingProfile {
-	return {
-		docId: overrides.docId ?? 0,
-		path: overrides.path ?? "doc.md",
-		stableKey: overrides.stableKey ?? overrides.path ?? "doc.md",
-		surfaceCoverageShapeKey: overrides.surfaceCoverageShapeKey ?? "h",
-		realizedCoverageCount: overrides.realizedCoverageCount ?? 1,
-		coverageGate: overrides.coverageGate ?? {
-			realizedCoverageCount: overrides.realizedCoverageCount ?? 1,
-			fullySatisfiedSurfaceGroupCount: 1,
-			startedSurfaceGroupCount: 1,
-			crossScriptSatisfiedGroupCount: 1,
-		},
-		exactUnitCount: overrides.exactUnitCount ?? 1,
-		completedHanSurfaceGroupCount: overrides.completedHanSurfaceGroupCount ?? 0,
-		hanSurfaceCompletionTierScoreTotal: overrides.hanSurfaceCompletionTierScoreTotal ?? 0,
-		strongestHanSurfaceCompletionTier: overrides.strongestHanSurfaceCompletionTier ?? "none",
-		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
-		singletonHanCompletion: overrides.singletonHanCompletion ?? {
-			singletonHanChar: null,
-			singletonHanCharIndex: null,
-			singletonHanSurfaceGroupIndex: null,
-			matched: false,
-			matchSource: "none",
-			bestAnchorKind: "none",
-			bestAnchorDistance: null,
-			sameBlockAsAnchor: false,
-			sameBlockAsBestBodyWindow: false,
-			tier: "none",
-		},
-		hanStrongRescueGroupCount: overrides.hanStrongRescueGroupCount ?? 0,
-		hanWeakRescueGroupCount: overrides.hanWeakRescueGroupCount ?? 0,
-		hanRescueSupportWeightTotal: overrides.hanRescueSupportWeightTotal ?? 0,
-		hasOnlyWeakHanRescue: overrides.hasOnlyWeakHanRescue ?? false,
-		hasAnyHanRescueAssessment: overrides.hasAnyHanRescueAssessment ?? false,
-		hanRescueAssessments: overrides.hanRescueAssessments ?? [],
-		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
-		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
-		fuzzyUnitCount: overrides.fuzzyUnitCount ?? 0,
-		fuzzyEditDistanceTotal: overrides.fuzzyEditDistanceTotal ?? 0,
-		metadataPackingSignature: overrides.metadataPackingSignature ?? {
-			basenameUnitCount: 0,
-			aliasUnitCount: 0,
-			routeUnitCount: 0,
-			sortedBuckets: [],
-		},
-		realizedFamilies: overrides.realizedFamilies ?? [],
-		identityContainer: overrides.identityContainer ?? null,
-		routeContainer: overrides.routeContainer ?? null,
-		bodyWindowContainer:
-			"bodyWindowContainer" in overrides
-				? (overrides.bodyWindowContainer ?? null)
-				: {
-					tier: "bodyWindow",
-					blockIds: [0],
-					boundaryCrossingCount: 0,
-					coveredUnitIndices: [0],
-					coveredDistinctUnitCount: 1,
-					containerCompactness: 100,
-					exactUnitCount: 1,
-					windowWidth: 1,
-					gapCount: 0,
-					density: 1,
-					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
-				},
-		strongestContainer:
-			"strongestContainer" in overrides
-				? (overrides.strongestContainer ?? null)
-				: overrides.bodyWindowContainer ?? {
-					tier: "bodyWindow",
-					blockIds: [0],
-					boundaryCrossingCount: 0,
-					coveredUnitIndices: [0],
-					coveredDistinctUnitCount: 1,
-					containerCompactness: 100,
-					exactUnitCount: 1,
-					windowWidth: 1,
-					gapCount: 0,
-					density: 1,
-					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
-				},
-		secondStrongestContainer: overrides.secondStrongestContainer ?? null,
-		fragmentationPenalty: overrides.fragmentationPenalty ?? {
-			bodyResidueUnitCount: 0,
-			uncoveredByTopTwoCount: 0,
-			explanatoryContainerCount: 1,
-		},
+	const defaultBodyWindow = {
+		tier: "bodyWindow" as const,
+		blockIds: [0],
+		boundaryCrossingCount: 0,
+		coveredUnitIndices: [0],
+		coveredDistinctUnitCount: 1,
+		containerCompactness: 100,
+		exactUnitCount: 1,
+		windowWidth: 1,
+		gapCount: 0,
+		density: 1,
+		headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
 	};
+	const bodyWindowContainer =
+		"bodyWindowContainer" in overrides
+			? (overrides.bodyWindowContainer ?? null)
+			: defaultBodyWindow;
+	const strongestContainer =
+		"strongestContainer" in overrides
+			? (overrides.strongestContainer ?? null)
+			: overrides.bodyWindowContainer ?? defaultBodyWindow;
+	return createBaseCandidate({
+		...overrides,
+		bodyWindowContainer,
+		strongestContainer,
+		secondStrongestContainer: overrides.secondStrongestContainer ?? null,
+		fragmentationPenalty:
+			overrides.fragmentationPenalty ?? {
+				bodyResidueUnitCount: 0,
+				uncoveredByTopTwoCount: 0,
+				explanatoryContainerCount: 1,
+			},
+	});
 }
 
 function createRealizedFamily(
@@ -283,7 +75,7 @@ function createRealizedFamily(
 	matchKind: "exact" | "prefix" | "fuzzy" | "opaque_exact" = "exact",
 	querySurfaceGroupIndex: number | null = queryUnitIndex,
 ) {
-	return {
+	return createBaseRealizedFamily({
 		queryUnitIndex,
 		queryUnitText,
 		querySurfaceGroupIndex,
@@ -291,28 +83,22 @@ function createRealizedFamily(
 		familyText,
 		matchKind,
 		editDistance: matchKind === "fuzzy" ? 1 : 0,
-		identityMetadataSource: "none" as const,
-		routeMetadataSource: "none" as const,
-		metadataPackingSource: "route" as const,
+		identityMetadataSource: "none",
+		routeMetadataSource: "none",
+		metadataPackingSource: "route",
 		inIdentity: false,
 		inRoute: false,
 		inHeading: false,
 		inBestBodyWindow: true,
 		inBodyResidue: false,
-	};
+	});
 }
 
 function createCandidateRecall(overrides: Partial<V3CandidateDocRecall>): V3CandidateDocRecall {
-	return {
-		docId: overrides.docId ?? 0,
-		matchedIdentityUnitIndices: overrides.matchedIdentityUnitIndices ?? [],
-		matchedRouteUnitIndices: overrides.matchedRouteUnitIndices ?? [],
-		matchedHeadingUnitIndices: overrides.matchedHeadingUnitIndices ?? [],
-		shortlistedBodyBlockIds: overrides.shortlistedBodyBlockIds ?? [0],
-		hanMetadataGateStats: overrides.hanMetadataGateStats ?? null,
-		hanBodyBlockGateStats: overrides.hanBodyBlockGateStats ?? [],
-		hanSurfaceGroupRecalls: overrides.hanSurfaceGroupRecalls ?? [],
-	};
+	return createMinimalCandidateRecall(
+		overrides.shortlistedBodyBlockIds ?? [0],
+		overrides,
+	);
 }
 
 function extractHighlightTexts(result: ReturnType<typeof buildV3DirectSubitems>): string[] {
@@ -320,7 +106,6 @@ function extractHighlightTexts(result: ReturnType<typeof buildV3DirectSubitems>)
 		(result.subItems[0]?.snippetText ?? "").slice(range.start, range.end),
 	) ?? [];
 }
-
 describe("coverage lexical v3 direct subitems", () => {
 	test("prefers a full Han surface snippet over a shorter real term", () => {
 		const queryAnalysis = createQueryAnalysis({
@@ -330,23 +115,23 @@ describe("coverage lexical v3 direct subitems", () => {
 					index: 0,
 					text: "\u751f\u547d\u529b",
 					kind: "han",
-					hanBigramTexts: ["生命", "命力"],
+					hanBigramTexts: ["\u751f\u547d", "\u547d\u529b"],
 					coveredCharMask: [true, true, false],
-					queryResidualUniqueBigrams: ["命力"],
+					queryResidualUniqueBigrams: ["\u547d\u529b"],
 					hasQueryResidualHanCoverage: true,
 				},
 			],
 			primaryUnits: [
-				{ index: 0, text: "生命", source: "han_tokenizer_real", surfaceGroupIndex: 0 },
+				{ index: 0, text: "\u751f\u547d", source: "han_tokenizer_real", surfaceGroupIndex: 0 },
 			],
 		});
 
 		const result = buildV3DirectSubitems({
-			snapshotText: "生命力十足\n\n这里只谈生命现象",
+			snapshotText: "\u751f\u547d\u529b\u5341\u8db3\n\u8fd9\u91cc\u53ea\u8c08\u751f\u547d\u73b0\u8c61",
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "life.md",
-				realizedFamilies: [createRealizedFamily(0, "生命", "生命", "exact", 0)],
+				realizedFamilies: [createRealizedFamily(0, "\u751f\u547d", "\u751f\u547d", "exact", 0)],
 			}),
 			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0, 1] }),
 			residentBase: createResidentBaseForBlockCounts([2]),
@@ -420,27 +205,27 @@ describe("coverage lexical v3 direct subitems", () => {
 					index: 1,
 					text: "\u751f\u547d\u529b",
 					kind: "han",
-					hanBigramTexts: ["生命", "命力"],
+					hanBigramTexts: ["\u751f\u547d", "\u547d\u529b"],
 					coveredCharMask: [true, true, false],
-					queryResidualUniqueBigrams: ["命力"],
+					queryResidualUniqueBigrams: ["\u547d\u529b"],
 					hasQueryResidualHanCoverage: true,
 				},
 			],
 			primaryUnits: [
 				{ index: 0, text: "abc", source: "surface", surfaceGroupIndex: 0 },
-				{ index: 1, text: "生命", source: "han_tokenizer_real", surfaceGroupIndex: 1 },
+				{ index: 1, text: "\u751f\u547d", source: "han_tokenizer_real", surfaceGroupIndex: 1 },
 			],
 			surfaceCoverageShapeKey: "lh",
 		});
 
 		const result = buildV3DirectSubitems({
-			snapshotText: "生命力十足\n\nabc 与生命分开出现",
+			snapshotText: "\u751f\u547d\u529b\u5341\u8db3\nabc \u4e0e\u751f\u547d\u5206\u5f00\u51fa\u73b0",
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "mixed.md",
 				realizedFamilies: [
 					createRealizedFamily(0, "abc", "abc", "exact", 0),
-					createRealizedFamily(1, "生命", "生命", "exact", 1),
+					createRealizedFamily(1, "\u751f\u547d", "\u751f\u547d", "exact", 1),
 				],
 				bodyWindowContainer: {
 					tier: "bodyWindow",
@@ -455,19 +240,7 @@ describe("coverage lexical v3 direct subitems", () => {
 					density: 1,
 					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
 				},
-				strongestContainer: {
-					tier: "bodyWindow",
-					blockIds: [0, 1],
-					boundaryCrossingCount: 1,
-					coveredUnitIndices: [0, 1],
-					coveredDistinctUnitCount: 2,
-					containerCompactness: 100,
-					exactUnitCount: 2,
-					windowWidth: 2,
-					gapCount: 1,
-					density: 1,
-					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
-				},
+
 			}),
 			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0, 1] }),
 			residentBase: createResidentBaseForBlockCounts([2]),
@@ -475,7 +248,7 @@ describe("coverage lexical v3 direct subitems", () => {
 
 		expect(result.candidates[0]?.coveredRealPrimaryCount).toBe(2);
 		expect(extractHighlightTexts(result)).toEqual(
-			expect.arrayContaining(["abc", expect.stringMatching(/^生命/)]),
+			expect.arrayContaining(["abc", expect.stringMatching(/^\u751f\u547d/)]),
 		);
 	});
 
@@ -487,23 +260,23 @@ describe("coverage lexical v3 direct subitems", () => {
 					index: 0,
 					text: "\u751f\u547d\u529b",
 					kind: "han",
-					hanBigramTexts: ["生命", "命力"],
+					hanBigramTexts: ["\u751f\u547d", "\u547d\u529b"],
 					coveredCharMask: [true, false, false],
-					queryResidualUniqueBigrams: ["命力"],
+					queryResidualUniqueBigrams: ["\u547d\u529b"],
 					hasQueryResidualHanCoverage: true,
 				},
 			],
 			primaryUnits: [
-				{ index: 0, text: "生命", source: "han_tokenizer_real", surfaceGroupIndex: 0 },
+				{ index: 0, text: "\u751f\u547d", source: "han_tokenizer_real", surfaceGroupIndex: 0 },
 			],
 		});
 
 		const result = buildV3DirectSubitems({
-			snapshotText: "这里先说生命，然后命力被单独提及",
+			snapshotText: "\u8fd9\u91cc\u5148\u8bf4\u751f\u547d\uff0c\u7136\u540e\u547d\u529b\u88ab\u5355\u72ec\u63d0\u53ca",
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "bigram.md",
-				realizedFamilies: [createRealizedFamily(0, "生命", "生命", "exact", 0)],
+				realizedFamilies: [createRealizedFamily(0, "\u751f\u547d", "\u751f\u547d", "exact", 0)],
 				bodyWindowContainer: null,
 				strongestContainer: null,
 			}),
@@ -523,7 +296,7 @@ describe("coverage lexical v3 direct subitems", () => {
 
 		expect(result.candidates[0]?.matchedOpaqueBigramCount).toBe(1);
 		expect(result.subItems).toHaveLength(1);
-		expect(result.subItems[0]?.snippetText).toContain("命力");
+		expect(result.subItems[0]?.snippetText).toContain("\u547d\u529b");
 	});
 
 	test("does not fabricate a full Han surface when only partial Han evidence exists", () => {
@@ -534,23 +307,23 @@ describe("coverage lexical v3 direct subitems", () => {
 					index: 0,
 					text: "\u751f\u547d\u529b",
 					kind: "han",
-					hanBigramTexts: ["生命", "命力"],
+					hanBigramTexts: ["\u751f\u547d", "\u547d\u529b"],
 					coveredCharMask: [true, true, false],
-					queryResidualUniqueBigrams: ["命力"],
+					queryResidualUniqueBigrams: ["\u547d\u529b"],
 					hasQueryResidualHanCoverage: true,
 				},
 			],
 			primaryUnits: [
-				{ index: 0, text: "生命", source: "han_tokenizer_real", surfaceGroupIndex: 0 },
+				{ index: 0, text: "\u751f\u547d", source: "han_tokenizer_real", surfaceGroupIndex: 0 },
 			],
 		});
 
 		const result = buildV3DirectSubitems({
-			snapshotText: "这里只有生命，没有完整词",
+			snapshotText: "\u8fd9\u91cc\u53ea\u6709\u751f\u547d\uff0c\u6ca1\u6709\u5b8c\u6574\u8bcd",
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "partial.md",
-				realizedFamilies: [createRealizedFamily(0, "生命", "生命", "exact", 0)],
+				realizedFamilies: [createRealizedFamily(0, "\u751f\u547d", "\u751f\u547d", "exact", 0)],
 				bodyWindowContainer: null,
 				strongestContainer: null,
 			}),
@@ -559,7 +332,7 @@ describe("coverage lexical v3 direct subitems", () => {
 		});
 
 		expect(result.candidates[0]?.confirmedSurfaceGroupCount).toBe(0);
-		expect(extractHighlightTexts(result)).toContain("生命");
+		expect(extractHighlightTexts(result)).toContain("\u751f\u547d");
 		expect(extractHighlightTexts(result)).not.toContain("\u751f\u547d\u529b");
 	});
 
@@ -717,23 +490,23 @@ describe("coverage lexical v3 direct subitems", () => {
 					index: 0,
 					text: "\u751f\u547d\u529b",
 					kind: "han",
-					hanBigramTexts: ["生命", "命力"],
+					hanBigramTexts: ["\u751f\u547d", "\u547d\u529b"],
 					coveredCharMask: [true, true, false],
-					queryResidualUniqueBigrams: ["命力"],
+					queryResidualUniqueBigrams: ["\u547d\u529b"],
 					hasQueryResidualHanCoverage: true,
 				},
 			],
 			primaryUnits: [
-				{ index: 0, text: "生命", source: "han_tokenizer_real", surfaceGroupIndex: 0 },
+				{ index: 0, text: "\u751f\u547d", source: "han_tokenizer_real", surfaceGroupIndex: 0 },
 			],
 		});
 
 		const result = buildV3DirectSubitems({
-			snapshotText: "先说生命\n\n后来说生命力十足",
+			snapshotText: "\u5148\u8bf4\u751f\u547d\n\n\u540e\u6765\u8bf4\u751f\u547d\u529b\u5341\u8db3",
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "hide-weak.md",
-				realizedFamilies: [createRealizedFamily(0, "生命", "生命", "exact", 0)],
+				realizedFamilies: [createRealizedFamily(0, "\u751f\u547d", "\u751f\u547d", "exact", 0)],
 			}),
 			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0, 1] }),
 			residentBase: createResidentBaseForBlockCounts([2]),
@@ -827,3 +600,4 @@ describe("coverage lexical v3 direct subitems", () => {
 		expect(result.subItems).toHaveLength(0);
 	});
 });
+

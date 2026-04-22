@@ -9,7 +9,7 @@ import {
 	V3_BODY_BLOCK_MAX_TOKENS,
 	V3_BODY_BLOCK_TARGET_TOKENS,
 } from "../query/text";
-import type { V3CandidateDocRecall, V3ResolvedHanSurfaceGroup } from "../recall";
+import { getLiveDocBodyBlockIds, type V3CandidateDocRecall, type V3ResolvedHanSurfaceGroup } from "../recall";
 import { resolveCandidateHanSurfaceGroups } from "../recall/han-surface-groups";
 import type { SingletonHanTarget } from "../singleton-han";
 import {
@@ -314,7 +314,6 @@ function collectBaseOccurrencesForScope(
 			const allowedBlockIds = new Set<number>();
 			for (const seedBlockId of groupRecall.bodySeedBlockIds) {
 				for (const blockId of collectSameDocSeedNeighborhoodBlockIds(
-					context.candidateRecall.docId,
 					seedBlockId,
 					context.scope.blocks,
 				)) {
@@ -1080,9 +1079,8 @@ function collectLocalBlockIds(
 		for (const seedBlockId of groupRecall.bodySeedBlockIds) {
 			blockIds.add(seedBlockId);
 			for (const blockId of collectSameDocSeedNeighborhoodBlockIds(
-				candidateRecall.docId,
 				seedBlockId,
-				getBodyBlocksForDoc(candidateRecall.docId, residentBase),
+				getBodyBlocksForLiveDocSlot(candidateRecall.liveDocSlot, residentBase),
 			)) {
 				blockIds.add(blockId);
 			}
@@ -1091,28 +1089,20 @@ function collectLocalBlockIds(
 	return blockIds;
 }
 
-function getBodyBlocksForDoc(
-	docId: number,
+function getBodyBlocksForLiveDocSlot(
+	liveDocSlot: number,
 	residentBase: ResidentBase,
 ): RawBlock[] {
-	const start = residentBase.docTable.bodyBlockStartByDocId[docId] ?? 0;
-	const count = residentBase.docTable.bodyBlockCountByDocId[docId] ?? 0;
-	const blocks: RawBlock[] = [];
-	for (let offset = 0; offset < count; offset += 1) {
-		const blockId = start + offset;
-		blocks.push({
-			blockId,
-			ordinal: residentBase.bodyBlocks.blockOrdinalByBlockId[blockId] ?? blockId,
-			start: 0,
-			end: 0,
-			text: "",
-		});
-	}
-	return blocks;
+	return getLiveDocBodyBlockIds(residentBase, liveDocSlot).map((blockId) => ({
+		blockId,
+		ordinal: residentBase.bodyBlocks.blockOrdinalByBlockId[blockId] ?? blockId,
+		start: 0,
+		end: 0,
+		text: "",
+	}));
 }
 
 function collectSameDocSeedNeighborhoodBlockIds(
-	_docId: number,
 	seedBlockId: number,
 	availableBlocks: readonly Pick<RawBlock, "blockId">[],
 ): number[] {

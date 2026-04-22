@@ -92,6 +92,8 @@ async function searchAlphaPaths(
 ): Promise<string[]> {
 	const matches = await engine.searchFiles({
 		queryText: "alpha",
+		isPrefixMatch: true,
+		isFuzzy: false,
 		maxItemResults,
 		hideWeaklyRelatedResults: false,
 	});

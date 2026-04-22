@@ -137,6 +137,19 @@
 		return null;
 	}
 
+	function getCurrentFileFreshnessNoticeText(): string | null {
+		if (!currFileItem) {
+			return null;
+		}
+		if (currFileItem.bannerMessage) {
+			return currFileItem.bannerMessage;
+		}
+		if (currFileItem.bannerKey) {
+			return t(currFileItem.bannerKey);
+		}
+		return null;
+	}
+
 	// TODO: use virtual list rather than rendering all buttons
 
 	// updates focused content and selected file index
@@ -627,6 +640,13 @@
 						<div class="hybrid-freshness-banner">
 							<p class="hybrid-freshness-banner-message">
 								{hybridFreshnessNotice.message}
+							</p>
+						</div>
+					{/if}
+					{#if currFileItem && getCurrentFileFreshnessNoticeText()}
+						<div class="hybrid-freshness-banner">
+							<p class="hybrid-freshness-banner-message">
+								{getCurrentFileFreshnessNoticeText()}
 							</p>
 						</div>
 					{/if}

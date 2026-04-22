@@ -62,6 +62,10 @@ jest.mock("src/services/search/highlighter", () => ({
 	LineHighlighter: class LineHighlighter {},
 }));
 
+jest.mock("src/services/search/shared/file-snapshot-store", () => ({
+	FileSnapshotStore: class FileSnapshotStore {},
+}));
+
 jest.mock("src/services/obsidian/view-registry", () => ({
 	ViewRegistry: class ViewRegistry {},
 	ViewType: {
@@ -107,6 +111,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		const { DataProvider } = require("src/services/obsidian/user-data/data-provider");
 		const { LexicalEngine } = require("src/services/search/lexical-engine");
 		const { LineHighlighter } = require("src/services/search/highlighter");
+		const { FileSnapshotStore } = require("src/services/search/shared/file-snapshot-store");
 		const { ViewRegistry } = require("src/services/obsidian/view-registry");
 		const { DataManager } = require("src/services/obsidian/user-data/data-manager");
 		const { SearchService } = require("src/services/obsidian/search-service");
@@ -133,6 +138,10 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		});
 		mockInstanceMap.set(LineHighlighter, {
 			parse: jest.fn(),
+			parseAll: jest.fn(() => []),
+		});
+		mockInstanceMap.set(FileSnapshotStore, {
+			readIndexedTexts: jest.fn(async () => new Map()),
 		});
 		mockInstanceMap.set(ViewRegistry, {
 			viewTypeByPath: jest.fn(() => "markdown"),
@@ -155,6 +164,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 				},
 			})),
 			hasHybridFailedEmbeddings: jest.fn(() => false),
+			getHybridFileFreshnessMap: jest.fn(async () => new Map()),
 		};
 		mockInstanceMap.set(DataManager, dataManager);
 
@@ -550,7 +560,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		]);
 	});
 
-	test("re-emits a fallback notice after the aggregated state clears", () => {
+	test("keeps a single fallback notice instance after the aggregated state clears", () => {
 		const { service } = createHarness();
 		const { SearchResult } = require("src/globals/search-types");
 		const fallbackResult = new SearchResult(
@@ -566,7 +576,6 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 
 		expect(mockNotices.map((entry) => entry.message)).toEqual([
 			"hybridReason.unavailablehybridNotice.lexicalFallbackSwitchedSuffix",
-			"hybridReason.unavailablehybridNotice.lexicalFallbackSwitchedSuffix",
 		]);
 	});
 
@@ -580,6 +589,125 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(dataManager.flushPendingDocOperations.mock.invocationCallOrder[0]).toBeLessThan(
 			mockHybridEngine.prepareRecall.mock.invocationCallOrder[0],
 		);
+	});
+
+	test("decorates hybrid file items with stale-grace freshness and item banner", async () => {
+		const { FileItem, EngineType } = require("src/globals/search-types");
+		const prepared = {
+			query: "alpha",
+			topK: 10,
+			displayCandidates: [],
+			fallbackNoticeKey: null,
+			fallbackNoticeMessage: null,
+			fallbackToLexicalSearch: false,
+		};
+		const hybridItem = new FileItem(
+			EngineType.HYBRID,
+			"notes/stale.md",
+			["alpha"],
+			["alpha"],
+			[],
+			"nothing",
+			true,
+		);
+		mockHybridEngine.prepareRecall.mockResolvedValue(prepared);
+		mockHybridEngine.buildItemsFromPreparedRecall.mockReturnValue([hybridItem]);
+		mockHybridEngine.finalizePreparedRecall.mockResolvedValue({
+			items: [hybridItem],
+			fallbackNoticeKey: null,
+			fallbackNoticeMessage: null,
+			fallbackToLexicalSearch: false,
+		});
+
+		const { service, dataManager } = createHarness();
+		dataManager.getHybridFileFreshnessMap.mockResolvedValue(
+			new Map([
+				[
+					"notes/stale.md",
+					{
+						state: "stale_grace",
+						reason: "embedding_wait_interval",
+						snapshotGeneration: 180,
+						snapshotSource: "shadow",
+					},
+				],
+			]),
+		);
+
+		const result = await service.searchInVaultHybrid("alpha");
+		const item = result.items[0];
+
+		expect(dataManager.getHybridFileFreshnessMap).toHaveBeenCalledWith([
+			"notes/stale.md",
+		]);
+		expect(item.freshnessState).toBe("stale_grace");
+		expect(item.freshnessReason).toBe("embedding_wait_interval");
+		expect(item.snapshotGeneration).toBe(180);
+		expect(item.snapshotSource).toBe("shadow");
+		expect(item.nativeSubItemsReady).toBe(false);
+		expect(item.bannerKey).toBe("hybridNotice.fileEmbeddingWaitInterval");
+	});
+
+	test("loads stale-grace hybrid subitems from the matching shadow snapshot", async () => {
+		const { FileItem, EngineType, FileSubItem } = require("src/globals/search-types");
+		const { DataProvider } = require("src/services/obsidian/user-data/data-provider");
+		const { LexicalEngine } = require("src/services/search/lexical-engine");
+		const { LineHighlighter } = require("src/services/search/highlighter");
+		const { FileSnapshotStore } = require("src/services/search/shared/file-snapshot-store");
+		const { service } = createHarness();
+
+		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
+		const lineHighlighter = mockInstanceMap.get(LineHighlighter);
+		const snapshotStore = mockInstanceMap.get(FileSnapshotStore);
+		const dataProvider = mockInstanceMap.get(DataProvider);
+
+		snapshotStore.readIndexedTexts.mockResolvedValue(
+			new Map([["notes/stale.md", "shadow body line"]]),
+		);
+		lexicalEngine.searchLinesByFileItem.mockResolvedValue([
+			{
+				text: "shadow body line",
+				row: 0,
+				positions: new Set([0, 1, 2]),
+			},
+		]);
+		lineHighlighter.parseAll.mockReturnValue([
+			{
+				text: "shadow body line",
+				row: 0,
+				col: 0,
+			},
+		]);
+
+		const staleItem = new FileItem(
+			EngineType.HYBRID,
+			"notes/stale.md",
+			["shadow"],
+			["shadow"],
+			[],
+			"nothing",
+			false,
+		);
+		staleItem.freshnessState = "stale_grace";
+		staleItem.freshnessReason = "embedding_updating";
+		staleItem.snapshotGeneration = 180;
+		staleItem.snapshotSource = "shadow";
+
+		const subItems = await service.getFileSubItems("shadow", staleItem);
+
+		expect(snapshotStore.readIndexedTexts).toHaveBeenCalledWith([
+			{
+				path: "notes/stale.md",
+				generation: 180,
+			},
+		]);
+		expect(dataProvider.readPlainText).not.toHaveBeenCalled();
+		expect(subItems).toHaveLength(1);
+		expect(subItems[0]).toBeInstanceOf(FileSubItem);
+		expect(subItems[0].text).toBe("shadow body line");
+		expect(subItems[0].snippet).toBe("shadow body line");
+		expect(staleItem.nativeSubItemsReady).toBe(true);
+		expect(staleItem.snapshotSource).toBe("shadow");
 	});
 
 });

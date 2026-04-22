@@ -111,6 +111,12 @@ export interface FileSearchEngine {
 	): Promise<PersistentFileIndexRecoveryPlan>;
 	persistFileIndexArtifact?(): Promise<void>;
 	clearPersistedFileIndexArtifact?(): Promise<void>;
+	notifyIndexedTextsCommitted?(
+		files: ReadonlyArray<{
+			path: string;
+			generation?: number;
+		}>,
+	): void;
 	resetBenchmarkIndexTiming?(): void;
 	getBenchmarkIndexTimingSummary?(): FileSearchIndexTimingSummary | null;
 	beginBatchReindex?(): void;

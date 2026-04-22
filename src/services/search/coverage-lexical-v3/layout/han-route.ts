@@ -6,6 +6,7 @@ import {
 	type AdaptivePostingCodecProfile,
 } from "./adaptive-postings";
 import {
+	buildIntegerArray,
 	buildSentinelStarts,
 	estimateSentinelPostingBytes,
 	flattenBuckets,
@@ -14,7 +15,10 @@ import {
 	buildBlockPositionLane,
 	estimateBlockPositionLaneBytes,
 } from "./position-lanes";
-import type { ResidentHanRouteArena } from "./types";
+import type {
+	ResidentHanRouteArena,
+	ResidentHanWitnessSidecar,
+} from "./types";
 
 type HanRouteBuildInput = Readonly<{
 	bigramIds: readonly number[];
@@ -37,6 +41,35 @@ const BODY_HAN_ADAPTIVE_POSTING_CODEC_PROFILE: AdaptivePostingCodecProfile = {
 	enablePairLane: true,
 };
 
+export function createEmptyResidentHanWitnessSidecar(): ResidentHanWitnessSidecar {
+	return {
+		identityWitnessStartByDocId: buildIntegerArray([]),
+		identityWitnessStartByLiveDocSlot: buildIntegerArray([]),
+		identityWitnessStringIds: flattenBuckets([]),
+		identityWitnessSourceMaskByDocEntry: new Uint8Array(),
+		routeWitnessStartByDocId: buildIntegerArray([]),
+		routeWitnessStartByLiveDocSlot: buildIntegerArray([]),
+		routeWitnessStringIds: flattenBuckets([]),
+		routeWitnessSourceMaskByDocEntry: new Uint8Array(),
+		headingWitnessStartByDocId: buildIntegerArray([]),
+		headingWitnessStartByLiveDocSlot: buildIntegerArray([]),
+		headingWitnessStringIds: flattenBuckets([]),
+		bodyWitnessOccurrenceStartByBlockId: buildIntegerArray([]),
+		bodyWitnessOccurrenceStringIds: flattenBuckets([]),
+		bodyWitnessPositionEncodingByBlockId: new Uint8Array(),
+		bodyWitnessPositionStartByBlockId: buildIntegerArray([]),
+		bodyWitnessPositionDeltaU8Tape: new Uint8Array(),
+		bodyWitnessPositionDeltaU16Tape: new Uint16Array(),
+		bodyWitnessPositionDeltaU32Tape: new Uint32Array(),
+		metadataWitnessEntryCount: 0,
+		bodyWitnessEntryCount: 0,
+		bytes: 0,
+	};
+}
+
+export const EMPTY_RESIDENT_HAN_WITNESS_SIDECAR =
+	createEmptyResidentHanWitnessSidecar();
+
 export function createEmptyHanRouteArena(): ResidentHanRouteArena {
 	return buildHanRouteArena({
 		bigramIds: [],
@@ -53,6 +86,104 @@ export function createEmptyHanRouteArena(): ResidentHanRouteArena {
 		bodyWitnessOccurrenceStringIdsByBlock: [],
 		bodyWitnessOccurrenceStartOffsetsByBlock: [],
 	});
+}
+
+export function buildResidentHanWitnessSidecar(
+	arena: ResidentHanRouteArena,
+): ResidentHanWitnessSidecar {
+	const breakdown = describeHanRouteByteBreakdown(arena);
+	return {
+		identityWitnessStartByDocId: arena.identityWitnessStartByDocId,
+		identityWitnessStartByLiveDocSlot:
+			arena.identityWitnessStartByLiveDocSlot,
+		identityWitnessStringIds: arena.identityWitnessStringIds,
+		identityWitnessSourceMaskByDocEntry:
+			arena.identityWitnessSourceMaskByDocEntry,
+		routeWitnessStartByDocId: arena.routeWitnessStartByDocId,
+		routeWitnessStartByLiveDocSlot: arena.routeWitnessStartByLiveDocSlot,
+		routeWitnessStringIds: arena.routeWitnessStringIds,
+		routeWitnessSourceMaskByDocEntry: arena.routeWitnessSourceMaskByDocEntry,
+		headingWitnessStartByDocId: arena.headingWitnessStartByDocId,
+		headingWitnessStartByLiveDocSlot:
+			arena.headingWitnessStartByLiveDocSlot,
+		headingWitnessStringIds: arena.headingWitnessStringIds,
+		bodyWitnessOccurrenceStartByBlockId:
+			arena.bodyWitnessOccurrenceStartByBlockId,
+		bodyWitnessOccurrenceStringIds: arena.bodyWitnessOccurrenceStringIds,
+		bodyWitnessPositionEncodingByBlockId:
+			arena.bodyWitnessPositionEncodingByBlockId,
+		bodyWitnessPositionStartByBlockId:
+			arena.bodyWitnessPositionStartByBlockId,
+		bodyWitnessPositionDeltaU8Tape: arena.bodyWitnessPositionDeltaU8Tape,
+		bodyWitnessPositionDeltaU16Tape: arena.bodyWitnessPositionDeltaU16Tape,
+		bodyWitnessPositionDeltaU32Tape: arena.bodyWitnessPositionDeltaU32Tape,
+		metadataWitnessEntryCount:
+			arena.identityWitnessStringIds.length +
+			arena.routeWitnessStringIds.length +
+			arena.headingWitnessStringIds.length,
+		bodyWitnessEntryCount: arena.bodyWitnessOccurrenceStringIds.length,
+		bytes:
+			breakdown.metadataWitnessBytes +
+			breakdown.bodyWitnessBytes +
+			breakdown.bodyWitnessPositionBytes,
+	};
+}
+
+export function setResidentHanWitnessSidecar(
+	arena: ResidentHanRouteArena,
+	sidecar: ResidentHanWitnessSidecar,
+): void {
+	const mutableArena = arena as {
+		identityWitnessStartByDocId: ResidentHanRouteArena["identityWitnessStartByDocId"];
+		identityWitnessStartByLiveDocSlot: ResidentHanRouteArena["identityWitnessStartByLiveDocSlot"];
+		identityWitnessStringIds: ResidentHanRouteArena["identityWitnessStringIds"];
+		identityWitnessSourceMaskByDocEntry: ResidentHanRouteArena["identityWitnessSourceMaskByDocEntry"];
+		routeWitnessStartByDocId: ResidentHanRouteArena["routeWitnessStartByDocId"];
+		routeWitnessStartByLiveDocSlot: ResidentHanRouteArena["routeWitnessStartByLiveDocSlot"];
+		routeWitnessStringIds: ResidentHanRouteArena["routeWitnessStringIds"];
+		routeWitnessSourceMaskByDocEntry: ResidentHanRouteArena["routeWitnessSourceMaskByDocEntry"];
+		headingWitnessStartByDocId: ResidentHanRouteArena["headingWitnessStartByDocId"];
+		headingWitnessStartByLiveDocSlot: ResidentHanRouteArena["headingWitnessStartByLiveDocSlot"];
+		headingWitnessStringIds: ResidentHanRouteArena["headingWitnessStringIds"];
+		bodyWitnessOccurrenceStartByBlockId: ResidentHanRouteArena["bodyWitnessOccurrenceStartByBlockId"];
+		bodyWitnessOccurrenceStringIds: ResidentHanRouteArena["bodyWitnessOccurrenceStringIds"];
+		bodyWitnessPositionEncodingByBlockId: ResidentHanRouteArena["bodyWitnessPositionEncodingByBlockId"];
+		bodyWitnessPositionStartByBlockId: ResidentHanRouteArena["bodyWitnessPositionStartByBlockId"];
+		bodyWitnessPositionDeltaU8Tape: ResidentHanRouteArena["bodyWitnessPositionDeltaU8Tape"];
+		bodyWitnessPositionDeltaU16Tape: ResidentHanRouteArena["bodyWitnessPositionDeltaU16Tape"];
+		bodyWitnessPositionDeltaU32Tape: ResidentHanRouteArena["bodyWitnessPositionDeltaU32Tape"];
+	};
+	mutableArena.identityWitnessStartByDocId =
+		sidecar.identityWitnessStartByDocId;
+	mutableArena.identityWitnessStartByLiveDocSlot =
+		sidecar.identityWitnessStartByLiveDocSlot;
+	mutableArena.identityWitnessStringIds = sidecar.identityWitnessStringIds;
+	mutableArena.identityWitnessSourceMaskByDocEntry =
+		sidecar.identityWitnessSourceMaskByDocEntry;
+	mutableArena.routeWitnessStartByDocId = sidecar.routeWitnessStartByDocId;
+	mutableArena.routeWitnessStartByLiveDocSlot =
+		sidecar.routeWitnessStartByLiveDocSlot;
+	mutableArena.routeWitnessStringIds = sidecar.routeWitnessStringIds;
+	mutableArena.routeWitnessSourceMaskByDocEntry =
+		sidecar.routeWitnessSourceMaskByDocEntry;
+	mutableArena.headingWitnessStartByDocId = sidecar.headingWitnessStartByDocId;
+	mutableArena.headingWitnessStartByLiveDocSlot =
+		sidecar.headingWitnessStartByLiveDocSlot;
+	mutableArena.headingWitnessStringIds = sidecar.headingWitnessStringIds;
+	mutableArena.bodyWitnessOccurrenceStartByBlockId =
+		sidecar.bodyWitnessOccurrenceStartByBlockId;
+	mutableArena.bodyWitnessOccurrenceStringIds =
+		sidecar.bodyWitnessOccurrenceStringIds;
+	mutableArena.bodyWitnessPositionEncodingByBlockId =
+		sidecar.bodyWitnessPositionEncodingByBlockId;
+	mutableArena.bodyWitnessPositionStartByBlockId =
+		sidecar.bodyWitnessPositionStartByBlockId;
+	mutableArena.bodyWitnessPositionDeltaU8Tape =
+		sidecar.bodyWitnessPositionDeltaU8Tape;
+	mutableArena.bodyWitnessPositionDeltaU16Tape =
+		sidecar.bodyWitnessPositionDeltaU16Tape;
+	mutableArena.bodyWitnessPositionDeltaU32Tape =
+		sidecar.bodyWitnessPositionDeltaU32Tape;
 }
 
 export function buildHanRouteArena(
@@ -93,16 +224,19 @@ export function buildHanRouteArena(
 		metadataCharDocIds: metadataCharBuckets.ids,
 		bodyCharAdaptivePostings,
 		identityWitnessStartByDocId: identityWitnessBuckets.starts,
+		identityWitnessStartByLiveDocSlot: identityWitnessBuckets.starts,
 		identityWitnessStringIds: identityWitnessBuckets.ids,
 		identityWitnessSourceMaskByDocEntry: Uint8Array.from(
 			flattenBuckets(identityWitnessSourceMasksByDoc),
 		),
 		routeWitnessStartByDocId: routeWitnessBuckets.starts,
+		routeWitnessStartByLiveDocSlot: routeWitnessBuckets.starts,
 		routeWitnessStringIds: routeWitnessBuckets.ids,
 		routeWitnessSourceMaskByDocEntry: Uint8Array.from(
 			flattenBuckets(routeWitnessSourceMasksByDoc),
 		),
 		headingWitnessStartByDocId: headingWitnessBuckets.starts,
+		headingWitnessStartByLiveDocSlot: headingWitnessBuckets.starts,
 		headingWitnessStringIds: headingWitnessBuckets.ids,
 		bodyWitnessOccurrenceStartByBlockId: bodyWitnessBuckets.starts,
 		bodyWitnessOccurrenceStringIds: bodyWitnessBuckets.ids,
@@ -165,16 +299,19 @@ export function estimateHanRouteBytes(arena: ResidentHanRouteArena): number {
 			arena.identityWitnessStartByDocId,
 			arena.identityWitnessStringIds,
 		) +
+		(arena.identityWitnessStartByLiveDocSlot?.byteLength ?? 0) +
 		arena.identityWitnessSourceMaskByDocEntry.byteLength +
 		estimateSentinelPostingBytes(
 			arena.routeWitnessStartByDocId,
 			arena.routeWitnessStringIds,
 		) +
+		(arena.routeWitnessStartByLiveDocSlot?.byteLength ?? 0) +
 		arena.routeWitnessSourceMaskByDocEntry.byteLength +
 		estimateSentinelPostingBytes(
 			arena.headingWitnessStartByDocId,
 			arena.headingWitnessStringIds,
 		) +
+		(arena.headingWitnessStartByLiveDocSlot?.byteLength ?? 0) +
 		estimateSentinelPostingBytes(
 			arena.bodyWitnessOccurrenceStartByBlockId,
 			arena.bodyWitnessOccurrenceStringIds,
@@ -292,16 +429,19 @@ export function describeHanRouteByteBreakdown(
 				arena.identityWitnessStartByDocId,
 				arena.identityWitnessStringIds,
 			) +
+			(arena.identityWitnessStartByLiveDocSlot?.byteLength ?? 0) +
 			arena.identityWitnessSourceMaskByDocEntry.byteLength +
 			estimateSentinelPostingBytes(
 				arena.routeWitnessStartByDocId,
 				arena.routeWitnessStringIds,
 			) +
+			(arena.routeWitnessStartByLiveDocSlot?.byteLength ?? 0) +
 			arena.routeWitnessSourceMaskByDocEntry.byteLength +
 			estimateSentinelPostingBytes(
 				arena.headingWitnessStartByDocId,
 				arena.headingWitnessStringIds,
-			),
+			) +
+			(arena.headingWitnessStartByLiveDocSlot?.byteLength ?? 0),
 		bodyWitnessBytes: estimateSentinelPostingBytes(
 			arena.bodyWitnessOccurrenceStartByBlockId,
 			arena.bodyWitnessOccurrenceStringIds,

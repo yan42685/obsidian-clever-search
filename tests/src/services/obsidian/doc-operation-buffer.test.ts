@@ -45,7 +45,8 @@ describe("DocOperationBuffer", () => {
 		await buffer.forceFlush();
 
 		expect(batches).toHaveLength(1);
-		expect(batches[0]).toEqual({
+		expect(batches[0].rawOperations).toHaveLength(3);
+		expect(batches[0].reducedBatch).toEqual({
 			dirtyPaths: [
 				expect.objectContaining({
 					path: "note.md",
@@ -67,7 +68,8 @@ describe("DocOperationBuffer", () => {
 		await buffer.forceFlush();
 
 		expect(batches).toHaveLength(1);
-		expect(batches[0]).toEqual({
+		expect(batches[0].rawOperations).toHaveLength(2);
+		expect(batches[0].reducedBatch).toEqual({
 			dirtyPaths: [
 				expect.objectContaining({
 					path: "new.md",
@@ -126,7 +128,8 @@ describe("DocOperationBuffer", () => {
 		await buffer.forceFlush();
 
 		expect(batches).toHaveLength(1);
-		expect(batches[0]).toEqual({
+		expect(batches[0].rawOperations).toHaveLength(2);
+		expect(batches[0].reducedBatch).toEqual({
 			dirtyPaths: [
 				expect.objectContaining({
 					path: "c.md",
@@ -156,7 +159,8 @@ describe("DocOperationBuffer", () => {
 		await buffer.forceFlush();
 
 		expect(batches).toHaveLength(1);
-		expect(batches[0]).toEqual({
+		expect(batches[0].rawOperations).toHaveLength(2);
+		expect(batches[0].reducedBatch).toEqual({
 			dirtyPaths: [
 				expect.objectContaining({
 					path: "b.md",
@@ -222,7 +226,8 @@ describe("DocOperationBuffer", () => {
 
 		await jest.advanceTimersByTimeAsync(1);
 		expect(batches).toHaveLength(1);
-		expect(batches[0]).toEqual({
+		expect(batches[0].rawOperations).toHaveLength(1);
+		expect(batches[0].reducedBatch).toEqual({
 			dirtyPaths: [
 				expect.objectContaining({
 					path: "note.md",

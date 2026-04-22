@@ -1,4 +1,4 @@
-import {
+﻿import {
 	compareContainerStrength,
 	comparePackingProfiles,
 	comparePackingProfilesBeforeHanSurfaceCompletion,
@@ -88,6 +88,8 @@ function createPackingProfile(
 		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
 		singletonHanCompletion: overrides.singletonHanCompletion ?? {
 			singletonHanChar: null,
+			singletonHanCharIndex: null,
+			singletonHanSurfaceGroupIndex: null,
 			matched: false,
 			matchSource: "none",
 			bestAnchorKind: "none",
@@ -302,7 +304,9 @@ describe("coverage lexical v3 comparator", () => {
 				crossScriptSatisfiedGroupCount: 1,
 			},
 			singletonHanCompletion: {
-				singletonHanChar: "云",
+				singletonHanChar: "\u4e91",
+				singletonHanCharIndex: 0,
+				singletonHanSurfaceGroupIndex: 0,
 				matched: true,
 				matchSource: "body_same_block",
 				bestAnchorKind: "exact",
@@ -322,7 +326,9 @@ describe("coverage lexical v3 comparator", () => {
 				crossScriptSatisfiedGroupCount: 1,
 			},
 			singletonHanCompletion: {
-				singletonHanChar: "云",
+				singletonHanChar: "\u4e91",
+				singletonHanCharIndex: 0,
+				singletonHanSurfaceGroupIndex: 0,
 				matched: false,
 				matchSource: "none",
 				bestAnchorKind: "none",
@@ -359,6 +365,8 @@ describe("coverage lexical v3 comparator", () => {
 			},
 			singletonHanCompletion: {
 				singletonHanChar: "\u529b",
+				singletonHanCharIndex: 0,
+				singletonHanSurfaceGroupIndex: 0,
 				matched: true,
 				matchSource: "body_adjacent_block",
 				bestAnchorKind: "exact",
@@ -379,6 +387,8 @@ describe("coverage lexical v3 comparator", () => {
 			},
 			singletonHanCompletion: {
 				singletonHanChar: "\u529b",
+				singletonHanCharIndex: 0,
+				singletonHanSurfaceGroupIndex: 0,
 				matched: true,
 				matchSource: "body_same_block",
 				bestAnchorKind: "exact",
@@ -836,3 +846,5 @@ describe("coverage lexical v3 comparator", () => {
 		expect(comparePackingProfiles(plain, compoundBacked)).toBeLessThan(0);
 	});
 });
+
+

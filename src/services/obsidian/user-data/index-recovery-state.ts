@@ -1,4 +1,6 @@
-export type IndexRecoveryEngine = "hybrid";
+import type { DocRef } from "src/globals/search-types";
+
+export type IndexRecoveryEngine = "hybrid" | "lexical";
 
 export type HybridRepairMode = "incremental" | "full";
 
@@ -26,6 +28,7 @@ export type IndexRecoveryState =
 export type IndexRecoveryStateRow = {
   id: string;
   engine: IndexRecoveryEngine;
+  docRef?: DocRef;
   path: string;
   targetGeneration: number;
   mode: HybridRepairMode;

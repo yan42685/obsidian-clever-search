@@ -1,3 +1,5 @@
+import type { DocRef } from "src/globals/search-types";
+
 export type VectorPrecision = 'int8' | 'float16';
 
 export type RawChunk = {
@@ -18,6 +20,8 @@ export type HeadingOutlineEntry = {
 
 export type Chunk = {
 	id: number;
+	docRef?: DocRef;
+	generation?: number;
 	filePath: string;
 	chunkIndex: number;
 	text: string;
@@ -43,6 +47,7 @@ export type Float16Vector = {
 export type StoredVector = Int8Vector | Float16Vector;
 
 export type ChunkVectorShard = {
+	docRef?: DocRef;
 	filePath: string;
 	precision: VectorPrecision;
 	dim: number;

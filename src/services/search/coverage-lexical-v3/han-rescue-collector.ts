@@ -14,6 +14,7 @@ import {
 	getDocIdentityHanWitnessTexts,
 	getDocRouteHanWitnessSourceMasks,
 	getDocRouteHanWitnessTexts,
+	getShardLocalFamilySlot,
 	type V3CandidateDocRecall,
 	type V3ResolvedHanSurfaceGroup,
 } from "./recall";
@@ -59,10 +60,12 @@ export type HanSyntheticBodyOccurrence = Readonly<{
 	unitIndex: number;
 	match: Readonly<{
 		familyId: number;
+		shardLocalFamilySlot: number;
 		familyText: string;
 		matchKind: "opaque_exact";
 		editDistance: 0;
 	}>;
+	shardLocalFamilySlot: number;
 	ordinalPosition: number;
 	localPosition: number;
 	localEndPosition: number;
@@ -505,6 +508,7 @@ function collectBodyRescueEvaluations<TBodyWindow extends HanBodyWindowLike>(par
 		const syntheticOrdinalSpanByBlockId = new Map<number, number>();
 		for (const blockId of neighborhoodBlockIdsByGroup.get(group.group.index) ?? []) {
 			const projectedOccurrences = projectGroupBodyBigramOccurrences({
+				base: params.base,
 				surfaceGroupIndex: group.group.index,
 				baseQueryUnitCount: params.queryAnalysis.primaryUnits.length,
 				unresolvedBigrams: group.unresolvedBigrams,
@@ -624,6 +628,7 @@ function collectMatchedSyntheticBodyOccurrencesByBlock(params: Readonly<{
 }
 
 function projectGroupBodyBigramOccurrences(params: Readonly<{
+	base: ResidentBase;
 	surfaceGroupIndex: number;
 	baseQueryUnitCount: number;
 	unresolvedBigrams: readonly string[];
@@ -633,6 +638,11 @@ function projectGroupBodyBigramOccurrences(params: Readonly<{
 	for (let bigramIndex = 0; bigramIndex < params.unresolvedBigrams.length; bigramIndex += 1) {
 		const bigram = params.unresolvedBigrams[bigramIndex] ?? "";
 		for (const occurrence of params.collectedByBigram.get(bigram) ?? []) {
+			const familyId = buildSyntheticBodyBigramFamilyId(
+				params.surfaceGroupIndex,
+				bigramIndex,
+				occurrence.ordinalPosition,
+			);
 			out.push({
 				blockId: occurrence.blockId,
 				unitIndex: buildSyntheticBodyBigramUnitIndex(
@@ -641,15 +651,13 @@ function projectGroupBodyBigramOccurrences(params: Readonly<{
 					bigramIndex,
 				),
 				match: {
-					familyId: buildSyntheticBodyBigramFamilyId(
-						params.surfaceGroupIndex,
-						bigramIndex,
-						occurrence.ordinalPosition,
-					),
+					familyId,
+					shardLocalFamilySlot: getShardLocalFamilySlot(params.base, familyId),
 					familyText: bigram,
 					matchKind: "opaque_exact",
 					editDistance: 0,
 				},
+				shardLocalFamilySlot: getShardLocalFamilySlot(params.base, familyId),
 				ordinalPosition: occurrence.ordinalPosition,
 				localPosition: occurrence.localPosition,
 				localEndPosition: occurrence.localEndPosition,
@@ -1037,7 +1045,7 @@ function compareSyntheticBodyOccurrenceOrder(
 	if (left.unitIndex !== right.unitIndex) {
 		return left.unitIndex - right.unitIndex;
 	}
-	return left.match.familyId - right.match.familyId;
+	return left.match.shardLocalFamilySlot - right.match.shardLocalFamilySlot;
 }
 
 function collectMatchedOpaqueBodyBigramTexts(params: Readonly<{

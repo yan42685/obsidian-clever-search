@@ -8,6 +8,7 @@ export type V3QueryFamilyMatchKind =
 
 export type V3QueryFamilyMatch = Readonly<{
 	familyId: number;
+	shardLocalFamilySlot: number;
 	familyText: string;
 	matchKind: V3QueryFamilyMatchKind;
 	editDistance: 0 | 1;
@@ -65,6 +66,7 @@ export type V3CandidateHanSurfaceGroupRecall = Readonly<{
 
 export type V3CandidateDocRecall = Readonly<{
 	docId: number;
+	liveDocSlot: number;
 	matchedIdentityUnitIndices: readonly number[];
 	matchedRouteUnitIndices: readonly number[];
 	matchedHeadingUnitIndices: readonly number[];

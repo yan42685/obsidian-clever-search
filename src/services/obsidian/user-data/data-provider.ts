@@ -31,6 +31,12 @@ export type GeneratedIndexedDocuments = {
 	failures: IndexedDocumentFailure[];
 };
 
+export type IndexedDocumentMetadata = Readonly<{
+	aliases?: string;
+	tags?: string;
+	headings?: string;
+}>;
+
 @singleton()
 export class DataProvider {
 	private readonly vault = getInstance(Vault);
@@ -189,6 +195,22 @@ export class DataProvider {
 			return textOutline;
 		}
 		return this.getHeadingOutline(fileOrPath);
+	}
+
+	getIndexedDocumentMetadata(fileOrPath: TFile | string): IndexedDocumentMetadata {
+		const file =
+			typeof fileOrPath === "string"
+				? this.vault.getAbstractFileByPath(fileOrPath)
+				: fileOrPath;
+		if (!(file instanceof TFile)) {
+			return {};
+		}
+		const metadata = this.app.metadataCache.getFileCache(file);
+		return {
+			aliases: this.parseAliases(metadata),
+			tags: this.parseTags(metadata),
+			headings: this.parseHeadings(metadata),
+		};
 	}
 
 	private parseAliases(metadata: CachedMetadata | null): string {

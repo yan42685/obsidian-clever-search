@@ -376,6 +376,7 @@ function collectRealHanSurfaceOccurrencesInWitness(
 					queryUnitText: realTerm,
 					querySurfaceGroupIndex: surfaceGroup.index,
 					familyId: 0,
+					shardLocalFamilySlot: 0,
 					familyText: realTerm,
 					matchKind: "exact",
 					editDistance: 0,

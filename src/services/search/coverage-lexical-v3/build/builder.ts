@@ -1,9 +1,18 @@
 import type { IndexedDocument } from "src/globals/search-types";
-import { buildBodyBlockArena } from "../layout/body-blocks";
+import {
+	buildBodyBlockArena,
+	buildResidentBodyFamilySupportSidecar,
+	EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
+	setResidentBodyFamilySupportSidecar,
+} from "../layout/body-blocks";
 import { buildBodyFamilyPostingField } from "../layout/body-family-posting";
 import { buildDocTable } from "../layout/doc-table";
 import {
+	buildResidentExactTapeSidecar,
 	buildExactTapeArena,
+	createEmptyResidentExactTapeSidecar,
+	EMPTY_RESIDENT_EXACT_TAPE_SIDECAR,
+	setResidentExactTapeSidecar,
 	type ExactTapeDraft,
 } from "../layout/exact-tapes";
 import {
@@ -13,11 +22,25 @@ import {
 	FAMILY_SOURCE_MASK_IDENTITY,
 	FAMILY_SOURCE_MASK_ROUTE,
 } from "../layout/family-lexicon";
-import { buildResidentFuzzyRescueSidecar } from "../layout/fuzzy-rescue";
-import { buildHanRouteArena } from "../layout/han-route";
+import {
+	buildResidentFuzzyRescueSidecar,
+	EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+} from "../layout/fuzzy-rescue";
+import {
+	buildHanRouteArena,
+	buildResidentHanWitnessSidecar,
+	createEmptyResidentHanWitnessSidecar,
+	setResidentHanWitnessSidecar,
+} from "../layout/han-route";
 import { buildIntegerArray } from "../layout/integer-arrays";
 import { buildMetadataContainerArena } from "../layout/metadata-containers";
-import type { ResidentBase } from "../layout/types";
+import type {
+	ResidentBase,
+	ResidentBodyFamilySupportSidecar,
+	ResidentExactTapeSidecar,
+	ResidentFuzzyRescueSidecar,
+	ResidentHanWitnessSidecar,
+} from "../layout/types";
 import {
 	IDENTITY_METADATA_SOURCE_ALIAS,
 	IDENTITY_METADATA_SOURCE_BASENAME,
@@ -49,6 +72,7 @@ const STRING_SOURCE_HEADING_WITNESS = 1 << 4;
 const STRING_SOURCE_BODY_WITNESS = 1 << 5;
 
 type PreparedDocument = Readonly<{
+	docRef: number;
 	path: string;
 	generation: number;
 	basename: string;
@@ -90,13 +114,27 @@ type PreparedBodyBlock = Readonly<{
 
 export type ResidentBuildArtifacts = Readonly<{
 	base: ResidentBase;
+	fuzzyRescueSidecar: ResidentFuzzyRescueSidecar;
+	bodyFamilySupportSidecar: ResidentBodyFamilySupportSidecar;
+	exactTapeSidecar: ResidentExactTapeSidecar;
+	hanWitnessSidecar: ResidentHanWitnessSidecar;
 }>;
 
 export function buildResidentBase(
 	documents: readonly IndexedDocument[],
 	tokenizeDocumentText?: V3DocumentTokenizer,
 ): ResidentBase {
-	return buildResidentBaseArtifacts(documents, tokenizeDocumentText).base;
+	const artifacts = buildResidentBaseArtifacts(documents, tokenizeDocumentText);
+	setResidentExactTapeSidecar(artifacts.base.exactTapes, artifacts.exactTapeSidecar);
+	setResidentBodyFamilySupportSidecar(
+		artifacts.base.bodyBlocks,
+		artifacts.bodyFamilySupportSidecar,
+	);
+	setResidentHanWitnessSidecar(
+		artifacts.base.hanRoute,
+		artifacts.hanWitnessSidecar,
+	);
+	return artifacts.base;
 }
 
 export function buildResidentBaseArtifacts(
@@ -193,9 +231,16 @@ export function buildResidentBaseArtifacts(
 	const exactTapes = buildExactTapeArena(
 		blockInputs.map((block) => block.exactDraft),
 	);
+	const exactTapeSidecar = buildResidentExactTapeSidecar(exactTapes.arena);
 	const bodyFamilyPosting = buildBodyFamilyPostingField({
 		familyIdsByBlock: blockInputs.map((block) => block.summaryFamilyIds),
 	});
+	const bodyFamilySupportSidecar = buildResidentBodyFamilySupportSidecar(
+		blockInputs.map((block) => ({
+			familySupportFamilyIds: block.familySupportFamilyIds,
+			familySupportMasks: block.familySupportMasks,
+		})),
+	);
 	const bodyBlocks = buildBodyBlockArena(
 		blockInputs.map((block, blockId) => ({
 			docId: block.docId,
@@ -205,10 +250,12 @@ export function buildResidentBaseArtifacts(
 			familySupportFamilyIds: block.familySupportFamilyIds,
 			familySupportMasks: block.familySupportMasks,
 		})),
+		EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
 	);
 
 	const docTable = buildDocTable(
 		preparedDocuments.map((document, docId) => ({
+			docRef: document.docRef,
 			pathStringId: stringArenaBuilder.intern(document.path, STRING_SOURCE_PATH),
 			generation: document.generation,
 			identityStart: metadataContainers.identityStartByDocId[docId] ?? 0,
@@ -223,8 +270,14 @@ export function buildResidentBaseArtifacts(
 	);
 
 	const hanRoute = buildResidentHanRoute(preparedDocuments, stringArenaBuilder);
+	const hanWitnessSidecar = buildResidentHanWitnessSidecar(hanRoute);
+	setResidentHanWitnessSidecar(
+		hanRoute,
+		createEmptyResidentHanWitnessSidecar(),
+	);
 	const stringArenaSourceBreakdown = stringArenaBuilder.describeSourceUtf8Bytes();
 	const stringArena = stringArenaBuilder.build();
+	const emptyExactTapes = createEmptyResidentExactTapeSidecar();
 	const metrics = buildResidentBaseMetrics({
 		stringArena,
 		stringArenaSourceBreakdown,
@@ -233,9 +286,12 @@ export function buildResidentBaseArtifacts(
 		metadataContainers: metadataContainers.arena,
 		bodyFamilyPosting,
 		bodyBlocks,
-		exactTapes: exactTapes.arena,
+		exactTapes: emptyExactTapes,
 		hanRoute,
-		auxiliaryBytes: fuzzyRescue.bytes,
+		auxiliaryBytes:
+			EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR.bytes +
+			EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR.bytes +
+			EMPTY_RESIDENT_EXACT_TAPE_SIDECAR.bytes,
 		indexedSurfaceUtf8Bytes: computeIndexedSurfaceUtf8Bytes(documents),
 		rawMarkdownUtf8Bytes: computeRawMarkdownUtf8Bytes(documents),
 	});
@@ -249,11 +305,15 @@ export function buildResidentBaseArtifacts(
 			metadataContainers: metadataContainers.arena,
 			bodyFamilyPosting,
 			bodyBlocks,
-			exactTapes: exactTapes.arena,
+			exactTapes: emptyExactTapes,
 			hanRoute,
-			fuzzyRescue,
+			fuzzyRescue: EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
 			metrics,
 		},
+		fuzzyRescueSidecar: fuzzyRescue,
+		bodyFamilySupportSidecar,
+		exactTapeSidecar,
+		hanWitnessSidecar,
 	};
 }
 
@@ -382,6 +442,7 @@ function prepareDocument(
 	);
 	const headingHanWitnessTexts = dedupeSorted(extractHanSegments(headingsText));
 	return {
+		docRef: document.docRef ?? 0,
 		path: document.path,
 		generation,
 		basename: document.basename ?? "",

@@ -3,9 +3,19 @@ import { THIS_PLUGIN } from "src/globals/constants";
 import { devOption } from "src/globals/dev-option";
 import { EventEnum } from "src/globals/enums";
 import { OuterSetting } from "src/globals/plugin-setting";
-import type { BaseIndexedFileRef, IndexedDocument } from "src/globals/search-types";
+import type {
+  BaseIndexedFileRef,
+  FileItemFreshnessReason,
+  FileItemFreshnessState,
+  FileItemSnapshotSource,
+  IndexedDocument,
+} from "src/globals/search-types";
 import type CleverSearch from "src/main";
-import { Database } from "src/services/database/database";
+import {
+  Database,
+  LEXICAL_QUERY_EVIDENCE_READY_VERSION,
+  type DocRegistryRow,
+} from "src/services/database/database";
 
 import {
   HybridDisabledError,
@@ -27,10 +37,12 @@ import {
   normalizeHybridIndexedFileState,
   type HybridStoredVectorInfo,
 } from "src/services/search/hybrid/hybrid-consistency";
+import { hashStableText } from "src/services/search/hybrid/incremental-reuse";
 import {
   retryAsync,
   runWeightedTasks,
 } from "src/services/search/hybrid/runtime-control";
+import type { FileSearchEngine } from "src/services/search/file-search-engine";
 import type { VectorPrecision } from "src/services/search/hybrid/hybrid-types";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type {
@@ -55,12 +67,23 @@ import { t, type LocaleKey } from "../translations/locale-helper";
 import { SearchService } from "../search-service";
 import { DataProvider, type IndexedDocumentFailure } from "./data-provider";
 import {
+  fromPendingDocOperationRow,
+  DocMoveOperation,
+  type FlushedDocOperationBatch,
   type DocOperation,
+  DocUpsertOperation,
+  type PendingDocOperationRow,
   type ReducedDocOperationBatch,
+  reduceDocOperations,
+  toPendingDocOperationRow,
   DocOperationBuffer,
 } from "./doc-operation-buffer";
 import { FileWatcher } from "./file-watcher";
-import type { HybridRepairMode } from "./index-recovery-state";
+import {
+  buildIndexRecoveryStateId,
+  type HybridRepairMode,
+  type IndexRecoveryStateRow,
+} from "./index-recovery-state";
 import { buildIndexArtifactStateId } from "./index-artifact-state";
 import { DirtyArtifactCoordinator } from "./dirty-artifact-coordinator";
 import {
@@ -93,6 +116,11 @@ type LexicalAddDocumentsResult = {
   failures: LexicalIndexFailure[];
 };
 
+type LexicalStartupMove = {
+  oldPath: string;
+  file: TFile;
+};
+
 type HybridPreflightReport = {
   totalBytes: number;
   filesToAdd: number;
@@ -110,6 +138,7 @@ type HybridStorageRepairReport = {
   repairedPaths: string[];
   reindexedPaths: string[];
   previousIndexedFileRefs: Map<string, HybridIndexedFileRef>;
+  previousDocRegistryEntries: Map<string, DocRegistryRow>;
 };
 
 type HybridStoredPathSummary = {
@@ -353,6 +382,13 @@ export type HybridFreshnessSummary = {
   updatedAt: number;
 };
 
+export type HybridFileFreshness = {
+  state: FileItemFreshnessState;
+  reason: FileItemFreshnessReason;
+  snapshotGeneration?: number;
+  snapshotSource: FileItemSnapshotSource;
+};
+
 type HybridFreshnessSnapshot = {
   trackedFiles: readonly TFile[];
   processingPathSet: Set<string>;
@@ -553,6 +589,8 @@ export class DataManager {
   private inVaultSearchFlushCallback: EventCallback | null = null;
   private lexicalIndexFailureNotice: Notice | null = null;
   private lexicalFailureRetryInFlight = false;
+  private lexicalStartupFailureRetryPending = false;
+  private lexicalStartupPendingOperations: DocOperation[] = [];
   private isUnloaded = false;
   private readonly lexicalIndexFailuresByPath = new Map<
     string,
@@ -641,6 +679,52 @@ export class DataManager {
     return this.buildHybridFreshnessSummary(
       await this.collectHybridFreshnessSnapshot(),
     );
+  }
+
+  async getHybridFileFreshness(
+    path: string,
+  ): Promise<HybridFileFreshness> {
+    return (
+      await this.getHybridFileFreshnessMap([path])
+    ).get(path) ?? {
+      state: "lexical_only",
+      reason: "shadow_missing",
+      snapshotGeneration: undefined,
+      snapshotSource: "live",
+    };
+  }
+
+  async getHybridFileFreshnessMap(
+    paths: readonly string[],
+  ): Promise<Map<string, HybridFileFreshness>> {
+    const uniquePaths = Array.from(
+      new Set(paths.filter((path) => path.trim().length > 0)),
+    );
+    const freshnessByPath = new Map<string, HybridFileFreshness>();
+    if (uniquePaths.length === 0) {
+      return freshnessByPath;
+    }
+
+    const indexedRefs = await this.fileSnapshotStore.getHybridIndexedFileRefs(
+      uniquePaths,
+    );
+    const pendingDocOperations = this.docOperationsBuffer.peekReducedBatch();
+    const pendingDirtyPaths = new Set(
+      pendingDocOperations.dirtyPaths.map((operation) => operation.path),
+    );
+
+    for (const path of uniquePaths) {
+      freshnessByPath.set(
+        path,
+        await this.resolveHybridFileFreshness(
+          path,
+          indexedRefs.get(path),
+          pendingDirtyPaths,
+        ),
+      );
+    }
+
+    return freshnessByPath;
   }
 
   private async collectHybridFreshnessSnapshot(): Promise<HybridFreshnessSnapshot> {
@@ -742,6 +826,93 @@ export class DataManager {
       repairSamplePaths: snapshot.repairSamplePaths,
       updatedAt: Date.now(),
     };
+  }
+
+  private async resolveHybridFileFreshness(
+    path: string,
+    indexedRef: HybridIndexedFileRef | undefined,
+    pendingDirtyPaths: ReadonlySet<string>,
+  ): Promise<HybridFileFreshness> {
+    if (
+      !this.hybridEngine.isEnabled() ||
+      !this.hybridEngine.shouldIndexPath(path)
+    ) {
+      return {
+        state: "lexical_only",
+        reason: "none",
+        snapshotGeneration: undefined,
+        snapshotSource: "live",
+      };
+    }
+
+    const file = this.dataProvider.getFileByPath(path);
+    const indexedGeneration = indexedRef?.generation;
+    const needsSync =
+      !file ||
+      indexedGeneration === undefined ||
+      file.stat.mtime > indexedGeneration;
+
+    if (!needsSync) {
+      return {
+        state: "fresh",
+        reason: "none",
+        snapshotGeneration: indexedGeneration,
+        snapshotSource: "live",
+      };
+    }
+
+    const availability = await this.fileSnapshotStore.inspectIndexedTextAvailability(
+      path,
+      indexedGeneration,
+    );
+    const recoveryEntry = this.hybridRecoveryCoordinator.getEntry(path);
+    const isDeferred = recoveryEntry?.recoveryKind === "deferred_embedding";
+    const isFailure = recoveryEntry?.recoveryKind === "failure";
+    const hasShadowSnapshot =
+      availability.shadowGeneration !== undefined &&
+      availability.shadowGenerationMatch;
+    const isProcessing = this.isHybridPathProcessing(path, pendingDirtyPaths);
+
+    if (
+      file &&
+      indexedGeneration !== undefined &&
+      file.stat.mtime > indexedGeneration &&
+      hasShadowSnapshot &&
+      !isFailure &&
+      (isProcessing || isDeferred)
+    ) {
+      return {
+        state: "stale_grace",
+        reason:
+          isDeferred &&
+          recoveryEntry?.nextRetryAt !== null &&
+          recoveryEntry?.nextRetryAt !== undefined &&
+          recoveryEntry.nextRetryAt > Date.now()
+            ? "embedding_wait_interval"
+            : "embedding_updating",
+        snapshotGeneration: indexedGeneration,
+        snapshotSource: "shadow",
+      };
+    }
+
+    return {
+      state: "lexical_only",
+      reason: isFailure ? "embedding_failed" : "shadow_missing",
+      snapshotGeneration: indexedGeneration,
+      snapshotSource: "live",
+    };
+  }
+
+  private isHybridPathProcessing(
+    path: string,
+    pendingDirtyPaths: ReadonlySet<string>,
+  ): boolean {
+    return (
+      this.hybridRepairQueue.has(path) ||
+      this.hybridRepairInFlightPaths.has(path) ||
+      this.hybridRepairPendingPersistPaths.has(path) ||
+      pendingDirtyPaths.has(path)
+    );
   }
 
   private warnOnHybridStaleFiles(
@@ -988,7 +1159,12 @@ export class DataManager {
   private async markLexicalSnapshotDirty(
     paths: readonly string[] = [],
   ): Promise<void> {
+    await this.database.clearLexicalQueryEvidenceReadyMarker();
     await this.lexicalSnapshotCoordinator.markDirty(paths);
+  }
+
+  private async invalidateLexicalQueryEvidenceReadyMarker(): Promise<void> {
+    await this.database.clearLexicalQueryEvidenceReadyMarker();
   }
 
   private clearLexicalSnapshotFlushTimer(): void {
@@ -1019,11 +1195,12 @@ export class DataManager {
     this.hybridRecoveryCoordinator.refreshRetrySchedule();
   }
   private docOperationsHandler = async (
-    operations: ReducedDocOperationBatch,
+    batch: FlushedDocOperationBatch,
   ) => {
     if (this.isUnloaded) {
       return;
     }
+    const { rawOperations, reducedBatch: operations } = batch;
     const consumedStalePaths = new Set<string>();
     // Apply surviving dirty paths first so rename fast-paths can reuse old-path data
     // before the stale cleanup pass removes it.
@@ -1050,6 +1227,9 @@ export class DataManager {
     }
 
     await this.maintainHybridFreshness();
+    await this.deletePersistedPendingLexicalDocOperations(
+      rawOperations.map((operation) => operation.id),
+    );
   };
 
   private docOperationsBuffer = new DocOperationBuffer(
@@ -1060,6 +1240,8 @@ export class DataManager {
   @monitorDecorator
   async initAsync(options: DataManagerInitOptions = {}) {
     this.isUnloaded = false;
+    this.lexicalStartupFailureRetryPending = false;
+    this.lexicalStartupPendingOperations = [];
     this.clearHybridFailedEmbeddingState();
     this.resetLexicalSnapshotTracking();
     this.fileSnapshotStore.resetRuntimeState();
@@ -1096,18 +1278,27 @@ export class DataManager {
     this.clearHybridFailedEmbeddingState();
     this.hideLexicalIndexFailureNotice();
     this.lexicalIndexFailuresByPath.clear();
+    this.lexicalStartupFailureRetryPending = false;
+    this.lexicalStartupPendingOperations = [];
     this.searchBootstrapCommitTask = null;
     this.setLexicalBootstrapState("blocked");
     this.setHybridBootstrapState("blocked");
   }
 
   receiveDocOperation(operation: DocOperation) {
+    if (this.isUnloaded) {
+      return;
+    }
     this.docOperationsBuffer.add(operation);
+    void this.persistPendingLexicalDocOperation(operation);
   }
 
   private async runSearchBootstrapPipeline(): Promise<SearchBootstrapCompletionSummary> {
     const databaseUpgradeDetected =
       await this.database.openAndConsumeSchemaUpgradeFlag();
+    if (databaseUpgradeDetected) {
+      await this.database.clearLexicalQueryEvidenceReadyMarker();
+    }
     this.setLexicalBootstrapState("restoring");
     this.markSearchBootstrapPhaseStarted("lexical", "restore");
     const lexicalPlan = await this.prepareLexicalBootstrapPlan();
@@ -1132,8 +1323,6 @@ export class DataManager {
     this.markSearchBootstrapPhaseStarted("lexical", "heal");
     await this.healLexicalBootstrapPlan(lexicalPlan);
     this.markSearchBootstrapPhaseCompleted("lexical", "heal");
-    this.setLexicalBootstrapState("searchable");
-    this.markSearchBootstrapSearchable();
 
     if (!hybridPlan) {
       return {
@@ -1405,7 +1594,9 @@ export class DataManager {
         tFiles.filter((f) => this.dataProvider.isIndexable(f)),
       );
     if (documents.length > 0) {
-      await this.lexicalEngine.addDocuments(documents);
+      await this.lexicalEngine.addDocuments(
+        await this.attachLexicalDocRefs(documents),
+      );
     }
     return {
       indexedFiles,
@@ -1431,8 +1622,32 @@ export class DataManager {
       this.addLexicalIndexFailures(result.failures);
       return false;
     }
+    const plainText = await this.primeCurrentFileText(file, generation);
     this.clearLexicalIndexFailures([file.path]);
+    await this.ensureLexicalDocRegistryEntry({
+      path: file.path,
+      generation,
+      deleted: false,
+      contentFingerprint: hashStableText(plainText),
+    });
+    const metadata = this.dataProvider.getIndexedDocumentMetadata(file);
+    await this.fileSnapshotStore.publishIndexedMetadata([
+      {
+        path: file.path,
+        generation,
+        aliasesText: metadata.aliases ?? "",
+        tagsText: metadata.tags ?? "",
+        headingsText: metadata.headings ?? "",
+      },
+    ]);
     await this.fileSnapshotStore.publishIndexedTexts([
+      {
+        path: file.path,
+        generation,
+        text: plainText,
+      },
+    ]);
+    this.notifyLexicalIndexedTextsCommitted([
       {
         path: file.path,
         generation,
@@ -1461,14 +1676,56 @@ export class DataManager {
       return false;
     }
 
-    const moved = await this.lexicalEngine.moveDocument(oldPath, documents[0]);
+    const previousDocRef = (await this.getLexicalDocRegistryEntry(oldPath))?.docRef;
+    const nextDocument =
+      previousDocRef === undefined
+        ? documents[0]
+        : {
+            ...documents[0],
+            docRef: previousDocRef,
+          };
+    const moved = await this.lexicalEngine.moveDocument(oldPath, nextDocument);
     if (!moved) {
       return false;
     }
 
+    const plainText = documents[0].content ?? "";
+    const contentFingerprint = hashStableText(plainText);
+    const movedRegistryEntry = await this.moveLexicalDocRegistryPath(
+      oldPath,
+      file.path,
+      {
+        generation,
+        contentFingerprint,
+      },
+    );
+    if (!movedRegistryEntry) {
+      await this.ensureLexicalDocRegistryEntry({
+        path: file.path,
+        generation,
+        deleted: false,
+        contentFingerprint,
+      });
+    }
     this.clearLexicalIndexFailures([oldPath, file.path]);
     await this.fileSnapshotStore.removeFiles([oldPath]);
+    await this.fileSnapshotStore.publishIndexedMetadata([
+      {
+        path: file.path,
+        generation,
+        aliasesText: documents[0].aliases ?? "",
+        tagsText: documents[0].tags ?? "",
+        headingsText: documents[0].headings ?? "",
+      },
+    ]);
     await this.fileSnapshotStore.publishIndexedTexts([
+      {
+        path: file.path,
+        generation,
+        text: plainText,
+      },
+    ]);
+    this.notifyLexicalIndexedTextsCommitted([
       {
         path: file.path,
         generation,
@@ -1486,10 +1743,48 @@ export class DataManager {
     if (files.length === 0) {
       return;
     }
+    const publishRequests = await Promise.all(
+      files.map(async (file) => {
+        const text = await this.primeCurrentFileText(file, file.stat.mtime);
+        return {
+          path: file.path,
+          generation: file.stat.mtime,
+          text,
+          contentFingerprint: hashStableText(text),
+        };
+      }),
+    );
+    await this.ensureLexicalDocRegistryEntries(
+      publishRequests.map((request) => ({
+        path: request.path,
+        generation: request.generation,
+        deleted: false,
+        contentFingerprint: request.contentFingerprint,
+      })),
+    );
+    await this.fileSnapshotStore.publishIndexedMetadata(
+      files.map((file) => {
+        const metadata = this.dataProvider.getIndexedDocumentMetadata(file);
+        return {
+          path: file.path,
+          generation: file.stat.mtime,
+          aliasesText: metadata.aliases ?? "",
+          tagsText: metadata.tags ?? "",
+          headingsText: metadata.headings ?? "",
+        };
+      }),
+    );
     await this.fileSnapshotStore.publishIndexedTexts(
-      files.map((file) => ({
-        path: file.path,
-        generation: file.stat.mtime,
+      publishRequests.map((request) => ({
+        path: request.path,
+        generation: request.generation,
+        text: request.text,
+      })),
+    );
+    this.notifyLexicalIndexedTextsCommitted(
+      publishRequests.map((request) => ({
+        path: request.path,
+        generation: request.generation,
       })),
     );
     for (const file of files) {
@@ -1505,14 +1800,21 @@ export class DataManager {
   private async writeLexicalSearchSnapshotArtifact(): Promise<void> {
     if (this.lexicalEngine.supportsPersistentFileIndex()) {
       await this.lexicalEngine.persistFileIndexArtifact();
+      await this.database.setLexicalQueryEvidenceReadyMarker(
+        LEXICAL_QUERY_EVIDENCE_READY_VERSION,
+      );
       return;
     }
     const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
     if (lexicalIndexData) {
       await this.database.setLexicalSearchSnapshot(lexicalIndexData);
+      await this.database.setLexicalQueryEvidenceReadyMarker(
+        LEXICAL_QUERY_EVIDENCE_READY_VERSION,
+      );
       return;
     }
     await this.database.deleteLexicalSearchSnapshot();
+    await this.database.clearLexicalQueryEvidenceReadyMarker();
   }
 
   private addLexicalIndexFailures(
@@ -1526,6 +1828,7 @@ export class DataManager {
     }
     this.logLexicalIndexFailures(failures);
     this.renderLexicalIndexFailureNotice();
+    void this.persistLexicalRecoveryFailures(failures);
   }
 
   private clearLexicalIndexFailures(paths: readonly string[]): void {
@@ -1536,6 +1839,373 @@ export class DataManager {
       this.lexicalIndexFailuresByPath.delete(path);
     }
     this.renderLexicalIndexFailureNotice();
+    void this.deletePersistedLexicalRecoveryStates(paths);
+  }
+
+  private async persistLexicalRecoveryFailures(
+    failures: readonly LexicalIndexFailure[],
+  ): Promise<void> {
+    if (failures.length === 0) {
+      return;
+    }
+    if (typeof this.database.bulkPutIndexRecoveryStates !== "function") {
+      return;
+    }
+
+    const now = Date.now();
+    const rows: IndexRecoveryStateRow[] = [];
+    for (const failure of failures) {
+      const docRegistryEntry = await this.ensureLexicalDocRegistryEntry({
+        path: failure.file.path,
+        generation: failure.file.stat.mtime,
+        deleted: false,
+      });
+      rows.push({
+        id: buildIndexRecoveryStateId("lexical", failure.file.path),
+        engine: "lexical",
+        docRef: docRegistryEntry?.docRef,
+        path: failure.file.path,
+        targetGeneration: failure.file.stat.mtime,
+        mode: "incremental",
+        recoveryKind: "failure",
+        state: "retryable_ready",
+        failureKind: "unknown",
+        failureMessage: this.formatLexicalIndexError(failure.error),
+        attemptCount: 1,
+        lastFailedAt: now,
+        nextRetryAt: null,
+        isBlocking: false,
+      });
+    }
+
+    try {
+      await this.database.bulkPutIndexRecoveryStates(rows);
+    } catch (error) {
+      logger.warn("failed to persist lexical recovery state:", error);
+    }
+  }
+
+  private async deletePersistedLexicalRecoveryStates(
+    paths: readonly string[],
+  ): Promise<void> {
+    if (
+      paths.length === 0 ||
+      typeof this.database.deleteIndexRecoveryState !== "function"
+    ) {
+      return;
+    }
+    for (const path of paths) {
+      try {
+        await this.database.deleteIndexRecoveryState("lexical", path);
+      } catch (error) {
+        logger.warn(
+          `failed to delete lexical recovery state for ${path}:`,
+          error,
+        );
+      }
+    }
+  }
+
+  private async persistPendingLexicalDocOperation(
+    operation: DocOperation,
+  ): Promise<void> {
+    const database = this.database as Database & {
+      putPendingDocOperation?: (row: PendingDocOperationRow) => Promise<void>;
+    };
+    if (!database.putPendingDocOperation) {
+      return;
+    }
+    try {
+      const docRef =
+        operation instanceof DocMoveOperation
+          ? (await this.getLexicalDocRegistryEntry(operation.oldPath))?.docRef
+          : operation instanceof DocUpsertOperation
+            ? (
+                await this.ensureLexicalDocRegistryEntry({
+                  path: operation.path,
+                  generation: operation.sourceGeneration,
+                  deleted: false,
+                })
+              )?.docRef
+            : (await this.getLexicalDocRegistryEntry(operation.path))?.docRef;
+      await database.putPendingDocOperation(
+        toPendingDocOperationRow(operation, docRef),
+      );
+    } catch (error) {
+      logger.warn("failed to persist pending lexical doc operation:", error);
+    }
+  }
+
+  private async deletePersistedPendingLexicalDocOperations(
+    ids: readonly string[],
+  ): Promise<void> {
+    if (ids.length === 0) {
+      return;
+    }
+    const database = this.database as Database & {
+      deletePendingDocOperations?: (ids: readonly string[]) => Promise<void>;
+    };
+    if (!database.deletePendingDocOperations) {
+      return;
+    }
+    try {
+      await database.deletePendingDocOperations(ids);
+    } catch (error) {
+      logger.warn("failed to delete pending lexical doc operations:", error);
+    }
+  }
+
+  private async clearPersistedPendingLexicalDocOperations(): Promise<void> {
+    const database = this.database as Database & {
+      clearPendingDocOperations?: (
+        engine?: PendingDocOperationRow["engine"],
+      ) => Promise<void>;
+    };
+    if (!database.clearPendingDocOperations) {
+      return;
+    }
+    try {
+      await database.clearPendingDocOperations("lexical");
+    } catch (error) {
+      logger.warn("failed to clear pending lexical doc operations:", error);
+    }
+  }
+
+  private async listPersistedPendingLexicalDocOperations(): Promise<
+    PendingDocOperationRow[]
+  > {
+    const database = this.database as Database & {
+      getPendingDocOperations?: (
+        engine?: PendingDocOperationRow["engine"],
+      ) => Promise<PendingDocOperationRow[]>;
+    };
+    if (!database.getPendingDocOperations) {
+      return [];
+    }
+    try {
+      return await database.getPendingDocOperations("lexical");
+    } catch (error) {
+      logger.warn("failed to load pending lexical doc operations:", error);
+      return [];
+    }
+  }
+
+  private async restorePersistedPendingLexicalDocOperations(): Promise<
+    DocOperation[]
+  > {
+    const rows = await this.listPersistedPendingLexicalDocOperations();
+    if (rows.length === 0) {
+      return [];
+    }
+    const currFiles = new Map(
+      this.dataProvider
+        .allFilesToBeIndexed()
+        .map((file) => [file.path, file] as const),
+    );
+    const docRegistryByRef = new Map(
+      (await this.listLexicalDocRegistryEntries()).map((row) => [row.docRef, row]),
+    );
+    const operations: DocOperation[] = [];
+    const invalidIds: string[] = [];
+    for (const row of rows.sort((left, right) => {
+      if (left.createdAt !== right.createdAt) {
+        return left.createdAt - right.createdAt;
+      }
+      return left.id.localeCompare(right.id);
+    })) {
+      const registryEntry =
+        row.docRef !== undefined ? docRegistryByRef.get(row.docRef) : undefined;
+      const normalizedRow =
+        !registryEntry
+          ? row
+          : {
+              ...row,
+              path: registryEntry.path,
+            };
+      if (
+        (normalizedRow.type === "upsert" || normalizedRow.type === "move") &&
+        !currFiles.has(normalizedRow.path)
+      ) {
+        invalidIds.push(row.id);
+        continue;
+      }
+      if (
+        normalizedRow.type === "delete" &&
+        currFiles.has(normalizedRow.path)
+      ) {
+        invalidIds.push(row.id);
+        continue;
+      }
+      const operation = fromPendingDocOperationRow(normalizedRow);
+      if (!operation) {
+        invalidIds.push(row.id);
+        continue;
+      }
+      operations.push(operation);
+    }
+    if (invalidIds.length > 0) {
+      await this.deletePersistedPendingLexicalDocOperations(invalidIds);
+    }
+    return operations;
+  }
+
+  private async listLexicalRecoveryStates(): Promise<IndexRecoveryStateRow[]> {
+    if (typeof this.database.getIndexRecoveryStates !== "function") {
+      return [];
+    }
+    try {
+      return await this.database.getIndexRecoveryStates("lexical");
+    } catch (error) {
+      logger.warn("failed to load persisted lexical recovery state:", error);
+      return [];
+    }
+  }
+
+  private shouldKeepPersistedLexicalRecoveryState(
+    row: IndexRecoveryStateRow,
+    currFiles: ReadonlyMap<string, TFile>,
+    previousIndexedFileRefs: ReadonlyMap<string, BaseIndexedFileRef>,
+  ): boolean {
+    if (!Number.isFinite(row.targetGeneration) || row.targetGeneration <= 0) {
+      return false;
+    }
+
+    const file = currFiles.get(row.path);
+    if (!file) {
+      return false;
+    }
+
+    if (file.stat.mtime > row.targetGeneration) {
+      return false;
+    }
+
+    const previousIndexedFileRef = previousIndexedFileRefs.get(row.path);
+    if (!previousIndexedFileRef) {
+      return true;
+    }
+
+    return previousIndexedFileRef.generation < row.targetGeneration;
+  }
+
+  private async restorePersistedLexicalRecoveryState(): Promise<number> {
+    await this.ensureLexicalIndexedFileRefsLoaded();
+    const rows = await this.listLexicalRecoveryStates();
+    if (rows.length === 0) {
+      return 0;
+    }
+
+    const currFiles = new Map(
+      this.dataProvider
+        .allFilesToBeIndexed()
+        .map((file) => [file.path, file] as const),
+    );
+    const docRegistryByRef = new Map(
+      (await this.listLexicalDocRegistryEntries()).map((row) => [row.docRef, row]),
+    );
+    let restoredCount = 0;
+
+    for (const row of rows) {
+      let effectivePath = row.path;
+      let file = currFiles.get(effectivePath);
+      if (!file && row.docRef !== undefined) {
+        const movedRegistryEntry = docRegistryByRef.get(row.docRef);
+        const movedFile = movedRegistryEntry
+          ? currFiles.get(movedRegistryEntry.path)
+          : undefined;
+        if (movedRegistryEntry && movedFile) {
+          effectivePath = movedRegistryEntry.path;
+          file = movedFile;
+          if (
+            effectivePath !== row.path &&
+            typeof this.database.moveIndexRecoveryState === "function"
+          ) {
+            try {
+              await this.database.moveIndexRecoveryState(
+                "lexical",
+                row.path,
+                effectivePath,
+              );
+            } catch (error) {
+              logger.warn(
+                `failed to move lexical recovery state from ${row.path} to ${effectivePath}:`,
+                error,
+              );
+            }
+          }
+        }
+      }
+
+      if (
+        !this.shouldKeepPersistedLexicalRecoveryState(
+          { ...row, path: effectivePath },
+          currFiles,
+          this.lexicalIndexedFileRefsByPath,
+        )
+      ) {
+        await this.deletePersistedLexicalRecoveryStates(
+          effectivePath === row.path ? [row.path] : [row.path, effectivePath],
+        );
+        continue;
+      }
+
+      if (this.lexicalIndexFailuresByPath.has(effectivePath)) {
+        continue;
+      }
+
+      if (!file) {
+        await this.deletePersistedLexicalRecoveryStates(
+          effectivePath === row.path ? [row.path] : [row.path, effectivePath],
+        );
+        continue;
+      }
+
+      this.lexicalIndexFailuresByPath.set(effectivePath, {
+        file,
+        error: new Error(
+          row.failureMessage ?? "Recovered persisted lexical failure state",
+        ),
+      });
+      restoredCount += 1;
+    }
+
+    if (restoredCount > 0) {
+      this.renderLexicalIndexFailureNotice();
+    }
+    return restoredCount;
+  }
+
+  private shouldAutoRetryRestoredLexicalFailures(
+    plan: LexicalBootstrapPlan,
+  ): boolean {
+    return (
+      !plan.needsFullReindex &&
+      !plan.needsRefHeal &&
+      (!plan.persistentRecoveryPlan ||
+        plan.persistentRecoveryPlan.status === "up_to_date")
+    );
+  }
+
+  private shouldReplayPersistedPendingLexicalDocOperations(
+    plan: LexicalBootstrapPlan,
+  ): boolean {
+    return (
+      !plan.needsFullReindex &&
+      !plan.needsRefHeal &&
+      (!plan.persistentRecoveryPlan ||
+        plan.persistentRecoveryPlan.status === "up_to_date")
+    );
+  }
+
+  private async replayPersistedPendingLexicalDocOperations(): Promise<void> {
+    if (this.lexicalStartupPendingOperations.length === 0) {
+      return;
+    }
+    const operations = [...this.lexicalStartupPendingOperations];
+    await this.docOperationsHandler({
+      rawOperations: operations,
+      reducedBatch: reduceDocOperations(operations),
+    });
+    this.lexicalStartupPendingOperations = [];
   }
 
   private logLexicalIndexFailures(
@@ -1640,6 +2310,7 @@ export class DataManager {
         this.lexicalIndexFailuresByPath.set(failure.file.path, failure);
       }
       if (result.failures.length > 0) {
+        await this.persistLexicalRecoveryFailures(result.failures);
         this.logLexicalIndexFailures(result.failures);
       }
     } catch (error) {
@@ -1960,6 +2631,10 @@ export class DataManager {
       this.lexicalEngine.supportsSerializedFileIndex();
     const supportsPersistentIndex =
       this.lexicalEngine.supportsPersistentFileIndex();
+    const lexicalQueryEvidenceReady =
+      supportsSerializedIndex || supportsPersistentIndex
+        ? await this.database.hasLexicalQueryEvidenceReadyMarker()
+        : false;
     const lexicalSnapshotDirty = supportsSerializedIndex && !supportsPersistentIndex
       ? await this.hasLexicalSnapshotDirtyMarker()
       : false;
@@ -1968,8 +2643,16 @@ export class DataManager {
       !this.shouldForceRefresh &&
       (supportsPersistentIndex || supportsSerializedIndex);
     if (supportsPersistentIndex && canRestorePersistedIndex) {
+      if (!lexicalQueryEvidenceReady) {
+        return {
+          needsFullReindex: true,
+          needsRefHeal: false,
+          persistentRecoveryPlan: null,
+        };
+      }
       const restored = await this.lexicalEngine.restorePersistedFileIndex();
       if (!restored) {
+        await this.invalidateLexicalQueryEvidenceReadyMarker();
         return {
           needsFullReindex: true,
           needsRefHeal: false,
@@ -1985,6 +2668,7 @@ export class DataManager {
           `Persisted lexical recovery requires full rebuild: ${persistentRecoveryPlan.reason}`,
         );
         this.lexicalEngine.clearIndex();
+        await this.invalidateLexicalQueryEvidenceReadyMarker();
         return {
           needsFullReindex: true,
           needsRefHeal: false,
@@ -2005,7 +2689,8 @@ export class DataManager {
       !devOption.loadIndexFromDatabase ||
       this.shouldForceRefresh ||
       !supportsSerializedIndex ||
-      lexicalSnapshotDirty
+      lexicalSnapshotDirty ||
+      !lexicalQueryEvidenceReady
     ) {
       prevData = null;
     } else {
@@ -2077,11 +2762,11 @@ export class DataManager {
   private async healLexicalBootstrapPlan(
     plan: LexicalBootstrapPlan,
   ): Promise<void> {
+    this.lexicalStartupFailureRetryPending = false;
+    this.lexicalStartupPendingOperations = [];
     if (plan.needsFullReindex) {
       await this.reindexLexicalEngineWithCurrFiles();
-      return;
-    }
-    if (
+    } else if (
       plan.persistentRecoveryPlan &&
       plan.persistentRecoveryPlan.status === "needs_heal"
     ) {
@@ -2091,11 +2776,31 @@ export class DataManager {
     } else {
       await this.ensureLexicalIndexedFileRefsLoaded();
     }
+
+    const restoredFailureCount =
+      await this.restorePersistedLexicalRecoveryState();
+    this.lexicalStartupFailureRetryPending =
+      restoredFailureCount > 0 &&
+      this.shouldAutoRetryRestoredLexicalFailures(plan);
+    if (this.shouldReplayPersistedPendingLexicalDocOperations(plan)) {
+      this.lexicalStartupPendingOperations =
+        await this.restorePersistedPendingLexicalDocOperations();
+    } else {
+      await this.clearPersistedPendingLexicalDocOperations();
+    }
   }
 
   private async commitLexicalBootstrapPlan(): Promise<void> {
     logger.trace("Lexical engine is ready");
     await this.persistLexicalSearchSnapshotIfAvailable();
+    if (this.lexicalStartupPendingOperations.length > 0) {
+      await this.replayPersistedPendingLexicalDocOperations();
+      await this.persistLexicalSearchSnapshotIfAvailable();
+    }
+    if (this.lexicalStartupFailureRetryPending) {
+      this.lexicalStartupFailureRetryPending = false;
+      void this.retryLexicalIndexFailures();
+    }
   }
 
   private async initHybridEngine(): Promise<HybridRefreshResult | null> {
@@ -2156,7 +2861,7 @@ export class DataManager {
           await MyLib.sleep(0);
         }
       }
-      this.lexicalEngine.finishBatchReindex();
+      await this.lexicalEngine.finishBatchReindex();
     } catch (error) {
       this.lexicalEngine.abortBatchReindex();
       throw error;
@@ -2164,12 +2869,7 @@ export class DataManager {
       progressNotice.hide();
     }
     await this.saveLexicalIndexedFileRefs(successfulFiles);
-    await this.fileSnapshotStore.publishIndexedTexts(
-      successfulFiles.map((file) => ({
-        path: file.path,
-        generation: file.stat.mtime,
-      })),
-    );
+    await this.commitIndexedLexicalFiles(successfulFiles);
     await this.fileSnapshotStore.retainOnlyFiles(indexedPaths);
     await this.markLexicalSnapshotDirty();
     this.clearLexicalIndexFailures(Array.from(indexedPaths));
@@ -2287,12 +2987,7 @@ export class DataManager {
     });
     logger.trace(`lexical recovery docs to upsert: ${upsertFiles.length}`);
     const addResult = await this.addDocuments(upsertFiles);
-    await this.fileSnapshotStore.publishIndexedTexts(
-      addResult.indexedFiles.map((file) => ({
-        path: file.path,
-        generation: file.stat.mtime,
-      })),
-    );
+    await this.commitIndexedLexicalFiles(addResult.indexedFiles);
     const failedPaths = new Set(
       addResult.failures.map((failure) => failure.file.path),
     );
@@ -2324,8 +3019,10 @@ export class DataManager {
     const previousIndexedFileRefs = new Map<string, BaseIndexedFileRef>(
       previousIndexedFileRefsList?.map((ref) => [ref.path, ref]),
     );
-
-    const docsToAdd: TAbstractFile[] = [];
+    const previousDocRegistryEntries = new Map<string, DocRegistryRow>(
+      (await this.listLexicalDocRegistryEntries()).map((row) => [row.path, row]),
+    );
+    const docsToAdd: TFile[] = [];
     const docsToDelete: string[] = [];
 
     for (const [path, file] of currFiles) {
@@ -2341,17 +3038,38 @@ export class DataManager {
       if (!currFiles.has(prevPath)) docsToDelete.push(prevPath);
     }
 
-    logger.trace(`docs to delete: ${docsToDelete.length}`);
-    logger.trace(`docs to add: ${docsToAdd.length}`);
-    await this.deleteDocuments(docsToDelete);
-    await this.fileSnapshotStore.removeFiles(docsToDelete);
-    const addResult = await this.addDocuments(docsToAdd);
-    await this.fileSnapshotStore.publishIndexedTexts(
-      addResult.indexedFiles.map((file) => ({
-        path: file.path,
-        generation: file.stat.mtime,
-      })),
+    const lexicalStartupMovePlan = await this.planLexicalStartupMoves(
+      currFiles,
+      docsToAdd,
+      docsToDelete,
+      previousIndexedFileRefs,
+      previousDocRegistryEntries,
     );
+    const pendingAddFiles = new Map<string, TFile>(
+      lexicalStartupMovePlan.docsToAdd.map((file) => [file.path, file]),
+    );
+    const pendingDeletePaths = new Set<string>(lexicalStartupMovePlan.docsToDelete);
+
+    for (const move of lexicalStartupMovePlan.docsToMove) {
+      const moved = await this.commitMovedLexicalFileState(
+        move.oldPath,
+        move.file,
+        move.file.stat.mtime,
+      );
+      if (!moved) {
+        pendingDeletePaths.add(move.oldPath);
+        pendingAddFiles.set(move.file.path, move.file);
+      }
+    }
+
+    const deleteList = [...pendingDeletePaths];
+    logger.trace(`docs to move: ${lexicalStartupMovePlan.docsToMove.length}`);
+    logger.trace(`docs to delete: ${deleteList.length}`);
+    logger.trace(`docs to add: ${pendingAddFiles.size}`);
+    await this.deleteDocuments(deleteList);
+    await this.fileSnapshotStore.removeFiles(deleteList);
+    const addResult = await this.addDocuments([...pendingAddFiles.values()]);
+    await this.commitIndexedLexicalFiles(addResult.indexedFiles);
     const failedPaths = new Set(
       addResult.failures.map((failure) => failure.file.path),
     );
@@ -2360,13 +3078,13 @@ export class DataManager {
         (file) => !failedPaths.has(file.path),
       ),
     );
-    if (docsToDelete.length > 0 || addResult.indexedFiles.length > 0) {
+    if (deleteList.length > 0 || addResult.indexedFiles.length > 0) {
       await this.markLexicalSnapshotDirty([
-        ...docsToDelete,
+        ...deleteList,
         ...addResult.indexedFiles.map((file) => file.path),
       ]);
     }
-    this.clearLexicalIndexFailures(docsToDelete);
+    this.clearLexicalIndexFailures(deleteList);
     this.clearLexicalIndexFailures(
       addResult.indexedFiles.map((file) => file.path),
     );
@@ -2375,8 +3093,243 @@ export class DataManager {
     }
   }
 
+  private async planLexicalStartupMoves(
+    currentFiles: ReadonlyMap<string, TFile>,
+    docsToAdd: readonly TFile[],
+    docsToDelete: readonly string[],
+    previousIndexedFileRefs: ReadonlyMap<string, BaseIndexedFileRef>,
+    previousDocRegistryEntries: ReadonlyMap<string, DocRegistryRow>,
+  ): Promise<{
+    docsToMove: LexicalStartupMove[];
+    docsToAdd: TFile[];
+    docsToDelete: string[];
+  }> {
+    if (docsToAdd.length === 0 || docsToDelete.length === 0) {
+      return {
+        docsToMove: [],
+        docsToAdd: [...docsToAdd],
+        docsToDelete: [...docsToDelete],
+      };
+    }
+
+    const deleteCandidatesByFingerprint = new Map<string, Array<{ path: string }>>();
+    const indexedTextRequests: Array<{ path: string; generation?: number }> = [];
+
+    for (const path of docsToDelete) {
+      if (currentFiles.has(path)) {
+        continue;
+      }
+      const registryEntry = previousDocRegistryEntries.get(path);
+      if (registryEntry?.contentFingerprint) {
+        const existing = deleteCandidatesByFingerprint.get(
+          registryEntry.contentFingerprint,
+        );
+        if (existing) {
+          existing.push({ path });
+        } else {
+          deleteCandidatesByFingerprint.set(registryEntry.contentFingerprint, [
+            { path },
+          ]);
+        }
+        continue;
+      }
+      const previousIndexedFileRef = previousIndexedFileRefs.get(path);
+      if (!previousIndexedFileRef) {
+        continue;
+      }
+      indexedTextRequests.push({
+        path,
+        generation: previousIndexedFileRef.generation,
+      });
+    }
+
+    if (indexedTextRequests.length > 0) {
+      const indexedTexts =
+        await this.fileSnapshotStore.readIndexedTexts(indexedTextRequests);
+      for (const request of indexedTextRequests) {
+        if (!indexedTexts.has(request.path)) {
+          continue;
+        }
+        const fingerprint = hashStableText(indexedTexts.get(request.path) ?? "");
+        const existing = deleteCandidatesByFingerprint.get(fingerprint);
+        if (existing) {
+          existing.push({ path: request.path });
+        } else {
+          deleteCandidatesByFingerprint.set(fingerprint, [{ path: request.path }]);
+        }
+      }
+    }
+
+    const matchedDeletePaths = new Set<string>();
+    const docsToMove: LexicalStartupMove[] = [];
+    const remainingAdds: TFile[] = [];
+
+    for (const file of docsToAdd) {
+      const plainText = await this.safeReadPlainText(file);
+      if (plainText === null) {
+        remainingAdds.push(file);
+        continue;
+      }
+      const fingerprint = hashStableText(plainText);
+      const candidates =
+        deleteCandidatesByFingerprint.get(fingerprint)?.filter(
+          (candidate) => !matchedDeletePaths.has(candidate.path),
+        ) ?? [];
+      if (candidates.length !== 1) {
+        remainingAdds.push(file);
+        continue;
+      }
+      matchedDeletePaths.add(candidates[0].path);
+      docsToMove.push({
+        oldPath: candidates[0].path,
+        file,
+      });
+    }
+
+    return {
+      docsToMove,
+      docsToAdd: remainingAdds,
+      docsToDelete: docsToDelete.filter((path) => !matchedDeletePaths.has(path)),
+    };
+  }
+
+  private async safeReadPlainText(file: TFile): Promise<string | null> {
+    try {
+      return await this.dataProvider.readPlainText(file);
+    } catch (error) {
+      logger.debug(
+        `lexical startup move detection failed to read ${file.path}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  private async ensureLexicalDocRegistryEntry(entry: {
+    path: string;
+    generation?: number;
+    deleted?: boolean;
+    contentFingerprint?: string;
+  }): Promise<DocRegistryRow | undefined> {
+    const database = this.database as Database & {
+      ensureDocRegistryEntry?: (
+        entry: {
+          path: string;
+          generation?: number;
+          deleted?: boolean;
+          contentFingerprint?: string;
+        },
+      ) => Promise<DocRegistryRow>;
+    };
+    if (!database.ensureDocRegistryEntry) {
+      return undefined;
+    }
+    return await database.ensureDocRegistryEntry(entry);
+  }
+
+  private async getLexicalDocRegistryEntry(
+    path: string,
+  ): Promise<DocRegistryRow | undefined> {
+    const database = this.database as Database & {
+      getDocRegistryEntry?: (path: string) => Promise<DocRegistryRow | undefined>;
+    };
+    if (!database.getDocRegistryEntry) {
+      return undefined;
+    }
+    return await database.getDocRegistryEntry(path);
+  }
+
+  private async ensureLexicalDocRegistryEntries(
+    entries: ReadonlyArray<{
+      path: string;
+      generation?: number;
+      deleted?: boolean;
+      contentFingerprint?: string;
+    }>,
+  ): Promise<Map<string, DocRegistryRow>> {
+    const database = this.database as Database & {
+      ensureDocRegistryEntries?: (
+        entries: ReadonlyArray<{
+          path: string;
+          generation?: number;
+          deleted?: boolean;
+          contentFingerprint?: string;
+        }>,
+      ) => Promise<Map<string, DocRegistryRow>>;
+    };
+    if (!database.ensureDocRegistryEntries) {
+      return new Map<string, DocRegistryRow>();
+    }
+    return await database.ensureDocRegistryEntries(entries);
+  }
+
+  private async attachLexicalDocRefs(
+    documents: readonly IndexedDocument[],
+  ): Promise<IndexedDocument[]> {
+    if (documents.length === 0) {
+      return [];
+    }
+    const docRegistryEntries = await this.ensureLexicalDocRegistryEntries(
+      documents.map((document) => ({
+        path: document.path,
+        generation: document.generation,
+        deleted: false,
+        contentFingerprint:
+          typeof document.content === "string"
+            ? hashStableText(document.content)
+            : undefined,
+      })),
+    );
+    return documents.map((document) => ({
+      ...document,
+      docRef: docRegistryEntries.get(document.path)?.docRef ?? document.docRef,
+    }));
+  }
+
+  private async listLexicalDocRegistryEntries(): Promise<DocRegistryRow[]> {
+    const database = this.database as Database & {
+      listDocRegistryEntries?: () => Promise<DocRegistryRow[]>;
+    };
+    if (!database.listDocRegistryEntries) {
+      return [];
+    }
+    return await database.listDocRegistryEntries();
+  }
+
+  private async moveLexicalDocRegistryPath(
+    oldPath: string,
+    newPath: string,
+    options?: {
+      generation?: number;
+      contentFingerprint?: string;
+    },
+  ): Promise<DocRegistryRow | undefined> {
+    const fileSnapshotStore = this.fileSnapshotStore as FileSnapshotStore & {
+      moveDocRegistryPath?: (
+        oldPath: string,
+        newPath: string,
+        options?: {
+          generation?: number;
+          contentFingerprint?: string;
+        },
+      ) => Promise<DocRegistryRow | undefined>;
+    };
+    if (!fileSnapshotStore.moveDocRegistryPath) {
+      return undefined;
+    }
+    return await fileSnapshotStore.moveDocRegistryPath(oldPath, newPath, options);
+  }
+
   private async saveLexicalIndexedFileRefs(files: TFile[]) {
+    const docRegistryEntries = await this.ensureLexicalDocRegistryEntries(
+      files.map((file) => ({
+        path: file.path,
+        generation: file.stat.mtime,
+        deleted: false,
+      })),
+    );
     const updatedIndexedFileRefs = files.map((file) => ({
+      docRef: docRegistryEntries.get(file.path)?.docRef,
       path: file.path,
       generation: file.stat.mtime,
       size: file.stat.size,
@@ -2386,6 +3339,23 @@ export class DataManager {
     logger.trace(
       `${updatedIndexedFileRefs.length} lexical indexed file refs updated`,
     );
+  }
+
+  private notifyLexicalIndexedTextsCommitted(
+    files: ReadonlyArray<{
+      path: string;
+      generation?: number;
+    }>,
+  ): void {
+    const lexicalEngine = this.lexicalEngine as unknown as FileSearchEngine & {
+      notifyIndexedTextsCommitted?: (
+        files: ReadonlyArray<{
+          path: string;
+          generation?: number;
+        }>,
+      ) => void;
+    };
+    lexicalEngine.notifyIndexedTextsCommitted?.(files);
   }
 
   private async ensureLexicalIndexedFileRefsLoaded(): Promise<void> {
@@ -2408,7 +3378,13 @@ export class DataManager {
     generation = file.stat.mtime,
   ): Promise<void> {
     await this.ensureLexicalIndexedFileRefsLoaded();
+    const docRegistryEntry = await this.ensureLexicalDocRegistryEntry({
+      path: file.path,
+      generation,
+      deleted: false,
+    });
     const nextRef: BaseIndexedFileRef = {
+      docRef: docRegistryEntry?.docRef,
       path: file.path,
       generation,
       size: file.stat.size,
@@ -3052,6 +4028,9 @@ export class DataManager {
       })
       .catch((error) => {
         logger.warn("[clever-search] search bootstrap commit failed:", error);
+        if (this.lexicalBootstrapState !== "searchable") {
+          this.setLexicalBootstrapState("failed");
+        }
         if (this.searchBootstrapMetrics) {
           this.searchBootstrapMetrics.commitPending = false;
           this.searchBootstrapMetrics.commitFailed = true;
@@ -3067,6 +4046,8 @@ export class DataManager {
 
   private async commitSearchBootstrapRun(): Promise<void> {
     await this.commitLexicalBootstrapPlan();
+    this.setLexicalBootstrapState("searchable");
+    this.markSearchBootstrapSearchable();
     if (this.hybridEngine.isEnabled()) {
       await this.hybridEngine.persistIndicesForBatch();
     }
@@ -3504,6 +4485,9 @@ export class DataManager {
   ): Promise<HybridStorageRepairReport> {
     const summaries = await this.collectHybridStoredPathSummaries();
     const previousIndexedFileRefs = new Map<string, HybridIndexedFileRef>();
+    const previousDocRegistryEntries = new Map<string, DocRegistryRow>(
+      (await this.database.listDocRegistryEntries()).map((row) => [row.path, row]),
+    );
     const repairedPaths = new Set<string>();
     const reindexedPaths = new Set<string>();
 
@@ -3528,12 +4512,13 @@ export class DataManager {
     }
 
     if (repairedPaths.size === 0) {
-      return {
-        repairedPaths: [],
-        reindexedPaths: Array.from(reindexedPaths),
-        previousIndexedFileRefs,
-      };
-    }
+        return {
+          repairedPaths: [],
+          reindexedPaths: Array.from(reindexedPaths),
+          previousIndexedFileRefs,
+          previousDocRegistryEntries,
+        };
+      }
 
     const repairedPathList = Array.from(repairedPaths);
     console.groupCollapsed(
@@ -3572,12 +4557,13 @@ export class DataManager {
         );
     }
 
-    return {
-      repairedPaths: repairedPathList,
-      reindexedPaths: Array.from(reindexedPaths),
-      previousIndexedFileRefs,
-    };
-  }
+      return {
+        repairedPaths: repairedPathList,
+        reindexedPaths: Array.from(reindexedPaths),
+        previousIndexedFileRefs,
+        previousDocRegistryEntries,
+      };
+    }
 
   private isRetryableHybridIndexError(error: unknown): boolean {
     if (

@@ -3,6 +3,7 @@ import type { V3QueryFamilyMatchKind } from "../recall";
 export type BlockShortlistRepresentative = Readonly<{
 	queryUnitIndex: number;
 	familyId: number;
+	shardLocalFamilySlot: number;
 	familyText: string;
 	matchKind: V3QueryFamilyMatchKind;
 	blockId: number;
@@ -133,8 +134,10 @@ function compareRepresentativeOrder(
 		if (leftRepresentative.blockId !== rightRepresentative.blockId) {
 			return leftRepresentative.blockId - rightRepresentative.blockId;
 		}
-		if (leftRepresentative.familyId !== rightRepresentative.familyId) {
-			return leftRepresentative.familyId - rightRepresentative.familyId;
+		const leftShardLocalFamilySlot = leftRepresentative.shardLocalFamilySlot;
+		const rightShardLocalFamilySlot = rightRepresentative.shardLocalFamilySlot;
+		if (leftShardLocalFamilySlot !== rightShardLocalFamilySlot) {
+			return leftShardLocalFamilySlot - rightShardLocalFamilySlot;
 		}
 	}
 	return left.length - right.length;

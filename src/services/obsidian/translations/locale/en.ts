@@ -249,6 +249,10 @@ export default {
 		" file(s) are still being processed",
 	"hybridModal.freshnessNotice.staleSegmentSuffix":
 		" file(s) are out of sync and not in the repair flow",
+	"hybridNotice.fileEmbeddingWaitInterval":
+		"This file is still inside the incremental embedding wait interval. Preview snippets and jumps are pinned to the previous shadow snapshot until the next embedding run starts.",
+	"hybridNotice.fileEmbeddingUpdating":
+		"This file is still updating its embedding. Preview snippets and jumps are pinned to the previous shadow snapshot until the new semantic index is ready.",
 	"hybridModal.healthSummary": "Hybrid health summary",
 	"hybridModal.healthSummary.loading": "Loading local health...",
 	"hybridModal.healthSummary.localOnly": "Local-only diagnosis. No embedding API, no rerank API, no token usage.",

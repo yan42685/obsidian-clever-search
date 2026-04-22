@@ -1,4 +1,16 @@
-import type { ResidentBase } from "../layout/types";
+import type {
+	ResidentBase,
+	ResidentBodyFamilySupportSidecar,
+	ResidentExactTapeSidecar,
+	ResidentHanWitnessSidecar,
+} from "../layout/types";
+import {
+	getSentinelSliceEnd,
+	getSentinelSliceStart,
+	sliceResidentIntegerArray,
+	sliceSentinelBucket,
+} from "../layout/integer-arrays";
+import { decodeBlockPositionLane } from "../layout/position-lanes";
 import {
 	logCoverageLexicalV3Debug,
 	shouldLogCoverageLexicalV3Debug,
@@ -44,24 +56,38 @@ import {
 	getBodyBlockExactTokenPositions,
 	getBodyBlockFamilySupportEntries,
 	getBodyBlockHanWitnessOccurrences,
+	getBodyBlockHanWitnessStartOffsets,
+	getBodyBlockHanWitnessStringIds,
 	getBodyBlockHanWitnessTexts,
 	getDocHeadingHanWitnessStringIds,
 	getDocHeadingHanWitnessTexts,
+	getDocIdForLiveDocSlot,
 	getDocIdentityHanWitnessSourceMasks,
 	getDocIdentityHanWitnessStringIds,
 	getDocIdentityHanWitnessTexts,
 	getDocRouteHanWitnessSourceMasks,
 	getDocRouteHanWitnessStringIds,
 	getDocRouteHanWitnessTexts,
-	getDocHeadingFamilyIds,
-	getDocIdentityFamilyIds,
-	getDocIdentitySourceMasks,
-	getDocPath,
-	getDocRouteFamilyIds,
-	getDocRouteSourceMasks,
-	getDocStableKey,
+	getLiveDocHeadingFamilyIds,
+	getLiveDocHeadingHanWitnessStringIds,
+	getLiveDocHeadingHanWitnessTexts,
+	getLiveDocIdentityFamilyIds,
+	getLiveDocIdentityHanWitnessSourceMasks,
+	getLiveDocIdentityHanWitnessStringIds,
+	getLiveDocIdentityHanWitnessTexts,
+	getLiveDocIdentitySourceMasks,
+	getLiveDocPath,
+	getLiveDocRouteFamilyIds,
+	getLiveDocRouteHanWitnessSourceMasks,
+	getLiveDocRouteHanWitnessStringIds,
+	getLiveDocRouteHanWitnessTexts,
+	getLiveDocRouteSourceMasks,
+	getLiveDocStableKey,
+	getShardLocalFamilySlot,
+	readResidentString,
 	resolveCandidateHanSurfaceGroups,
 } from "../recall";
+import type { BodyHanWitnessOccurrence } from "../recall";
 import {
 	chooseMetadataPackingSource,
 	decodeIdentityMetadataSource,
@@ -100,12 +126,17 @@ const WITNESS_MATCH_FAMILY_ID_OFFSET = 1;
 const BLOCK_SHORTLIST_LIMIT = 6;
 const BODY_WINDOW_PREFILTER_PER_BUCKET = 4;
 
-type CachedDocEvidence = Readonly<{
+export type CandidateDocEvidence = Readonly<{
 	identityFamilyIds: readonly number[];
 	routeFamilyIds: readonly number[];
 	headingFamilyIds: readonly number[];
+	identityShardLocalFamilySlots: readonly number[];
+	routeShardLocalFamilySlots: readonly number[];
+	headingShardLocalFamilySlots: readonly number[];
 	identitySourceMaskByFamilyId: ReadonlyMap<number, number>;
 	routeSourceMaskByFamilyId: ReadonlyMap<number, number>;
+	identitySourceMaskByShardLocalFamilySlot: ReadonlyMap<number, number>;
+	routeSourceMaskByShardLocalFamilySlot: ReadonlyMap<number, number>;
 	identityWitnessStringIds: readonly number[];
 	routeWitnessStringIds: readonly number[];
 	headingWitnessStringIds: readonly number[];
@@ -116,21 +147,69 @@ type CachedDocEvidence = Readonly<{
 	headingWitnessTexts: readonly string[];
 }>;
 
-type CachedBodyBlockEvidence = Readonly<{
+export type CandidateBodyBlockEvidence = Readonly<{
 	exactOccurrences: readonly PositionedFamilyOccurrence[];
 	witnessOccurrences: readonly PositionedFamilyOccurrence[];
 	witnessTexts: readonly string[];
 	familySupportMaskByFamilyId: ReadonlyMap<number, number>;
+	familySupportMaskByShardLocalFamilySlot: ReadonlyMap<number, number>;
 	approxSpan: number;
 	ordinalSpan: number;
 	weightedGapIndex: WeightedGapIndex;
 	singletonCharPositionsByChar: Map<string, readonly number[]>;
 }>;
 
-const DOC_EVIDENCE_CACHE = new WeakMap<ResidentBase, Map<number, CachedDocEvidence>>();
+export type CandidateHydratedBodyEvidenceBlock = Readonly<{
+	exactFamilyIds: readonly number[];
+	exactTokenPositions: readonly number[];
+	familySupportEntries: ReadonlyArray<
+		Readonly<{
+			familyId: number;
+			supportMask: number;
+		}>
+	>;
+}>;
+
+export type CandidateHydratedHanDocEvidence = Readonly<{
+	identityWitnessStringIds: readonly number[];
+	identityWitnessSourceMasks: readonly number[];
+	routeWitnessStringIds: readonly number[];
+	routeWitnessSourceMasks: readonly number[];
+	headingWitnessStringIds: readonly number[];
+}>;
+
+export type CandidateHydratedHanBodyEvidenceBlock = Readonly<{
+	bodyWitnessStringIds: readonly number[];
+	bodyWitnessStartOffsets: readonly number[];
+}>;
+
+export type CandidateEvidencePackage = Readonly<{
+	docEvidence: CandidateDocEvidence;
+	bodyBlockEvidenceByBlockId: ReadonlyMap<number, CandidateBodyBlockEvidence>;
+}>;
+
+export type CandidateEvidenceHydrationSource = Readonly<{
+	bodyEvidenceByBlockId?: ReadonlyMap<number, CandidateHydratedBodyEvidenceBlock> | null;
+	docHanEvidenceByLiveDocSlot?: ReadonlyMap<
+		number,
+		CandidateHydratedHanDocEvidence
+	> | null;
+	bodyHanEvidenceByBlockId?: ReadonlyMap<
+		number,
+		CandidateHydratedHanBodyEvidenceBlock
+	> | null;
+	exactTapeSidecar?: ResidentExactTapeSidecar | null;
+	bodyFamilySupportSidecar?: ResidentBodyFamilySupportSidecar | null;
+	hanWitnessSidecar?: ResidentHanWitnessSidecar | null;
+}>;
+
+const DOC_EVIDENCE_CACHE = new WeakMap<
+	ResidentBase,
+	Map<number, CandidateDocEvidence>
+>();
 const BODY_BLOCK_EVIDENCE_CACHE = new WeakMap<
 	ResidentBase,
-	Map<number, CachedBodyBlockEvidence>
+	Map<number, CandidateBodyBlockEvidence>
 >();
 
 type BodyBigramAnchorOccurrence = Readonly<{
@@ -143,6 +222,7 @@ type BodyOccurrence = Readonly<{
 	blockId: number;
 	unitIndex: number;
 	match: V3QueryFamilyMatch;
+	shardLocalFamilySlot: number;
 	ordinalPosition: number;
 	localPosition: number;
 	localEndPosition: number;
@@ -245,6 +325,7 @@ type OrdinalWindowSummary = Readonly<{
 
 type PositionedFamilyOccurrence = Readonly<{
 	familyId: number;
+	shardLocalFamilySlot: number;
 	ordinalPosition: number;
 	localPosition: number;
 	localEndPosition: number;
@@ -303,21 +384,25 @@ export function buildPackingProfile(
 	options?: Readonly<{
 		allowBodyOpaqueRescueSurfaceGroupIndices?: ReadonlySet<number> | null;
 		excludeSurfaceGroupIndices?: ReadonlySet<number> | null;
+		hydratedEvidence?: CandidateEvidencePackage | null;
 	}>,
 ): EvidencePackingProfile {
-	const docEvidence = getCachedDocEvidence(base, candidateRecall.docId);
-	const identityFamilyIds = new Set<number>([
-		...docEvidence.identityFamilyIds,
-		...docEvidence.identityWitnessStringIds.map(encodeWitnessMatchFamilyId),
-	]);
-	const routeFamilyIds = new Set<number>([
-		...docEvidence.routeFamilyIds,
-		...docEvidence.routeWitnessStringIds.map(encodeWitnessMatchFamilyId),
-	]);
-	const headingFamilyIds = new Set<number>([
-		...docEvidence.headingFamilyIds,
-		...docEvidence.headingWitnessStringIds.map(encodeWitnessMatchFamilyId),
-	]);
+	const docEvidence =
+		options?.hydratedEvidence?.docEvidence ??
+		getCachedDocEvidence(base, candidateRecall.liveDocSlot);
+	const identityShardLocalFamilySlots = new Set<number>(
+		docEvidence.identityShardLocalFamilySlots,
+	);
+	const routeShardLocalFamilySlots = new Set<number>(
+		docEvidence.routeShardLocalFamilySlots,
+	);
+	const headingShardLocalFamilySlots = new Set<number>(
+		docEvidence.headingShardLocalFamilySlots,
+	);
+	const identitySourceMaskByShardLocalFamilySlot =
+		docEvidence.identitySourceMaskByShardLocalFamilySlot;
+	const routeSourceMaskByShardLocalFamilySlot =
+		docEvidence.routeSourceMaskByShardLocalFamilySlot;
 	const excludedSurfaceGroupIndices = options?.excludeSurfaceGroupIndices ?? null;
 	const relevantUnitFamilyMatches = unitFamilyMatches.filter((unitMatches) => {
 		if (excludedSurfaceGroupIndices == null || excludedSurfaceGroupIndices.size === 0) {
@@ -329,11 +414,15 @@ export function buildPackingProfile(
 	const bodyOccurrencesByBlockId = new Map<number, BodyOccurrence[]>();
 	const bodyApproxSpanByBlockId = new Map<number, number>();
 	const bodyOrdinalSpanByBlockId = new Map<number, number>();
-	const bodyBlockIdsByUnitFamily = new Map<number, Map<number, Set<number>>>();
-	const bodySupportMaskByUnitFamily = new Map<number, Map<number, number>>();
+	const bodyBlockIdsByUnitFamilySlot = new Map<number, Map<number, Set<number>>>();
+	const bodySupportMaskByUnitFamilySlot = new Map<number, Map<number, number>>();
 	const bodyWitnessTextsByBlockId = new Map<number, readonly string[]>();
+	const hydratedBodyBlockEvidenceByBlockId =
+		options?.hydratedEvidence?.bodyBlockEvidenceByBlockId ?? null;
 	for (const blockId of candidateRecall.shortlistedBodyBlockIds) {
-		const blockEvidence = getCachedBodyBlockEvidence(base, blockId);
+		const blockEvidence =
+			hydratedBodyBlockEvidenceByBlockId?.get(blockId) ??
+			getCachedBodyBlockEvidence(base, blockId);
 		const exactOccurrences = blockEvidence.exactOccurrences;
 		const witnessOccurrences = blockEvidence.witnessOccurrences;
 		const allOccurrences = [...exactOccurrences, ...witnessOccurrences];
@@ -341,9 +430,11 @@ export function buildPackingProfile(
 		bodyApproxSpanByBlockId.set(blockId, blockEvidence.approxSpan);
 		bodyOrdinalSpanByBlockId.set(blockId, blockEvidence.ordinalSpan);
 		const blockOccurrences: BodyOccurrence[] = [];
-		const blockSupportMaskByFamilyId = blockEvidence.familySupportMaskByFamilyId;
+		const blockSupportMaskByShardLocalFamilySlot =
+			blockEvidence.familySupportMaskByShardLocalFamilySlot;
 		for (const unitMatches of relevantUnitFamilyMatches) {
 			const occurrences = collectBlockOccurrences(
+				base,
 				blockId,
 				unitMatches.queryUnitIndex,
 				unitMatches.matches,
@@ -354,26 +445,31 @@ export function buildPackingProfile(
 			}
 			blockOccurrences.push(...occurrences);
 			for (const occurrence of occurrences) {
-				let familyMap = bodyBlockIdsByUnitFamily.get(occurrence.unitIndex);
+				const shardLocalFamilySlot = occurrence.shardLocalFamilySlot;
+				let familyMap = bodyBlockIdsByUnitFamilySlot.get(occurrence.unitIndex);
 				if (familyMap == null) {
 					familyMap = new Map<number, Set<number>>();
-					bodyBlockIdsByUnitFamily.set(occurrence.unitIndex, familyMap);
+					bodyBlockIdsByUnitFamilySlot.set(occurrence.unitIndex, familyMap);
 				}
-				let blockIds = familyMap.get(occurrence.match.familyId);
+				let blockIds = familyMap.get(shardLocalFamilySlot);
 				if (blockIds == null) {
 					blockIds = new Set<number>();
-					familyMap.set(occurrence.match.familyId, blockIds);
+					familyMap.set(shardLocalFamilySlot, blockIds);
 				}
 				blockIds.add(blockId);
-				let familySupportMaskMap = bodySupportMaskByUnitFamily.get(occurrence.unitIndex);
+				let familySupportMaskMap =
+					bodySupportMaskByUnitFamilySlot.get(occurrence.unitIndex);
 				if (familySupportMaskMap == null) {
 					familySupportMaskMap = new Map<number, number>();
-					bodySupportMaskByUnitFamily.set(occurrence.unitIndex, familySupportMaskMap);
+					bodySupportMaskByUnitFamilySlot.set(
+						occurrence.unitIndex,
+						familySupportMaskMap,
+					);
 				}
 				familySupportMaskMap.set(
-					occurrence.match.familyId,
-					(familySupportMaskMap.get(occurrence.match.familyId) ?? 0) |
-						(blockSupportMaskByFamilyId.get(occurrence.match.familyId) ?? 0),
+					shardLocalFamilySlot,
+					(familySupportMaskMap.get(shardLocalFamilySlot) ?? 0) |
+						(blockSupportMaskByShardLocalFamilySlot.get(shardLocalFamilySlot) ?? 0),
 				);
 			}
 		}
@@ -390,7 +486,7 @@ export function buildPackingProfile(
 		bodyOccurrencesByBlockId,
 		bodyApproxSpanByBlockId,
 		bodyOrdinalSpanByBlockId,
-		headingFamilyIds,
+		headingShardLocalFamilySlots,
 	);
 	const baseBestBodyWindowContainer = bodyWindowSelection.bestCandidate;
 	const baseBestBodyWindowBlockIds = new Set<number>(
@@ -400,13 +496,13 @@ export function buildPackingProfile(
 		.map((unitMatches) =>
 			selectRealizedFamilyForUnit({
 				unitMatches,
-				identityFamilyIds,
-				routeFamilyIds,
-				headingFamilyIds,
-				identitySourceMaskByFamilyId: docEvidence.identitySourceMaskByFamilyId,
-				routeSourceMaskByFamilyId: docEvidence.routeSourceMaskByFamilyId,
-				bodyBlockIdsByUnitFamily,
-				bodySupportMaskByUnitFamily,
+				identityShardLocalFamilySlots,
+				routeShardLocalFamilySlots,
+				headingShardLocalFamilySlots,
+				identitySourceMaskByShardLocalFamilySlot,
+				routeSourceMaskByShardLocalFamilySlot,
+				bodyBlockIdsByUnitFamilySlot,
+				bodySupportMaskByUnitFamilySlot,
 				bestBodyWindowBlockIds: baseBestBodyWindowBlockIds,
 			}),
 		)
@@ -453,7 +549,7 @@ export function buildPackingProfile(
 		logCoverageLexicalV3Debug("ranking.buildPackingProfile.hanOpaqueRescue", {
 			queryText: queryAnalysis.queryText,
 			docId: candidateRecall.docId,
-			path: getDocPath(base, candidateRecall.docId),
+			path: getLiveDocPath(base, candidateRecall.liveDocSlot),
 			allowBodyOpaqueRescueSurfaceGroupIndices:
 				options?.allowBodyOpaqueRescueSurfaceGroupIndices == null
 					? null
@@ -540,6 +636,7 @@ export function buildPackingProfile(
 			queryUnitText: unit.queryUnitText,
 			querySurfaceGroupIndex: unit.surfaceGroupIndex,
 			familyId: unit.familyId,
+			shardLocalFamilySlot: unit.familyId,
 			familyText: unit.familyText,
 			matchKind: "opaque_exact",
 			editDistance: 0,
@@ -558,6 +655,7 @@ export function buildPackingProfile(
 			queryUnitText: bodyOpaqueRescue.queryUnitText,
 			querySurfaceGroupIndex: bodyOpaqueRescue.surfaceGroupIndex,
 			familyId: bodyOpaqueRescue.familyId,
+			shardLocalFamilySlot: bodyOpaqueRescue.familyId,
 			familyText: bodyOpaqueRescue.familyText,
 			matchKind: "opaque_exact",
 			editDistance: 0,
@@ -630,8 +728,8 @@ export function buildPackingProfile(
 	});
 	const profile: EvidencePackingProfile = {
 		docId: candidateRecall.docId,
-		path: getDocPath(base, candidateRecall.docId),
-		stableKey: getDocStableKey(base, candidateRecall.docId),
+		path: getLiveDocPath(base, candidateRecall.liveDocSlot),
+		stableKey: getLiveDocStableKey(base, candidateRecall.liveDocSlot),
 		surfaceCoverageShapeKey: queryAnalysis.surfaceCoverageShapeKey,
 		realizedCoverageCount: realizedFamilies.length,
 		coverageGate,
@@ -680,42 +778,193 @@ export function buildPackingProfile(
 	return profile;
 }
 
+export function hydrateCandidateEvidence(
+	base: ResidentBase,
+	candidateRecall: V3CandidateDocRecall,
+	source?: CandidateEvidenceHydrationSource | null,
+): CandidateEvidencePackage {
+	return {
+		docEvidence:
+			source?.hanWitnessSidecar == null
+				? getCachedDocEvidence(base, candidateRecall.liveDocSlot)
+				: buildDocEvidenceFromSource(base, candidateRecall.liveDocSlot, source),
+		bodyBlockEvidenceByBlockId: new Map(
+			candidateRecall.shortlistedBodyBlockIds.map((blockId) => [
+				blockId,
+				source == null
+					? getCachedBodyBlockEvidence(base, blockId)
+					: buildBodyBlockEvidenceFromSource(base, blockId, source),
+			]),
+		),
+	};
+}
+
+export function hydrateCandidateEvidenceBatch(
+	base: ResidentBase,
+	candidateRecalls: readonly V3CandidateDocRecall[],
+	source?: CandidateEvidenceHydrationSource | null,
+): ReadonlyMap<number, CandidateEvidencePackage> {
+	const hydratedByDocId = new Map<number, CandidateEvidencePackage>();
+	for (const candidateRecall of candidateRecalls) {
+		hydratedByDocId.set(
+			candidateRecall.docId,
+			hydrateCandidateEvidence(base, candidateRecall, source),
+		);
+	}
+	return hydratedByDocId;
+}
+
 function getCachedDocEvidence(
 	base: ResidentBase,
-	docId: number,
-): CachedDocEvidence {
+	liveDocSlot: number,
+): CandidateDocEvidence {
 	let cache = DOC_EVIDENCE_CACHE.get(base);
 	if (cache == null) {
-		cache = new Map<number, CachedDocEvidence>();
+		cache = new Map<number, CandidateDocEvidence>();
 		DOC_EVIDENCE_CACHE.set(base, cache);
 	}
-	const existing = cache.get(docId);
+	const existing = cache.get(liveDocSlot);
 	if (existing != null) {
 		return existing;
 	}
-	const created: CachedDocEvidence = {
-		identityFamilyIds: getDocIdentityFamilyIds(base, docId),
-		routeFamilyIds: getDocRouteFamilyIds(base, docId),
-		headingFamilyIds: getDocHeadingFamilyIds(base, docId),
-		identitySourceMaskByFamilyId: buildMetadataSourceMaskByFamilyId(
-			getDocIdentityFamilyIds(base, docId),
-			getDocIdentitySourceMasks(base, docId),
-		),
-		routeSourceMaskByFamilyId: buildMetadataSourceMaskByFamilyId(
-			getDocRouteFamilyIds(base, docId),
-			getDocRouteSourceMasks(base, docId),
-		),
-		identityWitnessStringIds: getDocIdentityHanWitnessStringIds(base, docId),
-		routeWitnessStringIds: getDocRouteHanWitnessStringIds(base, docId),
-		headingWitnessStringIds: getDocHeadingHanWitnessStringIds(base, docId),
-		identityWitnessTexts: getDocIdentityHanWitnessTexts(base, docId),
-		identityWitnessSourceMasks: getDocIdentityHanWitnessSourceMasks(base, docId),
-		routeWitnessTexts: getDocRouteHanWitnessTexts(base, docId),
-		routeWitnessSourceMasks: getDocRouteHanWitnessSourceMasks(base, docId),
-		headingWitnessTexts: getDocHeadingHanWitnessTexts(base, docId),
+	const identityFamilyIds = getLiveDocIdentityFamilyIds(base, liveDocSlot);
+	const routeFamilyIds = getLiveDocRouteFamilyIds(base, liveDocSlot);
+	const headingFamilyIds = getLiveDocHeadingFamilyIds(base, liveDocSlot);
+	const identityWitnessStringIds = getLiveDocIdentityHanWitnessStringIds(
+		base,
+		liveDocSlot,
+	);
+	const routeWitnessStringIds = getLiveDocRouteHanWitnessStringIds(
+		base,
+		liveDocSlot,
+	);
+	const headingWitnessStringIds = getLiveDocHeadingHanWitnessStringIds(
+		base,
+		liveDocSlot,
+	);
+	const identitySourceMaskByFamilyId = buildMetadataSourceMaskByFamilyId(
+		identityFamilyIds,
+		getLiveDocIdentitySourceMasks(base, liveDocSlot),
+	);
+	const routeSourceMaskByFamilyId = buildMetadataSourceMaskByFamilyId(
+		routeFamilyIds,
+		getLiveDocRouteSourceMasks(base, liveDocSlot),
+	);
+	const created: CandidateDocEvidence = {
+		identityFamilyIds,
+		routeFamilyIds,
+		headingFamilyIds,
+		identityShardLocalFamilySlots: [
+			...identityFamilyIds,
+			...identityWitnessStringIds.map(encodeWitnessMatchFamilyId),
+		].map((familyId) => getShardLocalFamilySlot(base, familyId)),
+		routeShardLocalFamilySlots: [
+			...routeFamilyIds,
+			...routeWitnessStringIds.map(encodeWitnessMatchFamilyId),
+		].map((familyId) => getShardLocalFamilySlot(base, familyId)),
+		headingShardLocalFamilySlots: [
+			...headingFamilyIds,
+			...headingWitnessStringIds.map(encodeWitnessMatchFamilyId),
+		].map((familyId) => getShardLocalFamilySlot(base, familyId)),
+		identitySourceMaskByFamilyId,
+		routeSourceMaskByFamilyId,
+		identitySourceMaskByShardLocalFamilySlot:
+			buildMetadataSourceMaskByShardLocalFamilySlot(
+				base,
+				identitySourceMaskByFamilyId,
+			),
+		routeSourceMaskByShardLocalFamilySlot:
+			buildMetadataSourceMaskByShardLocalFamilySlot(
+				base,
+				routeSourceMaskByFamilyId,
+			),
+		identityWitnessStringIds,
+		routeWitnessStringIds,
+		headingWitnessStringIds,
+		identityWitnessTexts: getLiveDocIdentityHanWitnessTexts(base, liveDocSlot),
+		identityWitnessSourceMasks: getLiveDocIdentityHanWitnessSourceMasks(base, liveDocSlot),
+		routeWitnessTexts: getLiveDocRouteHanWitnessTexts(base, liveDocSlot),
+		routeWitnessSourceMasks: getLiveDocRouteHanWitnessSourceMasks(base, liveDocSlot),
+		headingWitnessTexts: getLiveDocHeadingHanWitnessTexts(base, liveDocSlot),
 	};
-	cache.set(docId, created);
+	cache.set(liveDocSlot, created);
 	return created;
+}
+
+function buildDocEvidenceFromSource(
+	base: ResidentBase,
+	liveDocSlot: number,
+	source: CandidateEvidenceHydrationSource,
+): CandidateDocEvidence {
+	const prehydratedHanDocEvidence =
+		source.docHanEvidenceByLiveDocSlot?.get(liveDocSlot);
+	const identityFamilyIds = getLiveDocIdentityFamilyIds(base, liveDocSlot);
+	const routeFamilyIds = getLiveDocRouteFamilyIds(base, liveDocSlot);
+	const headingFamilyIds = getLiveDocHeadingFamilyIds(base, liveDocSlot);
+	const identityWitnessStringIds =
+		prehydratedHanDocEvidence?.identityWitnessStringIds ??
+		getLiveDocIdentityHanWitnessStringIds(base, liveDocSlot);
+	const routeWitnessStringIds =
+		prehydratedHanDocEvidence?.routeWitnessStringIds ??
+		getLiveDocRouteHanWitnessStringIds(base, liveDocSlot);
+	const headingWitnessStringIds =
+		prehydratedHanDocEvidence?.headingWitnessStringIds ??
+		getLiveDocHeadingHanWitnessStringIds(base, liveDocSlot);
+	const identitySourceMaskByFamilyId = buildMetadataSourceMaskByFamilyId(
+		identityFamilyIds,
+		getLiveDocIdentitySourceMasks(base, liveDocSlot),
+	);
+	const routeSourceMaskByFamilyId = buildMetadataSourceMaskByFamilyId(
+		routeFamilyIds,
+		getLiveDocRouteSourceMasks(base, liveDocSlot),
+	);
+	return {
+		identityFamilyIds,
+		routeFamilyIds,
+		headingFamilyIds,
+		identityShardLocalFamilySlots: [
+			...identityFamilyIds,
+			...identityWitnessStringIds.map(encodeWitnessMatchFamilyId),
+		].map((familyId) => getShardLocalFamilySlot(base, familyId)),
+		routeShardLocalFamilySlots: [
+			...routeFamilyIds,
+			...routeWitnessStringIds.map(encodeWitnessMatchFamilyId),
+		].map((familyId) => getShardLocalFamilySlot(base, familyId)),
+		headingShardLocalFamilySlots: [
+			...headingFamilyIds,
+			...headingWitnessStringIds.map(encodeWitnessMatchFamilyId),
+		].map((familyId) => getShardLocalFamilySlot(base, familyId)),
+		identitySourceMaskByFamilyId,
+		routeSourceMaskByFamilyId,
+		identitySourceMaskByShardLocalFamilySlot:
+			buildMetadataSourceMaskByShardLocalFamilySlot(
+				base,
+				identitySourceMaskByFamilyId,
+			),
+		routeSourceMaskByShardLocalFamilySlot:
+			buildMetadataSourceMaskByShardLocalFamilySlot(
+				base,
+				routeSourceMaskByFamilyId,
+			),
+		identityWitnessStringIds,
+		routeWitnessStringIds,
+		headingWitnessStringIds,
+		identityWitnessTexts: (
+			identityWitnessStringIds
+		).map((stringId) => readResidentString(base, stringId)),
+		identityWitnessSourceMasks:
+			prehydratedHanDocEvidence?.identityWitnessSourceMasks ??
+			getLiveDocIdentityHanWitnessSourceMasks(base, liveDocSlot),
+		routeWitnessTexts: (
+			routeWitnessStringIds
+		).map((stringId) => readResidentString(base, stringId)),
+		routeWitnessSourceMasks:
+			prehydratedHanDocEvidence?.routeWitnessSourceMasks ??
+			getLiveDocRouteHanWitnessSourceMasks(base, liveDocSlot),
+		headingWitnessTexts: (
+			headingWitnessStringIds
+		).map((stringId) => readResidentString(base, stringId)),
+	};
 }
 
 function buildMetadataSourceMaskByFamilyId(
@@ -732,13 +981,20 @@ function buildMetadataSourceMaskByFamilyId(
 	return sourceMaskByFamilyId;
 }
 
+function buildMetadataSourceMaskByShardLocalFamilySlot(
+	base: ResidentBase,
+	sourceMaskByFamilyId: ReadonlyMap<number, number>,
+): ReadonlyMap<number, number> {
+	return remapFamilySourceMaskMapToShardLocalSlots(base, sourceMaskByFamilyId);
+}
+
 function getCachedBodyBlockEvidence(
 	base: ResidentBase,
 	blockId: number,
-): CachedBodyBlockEvidence {
+): CandidateBodyBlockEvidence {
 	let cache = BODY_BLOCK_EVIDENCE_CACHE.get(base);
 	if (cache == null) {
-		cache = new Map<number, CachedBodyBlockEvidence>();
+		cache = new Map<number, CandidateBodyBlockEvidence>();
 		BODY_BLOCK_EVIDENCE_CACHE.set(base, cache);
 	}
 	const existing = cache.get(blockId);
@@ -758,13 +1014,22 @@ function getCachedBodyBlockEvidence(
 		getPositionedOccurrenceSpan(exactOccurrences),
 		getPositionedOccurrenceSpan(witnessOccurrences),
 	);
-	const created: CachedBodyBlockEvidence = {
+	const familySupportMaskByFamilyId = new Map(
+		getBodyBlockFamilySupportEntries(base, blockId).map((entry) => [
+			entry.familyId,
+			entry.supportMask,
+		]),
+	);
+	const created: CandidateBodyBlockEvidence = {
 		exactOccurrences,
 		witnessOccurrences,
 		witnessTexts,
-		familySupportMaskByFamilyId: new Map(
-			getBodyBlockFamilySupportEntries(base, blockId).map((entry) => [entry.familyId, entry.supportMask]),
-		),
+		familySupportMaskByFamilyId,
+		familySupportMaskByShardLocalFamilySlot:
+			remapFamilySourceMaskMapToShardLocalSlots(
+				base,
+				familySupportMaskByFamilyId,
+			),
 		approxSpan,
 		ordinalSpan: Math.max(1, exactOccurrences.length, witnessOccurrences.length),
 		weightedGapIndex: buildWeightedGapIndexFromSegments(
@@ -780,7 +1045,336 @@ function getCachedBodyBlockEvidence(
 	};
 	cache.set(blockId, created);
 	return created;
+}
+
+function buildBodyBlockEvidenceFromSource(
+	base: ResidentBase,
+	blockId: number,
+	source: CandidateEvidenceHydrationSource,
+): CandidateBodyBlockEvidence {
+	const prehydratedBodyEvidence = source.bodyEvidenceByBlockId?.get(blockId);
+	const prehydratedHanBodyEvidence = source.bodyHanEvidenceByBlockId?.get(blockId);
+	const exactOccurrences = buildExactPositionedOccurrences(
+		base,
+		prehydratedBodyEvidence?.exactFamilyIds ??
+			readBodyBlockExactFamilyIds(base, blockId, source.exactTapeSidecar),
+		prehydratedBodyEvidence?.exactTokenPositions ??
+			readBodyBlockExactTokenPositions(base, blockId, source.exactTapeSidecar),
+	);
+	const rawWitnessOccurrences = readBodyBlockHanWitnessOccurrences(
+		base,
+		blockId,
+		prehydratedHanBodyEvidence?.bodyWitnessStringIds,
+		prehydratedHanBodyEvidence?.bodyWitnessStartOffsets,
+		source.hanWitnessSidecar,
+	);
+	const witnessOccurrences = buildWitnessPositionedOccurrences(base, rawWitnessOccurrences);
+	const witnessTexts = readBodyBlockHanWitnessTexts(
+		base,
+		blockId,
+		prehydratedHanBodyEvidence?.bodyWitnessStringIds,
+		source.hanWitnessSidecar,
+	);
+	const approxSpan = Math.max(
+		1,
+		getPositionedOccurrenceSpan(exactOccurrences),
+		getPositionedOccurrenceSpan(witnessOccurrences),
+	);
+	const familySupportMaskByFamilyId = new Map(
+		(
+			prehydratedBodyEvidence?.familySupportEntries ??
+			readBodyBlockFamilySupportEntries(
+				base,
+				blockId,
+				source.bodyFamilySupportSidecar,
+			)
+		).map((entry) => [entry.familyId, entry.supportMask]),
+	);
+	return {
+		exactOccurrences,
+		witnessOccurrences,
+		witnessTexts,
+		familySupportMaskByFamilyId,
+		familySupportMaskByShardLocalFamilySlot:
+			remapFamilySourceMaskMapToShardLocalSlots(
+				base,
+				familySupportMaskByFamilyId,
+			),
+		approxSpan,
+		ordinalSpan: Math.max(1, exactOccurrences.length, witnessOccurrences.length),
+		weightedGapIndex: buildWeightedGapIndexFromSegments(
+			approxSpan,
+			rawWitnessOccurrences
+				.map((occurrence, index) => ({
+					start: occurrence.start,
+					text: witnessTexts[index] ?? "",
+				}))
+				.filter((segment) => segment.text.length > 0),
+		),
+		singletonCharPositionsByChar: new Map<string, readonly number[]>(),
+	};
+}
+
+function readBodyBlockExactFamilyIds(
+	base: ResidentBase,
+	blockId: number,
+	exactTapeSidecar?: ResidentExactTapeSidecar | null,
+): number[] {
+	if (exactTapeSidecar == null) {
+		return getBodyBlockExactFamilyIds(base, blockId);
 	}
+	return sliceResidentIntegerArray(
+		exactTapeSidecar.familyIds,
+		base.bodyBlocks.exactTapeStartByBlockId[blockId] ?? 0,
+		(base.bodyBlocks.exactTapeStartByBlockId[blockId] ?? 0) +
+			(base.bodyBlocks.exactTapeCountByBlockId[blockId] ?? 0),
+	);
+}
+
+function readBodyBlockExactTokenPositions(
+	base: ResidentBase,
+	blockId: number,
+	exactTapeSidecar?: ResidentExactTapeSidecar | null,
+): number[] {
+	if (exactTapeSidecar == null) {
+		return getBodyBlockExactTokenPositions(base, blockId);
+	}
+	const count = base.bodyBlocks.exactTapeCountByBlockId[blockId] ?? 0;
+	return decodeBlockPositionLane(exactTapeSidecar, blockId, count);
+}
+
+function readBodyBlockFamilySupportEntries(
+	base: ResidentBase,
+	blockId: number,
+	bodyFamilySupportSidecar?: ResidentBodyFamilySupportSidecar | null,
+): ReadonlyArray<Readonly<{ familyId: number; supportMask: number }>> {
+	if (bodyFamilySupportSidecar == null) {
+		return getBodyBlockFamilySupportEntries(base, blockId);
+	}
+	const start = getSentinelSliceStart(
+		bodyFamilySupportSidecar.familySupportStartByBlockId,
+		blockId,
+	);
+	const end = getSentinelSliceEnd(
+		bodyFamilySupportSidecar.familySupportStartByBlockId,
+		blockId,
+	);
+	const familyIds = sliceResidentIntegerArray(
+		bodyFamilySupportSidecar.familySupportFamilyIds,
+		start,
+		end,
+	);
+	return familyIds.map((familyId, index) => ({
+		familyId,
+		supportMask: bodyFamilySupportSidecar.familySupportMaskByEntry[start + index] ?? 0,
+	}));
+}
+
+function readDocIdentityHanWitnessStringIds(
+	base: ResidentBase,
+	docId: number,
+	hanWitnessSidecar?: ResidentHanWitnessSidecar | null,
+): number[] {
+	if (hanWitnessSidecar == null) {
+		return getDocIdentityHanWitnessStringIds(base, docId);
+	}
+	return sliceSentinelBucket(
+		hanWitnessSidecar.identityWitnessStartByDocId,
+		hanWitnessSidecar.identityWitnessStringIds,
+		docId,
+	);
+}
+
+function readDocIdentityHanWitnessSourceMasks(
+	base: ResidentBase,
+	docId: number,
+	hanWitnessSidecar?: ResidentHanWitnessSidecar | null,
+): number[] {
+	if (hanWitnessSidecar == null) {
+		return getDocIdentityHanWitnessSourceMasks(base, docId);
+	}
+	const start = hanWitnessSidecar.identityWitnessStartByDocId[docId] ?? 0;
+	const end = hanWitnessSidecar.identityWitnessStartByDocId[docId + 1] ?? start;
+	return Array.from(
+		hanWitnessSidecar.identityWitnessSourceMaskByDocEntry.slice(start, end),
+	);
+}
+
+function readDocIdentityHanWitnessTexts(
+	base: ResidentBase,
+	docId: number,
+	hanWitnessSidecar?: ResidentHanWitnessSidecar | null,
+): string[] {
+	if (hanWitnessSidecar == null) {
+		return getDocIdentityHanWitnessTexts(base, docId);
+	}
+	return readDocIdentityHanWitnessStringIds(base, docId, hanWitnessSidecar).map(
+		(stringId) => readResidentString(base, stringId),
+	);
+}
+
+function readDocRouteHanWitnessStringIds(
+	base: ResidentBase,
+	docId: number,
+	hanWitnessSidecar?: ResidentHanWitnessSidecar | null,
+): number[] {
+	if (hanWitnessSidecar == null) {
+		return getDocRouteHanWitnessStringIds(base, docId);
+	}
+	return sliceSentinelBucket(
+		hanWitnessSidecar.routeWitnessStartByDocId,
+		hanWitnessSidecar.routeWitnessStringIds,
+		docId,
+	);
+}
+
+function readDocRouteHanWitnessSourceMasks(
+	base: ResidentBase,
+	docId: number,
+	hanWitnessSidecar?: ResidentHanWitnessSidecar | null,
+): number[] {
+	if (hanWitnessSidecar == null) {
+		return getDocRouteHanWitnessSourceMasks(base, docId);
+	}
+	const start = hanWitnessSidecar.routeWitnessStartByDocId[docId] ?? 0;
+	const end = hanWitnessSidecar.routeWitnessStartByDocId[docId + 1] ?? start;
+	return Array.from(
+		hanWitnessSidecar.routeWitnessSourceMaskByDocEntry.slice(start, end),
+	);
+}
+
+function readDocRouteHanWitnessTexts(
+	base: ResidentBase,
+	docId: number,
+	hanWitnessSidecar?: ResidentHanWitnessSidecar | null,
+): string[] {
+	if (hanWitnessSidecar == null) {
+		return getDocRouteHanWitnessTexts(base, docId);
+	}
+	return readDocRouteHanWitnessStringIds(base, docId, hanWitnessSidecar).map(
+		(stringId) => readResidentString(base, stringId),
+	);
+}
+
+function readDocHeadingHanWitnessStringIds(
+	base: ResidentBase,
+	docId: number,
+	hanWitnessSidecar?: ResidentHanWitnessSidecar | null,
+): number[] {
+	if (hanWitnessSidecar == null) {
+		return getDocHeadingHanWitnessStringIds(base, docId);
+	}
+	return sliceSentinelBucket(
+		hanWitnessSidecar.headingWitnessStartByDocId,
+		hanWitnessSidecar.headingWitnessStringIds,
+		docId,
+	);
+}
+
+function readDocHeadingHanWitnessTexts(
+	base: ResidentBase,
+	docId: number,
+	hanWitnessSidecar?: ResidentHanWitnessSidecar | null,
+): string[] {
+	if (hanWitnessSidecar == null) {
+		return getDocHeadingHanWitnessTexts(base, docId);
+	}
+	return readDocHeadingHanWitnessStringIds(base, docId, hanWitnessSidecar).map(
+		(stringId) => readResidentString(base, stringId),
+	);
+}
+
+function readBodyBlockHanWitnessStringIds(
+	base: ResidentBase,
+	blockId: number,
+	hanWitnessSidecar?: ResidentHanWitnessSidecar | null,
+): number[] {
+	if (hanWitnessSidecar == null) {
+		return getBodyBlockHanWitnessStringIds(base, blockId);
+	}
+	return sliceSentinelBucket(
+		hanWitnessSidecar.bodyWitnessOccurrenceStartByBlockId,
+		hanWitnessSidecar.bodyWitnessOccurrenceStringIds,
+		blockId,
+	);
+}
+
+function readBodyBlockHanWitnessStartOffsets(
+	base: ResidentBase,
+	blockId: number,
+	hanWitnessSidecar?: ResidentHanWitnessSidecar | null,
+): number[] {
+	if (hanWitnessSidecar == null) {
+		return getBodyBlockHanWitnessStartOffsets(base, blockId);
+	}
+	const count =
+		(hanWitnessSidecar.bodyWitnessOccurrenceStartByBlockId[blockId + 1] ?? 0) -
+		(hanWitnessSidecar.bodyWitnessOccurrenceStartByBlockId[blockId] ?? 0);
+	return decodeBlockPositionLane(
+		{
+			positionEncodingByBlockId:
+				hanWitnessSidecar.bodyWitnessPositionEncodingByBlockId,
+			positionStartByBlockId:
+				hanWitnessSidecar.bodyWitnessPositionStartByBlockId,
+			positionDeltaU8Tape: hanWitnessSidecar.bodyWitnessPositionDeltaU8Tape,
+			positionDeltaU16Tape:
+				hanWitnessSidecar.bodyWitnessPositionDeltaU16Tape,
+			positionDeltaU32Tape:
+				hanWitnessSidecar.bodyWitnessPositionDeltaU32Tape,
+		},
+		blockId,
+		count,
+	);
+}
+
+function readBodyBlockHanWitnessOccurrences(
+	base: ResidentBase,
+	blockId: number,
+	prehydratedStringIds?: readonly number[] | null,
+	prehydratedStartOffsets?: readonly number[] | null,
+	hanWitnessSidecar?: ResidentHanWitnessSidecar | null,
+): BodyHanWitnessOccurrence[] {
+	if (prehydratedStringIds != null && prehydratedStartOffsets != null) {
+		return prehydratedStringIds.map((stringId, index) => ({
+			stringId,
+			start: prehydratedStartOffsets[index] ?? 0,
+		}));
+	}
+	if (hanWitnessSidecar == null) {
+		return getBodyBlockHanWitnessOccurrences(base, blockId);
+	}
+	const stringIds = readBodyBlockHanWitnessStringIds(
+		base,
+		blockId,
+		hanWitnessSidecar,
+	);
+	const starts = readBodyBlockHanWitnessStartOffsets(
+		base,
+		blockId,
+		hanWitnessSidecar,
+	);
+	return stringIds.map((stringId, index) => ({
+		stringId,
+		start: starts[index] ?? 0,
+	}));
+}
+
+function readBodyBlockHanWitnessTexts(
+	base: ResidentBase,
+	blockId: number,
+	prehydratedStringIds?: readonly number[] | null,
+	hanWitnessSidecar?: ResidentHanWitnessSidecar | null,
+): string[] {
+	if (prehydratedStringIds != null) {
+		return prehydratedStringIds.map((stringId) => readResidentString(base, stringId));
+	}
+	if (hanWitnessSidecar == null) {
+		return getBodyBlockHanWitnessTexts(base, blockId);
+	}
+	return readBodyBlockHanWitnessStringIds(base, blockId, hanWitnessSidecar).map(
+		(stringId) => readResidentString(base, stringId),
+	);
+}
 
 function buildSyntheticMetadataQueryUnitIndex(
 	baseQueryUnitCount: number,
@@ -838,22 +1432,30 @@ function routeContainerProvidesNovelCoverage(
 }
 
 function collectBlockOccurrences(
+	base: ResidentBase,
 	blockId: number,
 	unitIndex: number,
 	matches: readonly V3QueryFamilyMatch[],
 	positionedOccurrences: readonly PositionedFamilyOccurrence[],
 ): BodyOccurrence[] {
+	const matchByShardLocalFamilySlot = new Map<number, V3QueryFamilyMatch>();
+	for (const match of matches) {
+		matchByShardLocalFamilySlot.set(match.shardLocalFamilySlot, match);
+	}
 	const occurrences: BodyOccurrence[] = [];
 	for (const positionedOccurrence of positionedOccurrences) {
-		const familyId = positionedOccurrence.familyId;
-		const match = matches.find((candidate) => candidate.familyId === familyId);
+		const match = matchByShardLocalFamilySlot.get(
+			positionedOccurrence.shardLocalFamilySlot,
+		);
 		if (match == null) {
 			continue;
 		}
+		const shardLocalFamilySlot = positionedOccurrence.shardLocalFamilySlot;
 		occurrences.push({
 			blockId,
 			unitIndex,
 			match,
+			shardLocalFamilySlot,
 			ordinalPosition: positionedOccurrence.ordinalPosition,
 			localPosition: positionedOccurrence.localPosition,
 			localEndPosition: positionedOccurrence.localEndPosition,
@@ -876,6 +1478,7 @@ function buildExactPositionedOccurrences(
 		const localPosition = tokenPositions[index] ?? fallbackCursor;
 		const occurrence = {
 			familyId,
+			shardLocalFamilySlot: getShardLocalFamilySlot(base, familyId),
 			ordinalPosition: index,
 			localPosition,
 			localEndPosition: localPosition + approxLength,
@@ -890,9 +1493,11 @@ function buildWitnessPositionedOccurrences(
 	occurrences: ReadonlyArray<Readonly<{ stringId: number; start: number }>>,
 ): PositionedFamilyOccurrence[] {
 	return occurrences.map((occurrence, index) => {
+		const familyId = encodeWitnessMatchFamilyId(occurrence.stringId);
 		const approxLength = Math.max(1, base.stringArena.lengths[occurrence.stringId] ?? 0);
 		return {
-			familyId: encodeWitnessMatchFamilyId(occurrence.stringId),
+			familyId,
+			shardLocalFamilySlot: getShardLocalFamilySlot(base, familyId),
 			ordinalPosition: index,
 			localPosition: occurrence.start,
 			localEndPosition: occurrence.start + approxLength,
@@ -961,7 +1566,7 @@ function compareBodyOccurrenceOrder(left: BodyOccurrence, right: BodyOccurrence)
 	if (left.unitIndex !== right.unitIndex) {
 		return left.unitIndex - right.unitIndex;
 	}
-	return left.match.familyId - right.match.familyId;
+	return left.shardLocalFamilySlot - right.shardLocalFamilySlot;
 }
 
 function chooseBestBodyWindow(
@@ -969,7 +1574,7 @@ function chooseBestBodyWindow(
 	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>,
 	bodyApproxSpanByBlockId: ReadonlyMap<number, number>,
 	bodyOrdinalSpanByBlockId: ReadonlyMap<number, number>,
-	headingFamilyIds: ReadonlySet<number>,
+	headingShardLocalFamilySlots: ReadonlySet<number>,
 	options?: Readonly<{
 		minDistinctUnitCount?: number;
 	}>,
@@ -992,7 +1597,7 @@ function chooseBestBodyWindow(
 	for (const scope of prefilteredScopes) {
 		const candidate = buildBodyWindowCandidateFromVirtualOccurrences(
 			scope.virtualOccurrences,
-			headingFamilyIds,
+			headingShardLocalFamilySlots,
 			options?.minDistinctUnitCount ?? 2,
 		);
 		if (candidate == null) {
@@ -1009,7 +1614,7 @@ function chooseBestBodyWindow(
 
 function buildBodyWindowCandidateFromVirtualOccurrences(
 	virtualOccurrences: readonly BodyOccurrence[],
-	headingFamilyIds: ReadonlySet<number>,
+	headingShardLocalFamilySlots: ReadonlySet<number>,
 	minDistinctUnitCount = 2,
 ): BodyWindowCandidate | null {
 	if (virtualOccurrences.length === 0) {
@@ -1042,7 +1647,7 @@ function buildBodyWindowCandidateFromVirtualOccurrences(
 				bestSnapshot = snapshotBodyWindowShortlistState(state);
 				bestWindow = materializeBodyWindowCandidateFromShortlistState(
 					state,
-					headingFamilyIds,
+					headingShardLocalFamilySlots,
 				);
 			}
 		}
@@ -1327,7 +1932,7 @@ function removeRepresentativeByVirtualOrder(
 			candidate.virtualPosition === occurrence.virtualPosition &&
 			candidate.virtualEndPosition === occurrence.virtualEndPosition &&
 			candidate.blockId === occurrence.blockId &&
-			candidate.match.familyId === occurrence.match.familyId,
+			candidate.shardLocalFamilySlot === occurrence.shardLocalFamilySlot,
 	);
 	if (fallbackIndex >= 0) {
 		representativesByVirtualOrder.splice(fallbackIndex, 1);
@@ -1488,7 +2093,7 @@ function compareBodyScopePrefilter(left: BodyScopePrefilter, right: BodyScopePre
 
 function summarizeWindowCandidate(
 	windowOccurrences: readonly BodyOccurrence[],
-	headingFamilyIds: ReadonlySet<number>,
+	headingShardLocalFamilySlots: ReadonlySet<number>,
 ): BodyWindowCandidate | null {
 	if (windowOccurrences.length === 0) {
 		return null;
@@ -1504,12 +2109,15 @@ function summarizeWindowCandidate(
 	for (const representative of representativeByUnit.values()) {
 		insertBodyWindowRepresentative(state, representative);
 	}
-	return materializeBodyWindowCandidateFromShortlistState(state, headingFamilyIds);
+	return materializeBodyWindowCandidateFromShortlistState(
+		state,
+		headingShardLocalFamilySlots,
+	);
 }
 
 function materializeBodyWindowCandidateFromShortlistState(
 	state: BodyWindowSearchState,
-	headingFamilyIds: ReadonlySet<number>,
+	headingShardLocalFamilySlots: ReadonlySet<number>,
 ): BodyWindowCandidate | null {
 	const representatives = [...state.representativesByVirtualOrder];
 	const coveredUnitIndices = [...state.coveredUnitIndicesSorted];
@@ -1521,7 +2129,7 @@ function materializeBodyWindowCandidateFromShortlistState(
 		const representative = state.representativeByUnit.get(unitIndex);
 		return (
 			representative != null &&
-			headingFamilyIds.has(representative.match.familyId)
+			headingShardLocalFamilySlots.has(representative.shardLocalFamilySlot)
 		);
 	});
 	return {
@@ -1596,7 +2204,7 @@ function compareOccurrenceRepresentative(left: BodyOccurrence, right: BodyOccurr
 	if (left.blockId !== right.blockId) {
 		return left.blockId - right.blockId;
 	}
-	return left.match.familyId - right.match.familyId;
+	return left.shardLocalFamilySlot - right.shardLocalFamilySlot;
 }
 
 function passesBodyWindowShortlistAdmission(
@@ -1689,8 +2297,10 @@ function compareBodyWindowRepresentativeOrder(
 		if (left[index].blockId !== right[index].blockId) {
 			return left[index].blockId - right[index].blockId;
 		}
-		if (left[index].match.familyId !== right[index].match.familyId) {
-			return left[index].match.familyId - right[index].match.familyId;
+		const leftShardLocalFamilySlot = left[index].shardLocalFamilySlot;
+		const rightShardLocalFamilySlot = right[index].shardLocalFamilySlot;
+		if (leftShardLocalFamilySlot !== rightShardLocalFamilySlot) {
+			return leftShardLocalFamilySlot - rightShardLocalFamilySlot;
 		}
 	}
 	return left.length - right.length;
@@ -1735,6 +2345,7 @@ function toBlockShortlistItem(
 		(representative) => ({
 			queryUnitIndex: representative.unitIndex,
 			familyId: representative.match.familyId,
+			shardLocalFamilySlot: representative.shardLocalFamilySlot,
 			familyText: representative.match.familyText,
 			matchKind: representative.match.matchKind,
 			blockId: representative.blockId,
@@ -1802,39 +2413,52 @@ function isCompoundPrefixFamily(family: RealizedQueryUnitFamily): boolean {
 
 function selectRealizedFamilyForUnit(params: Readonly<{
 	unitMatches: V3QueryUnitFamilyMatches;
-	identityFamilyIds: ReadonlySet<number>;
-	routeFamilyIds: ReadonlySet<number>;
-	headingFamilyIds: ReadonlySet<number>;
-	identitySourceMaskByFamilyId: ReadonlyMap<number, number>;
-	routeSourceMaskByFamilyId: ReadonlyMap<number, number>;
-	bodyBlockIdsByUnitFamily: ReadonlyMap<number, ReadonlyMap<number, ReadonlySet<number>>>;
-	bodySupportMaskByUnitFamily: ReadonlyMap<number, ReadonlyMap<number, number>>;
+	identityShardLocalFamilySlots: ReadonlySet<number>;
+	routeShardLocalFamilySlots: ReadonlySet<number>;
+	headingShardLocalFamilySlots: ReadonlySet<number>;
+	identitySourceMaskByShardLocalFamilySlot: ReadonlyMap<number, number>;
+	routeSourceMaskByShardLocalFamilySlot: ReadonlyMap<number, number>;
+	bodyBlockIdsByUnitFamilySlot: ReadonlyMap<
+		number,
+		ReadonlyMap<number, ReadonlySet<number>>
+	>;
+	bodySupportMaskByUnitFamilySlot: ReadonlyMap<number, ReadonlyMap<number, number>>;
 	bestBodyWindowBlockIds: ReadonlySet<number>;
 }>): RealizedQueryUnitFamily | null {
-	const unitBodySupport = params.bodyBlockIdsByUnitFamily.get(params.unitMatches.queryUnitIndex);
-	const unitBodySupportMasks = params.bodySupportMaskByUnitFamily.get(
+	const unitBodySupport = params.bodyBlockIdsByUnitFamilySlot.get(
+		params.unitMatches.queryUnitIndex,
+	);
+	const unitBodySupportMasks = params.bodySupportMaskByUnitFamilySlot.get(
 		params.unitMatches.queryUnitIndex,
 	);
 	const candidates = params.unitMatches.matches
 		.map((match) => {
-			const bodyBlockIds = [...(unitBodySupport?.get(match.familyId) ?? [])];
+			const shardLocalFamilySlot = match.shardLocalFamilySlot;
+			const bodyBlockIds = [...(unitBodySupport?.get(shardLocalFamilySlot) ?? [])];
 			const inBestBodyWindow = bodyBlockIds.some((blockId) =>
 				params.bestBodyWindowBlockIds.has(blockId),
 			);
 			const inBodyResidue = bodyBlockIds.some(
 				(blockId) => !params.bestBodyWindowBlockIds.has(blockId),
 			);
-			const inIdentity = params.identityFamilyIds.has(match.familyId);
-			const inRoute = params.routeFamilyIds.has(match.familyId);
-			const inHeading = params.headingFamilyIds.has(match.familyId);
+			const inIdentity =
+				params.identityShardLocalFamilySlots.has(shardLocalFamilySlot);
+			const inRoute =
+				params.routeShardLocalFamilySlots.has(shardLocalFamilySlot);
+			const inHeading =
+				params.headingShardLocalFamilySlots.has(shardLocalFamilySlot);
 			const identityMetadataSource = decodeIdentityMetadataSource(
-				params.identitySourceMaskByFamilyId.get(match.familyId) ?? 0,
+				params.identitySourceMaskByShardLocalFamilySlot.get(
+					shardLocalFamilySlot,
+				) ?? 0,
 			);
 			const routeMetadataSource = decodeRouteMetadataSource(
-				params.routeSourceMaskByFamilyId.get(match.familyId) ?? 0,
+				params.routeSourceMaskByShardLocalFamilySlot.get(
+					shardLocalFamilySlot,
+				) ?? 0,
 			);
 			const bodyPrefixSupportKind = resolveBodyPrefixSupportKind(
-				unitBodySupportMasks?.get(match.familyId) ?? 0,
+				unitBodySupportMasks?.get(shardLocalFamilySlot) ?? 0,
 			);
 			const baseSupportScore =
 				(inIdentity ? 8 : 0) +
@@ -1885,6 +2509,7 @@ function selectRealizedFamilyForUnit(params: Readonly<{
 		queryUnitText: params.unitMatches.queryUnitText,
 		querySurfaceGroupIndex: params.unitMatches.querySurfaceGroupIndex,
 		familyId: best.match.familyId,
+		shardLocalFamilySlot: best.match.shardLocalFamilySlot,
 		familyText: best.match.familyText,
 		matchKind: best.match.matchKind,
 		editDistance: best.match.editDistance,
@@ -1898,6 +2523,22 @@ function selectRealizedFamilyForUnit(params: Readonly<{
 		inBestBodyWindow: best.inBestBodyWindow,
 		inBodyResidue: best.inBodyResidue,
 	};
+}
+
+function remapFamilySourceMaskMapToShardLocalSlots(
+	base: ResidentBase,
+	sourceMaskByFamilyId: ReadonlyMap<number, number>,
+): ReadonlyMap<number, number> {
+	const sourceMaskByShardLocalFamilySlot = new Map<number, number>();
+	for (const [familyId, sourceMask] of sourceMaskByFamilyId.entries()) {
+		const shardLocalFamilySlot = getShardLocalFamilySlot(base, familyId);
+		sourceMaskByShardLocalFamilySlot.set(
+			shardLocalFamilySlot,
+			(sourceMaskByShardLocalFamilySlot.get(shardLocalFamilySlot) ?? 0) |
+				sourceMask,
+		);
+	}
+	return sourceMaskByShardLocalFamilySlot;
 }
 function buildIdentityContainer(
 	realizedFamilies: readonly RealizedQueryUnitFamily[],
@@ -2286,7 +2927,7 @@ function summarizeSingletonHanCompletion(params: Readonly<{
 	base: ResidentBase;
 	queryAnalysis: V3QueryAnalysis;
 	candidateRecall: V3CandidateDocRecall;
-	docEvidence: CachedDocEvidence;
+	docEvidence: CandidateDocEvidence;
 	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>;
 	bodyRescueEvaluationBySurfaceGroupIndex: ReadonlyMap<
 		number,
@@ -2378,7 +3019,7 @@ function collectAllBodyRescueBigramOccurrencesByBlockId(
 
 function collectMatchedHanBigramAnchorsForSingletonScope(params: Readonly<{
 	base: ResidentBase;
-	docEvidence: CachedDocEvidence;
+	docEvidence: CandidateDocEvidence;
 	candidateBlockIds: readonly number[];
 	queryBigramTexts: readonly string[];
 	bodyRescueBigramOccurrencesByBlockId: ReadonlyMap<
@@ -2417,7 +3058,7 @@ function collectMatchedHanBigramAnchorsForSingletonScope(params: Readonly<{
 
 function buildMetadataSingletonHanCompletionCandidate(params: Readonly<{
 	target: SingletonHanTarget;
-	docEvidence: CachedDocEvidence;
+	docEvidence: CandidateDocEvidence;
 	realizedFamilies: readonly RealizedQueryUnitFamily[];
 	queryBigramTexts: readonly string[];
 }>): SingletonHanCompletionCandidate | null {
@@ -2695,7 +3336,7 @@ function collectCandidateSingletonHanBlockIds(
 }
 
 function collectBodySingletonCharPositions(
-	blockEvidence: CachedBodyBlockEvidence,
+	blockEvidence: CandidateBodyBlockEvidence,
 	singletonHanChar: string,
 ): readonly number[] {
 	const cached = blockEvidence.singletonCharPositionsByChar.get(singletonHanChar);
@@ -2716,7 +3357,7 @@ function collectBodySingletonCharPositions(
 }
 
 function collectBodyBigramAnchorOccurrences(params: Readonly<{
-	blockEvidence: CachedBodyBlockEvidence;
+	blockEvidence: CandidateBodyBlockEvidence;
 	queryBigramTexts: readonly string[];
 	rescueOccurrences: readonly HanSyntheticBodyOccurrence[] | null;
 }>): readonly BodyBigramAnchorOccurrence[] {
@@ -3251,5 +3892,3 @@ function getHanSurfaceCompletionTierScore(tier: HanSurfaceCompletionTier): numbe
 			return 0;
 	}
 }
-
-

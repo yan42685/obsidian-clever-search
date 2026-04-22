@@ -65,6 +65,13 @@ type HybridQuerySessionControllerOptions = {
 };
 
 export function usesDirectFileSubItems(item: FileItem): boolean {
+	if (
+		item.engineType === EngineType.HYBRID &&
+		item.freshnessState === "stale_grace" &&
+		!item.nativeSubItemsReady
+	) {
+		return false;
+	}
 	return (
 		item.engineType === EngineType.HYBRID ||
 		item.nativeSubItemsReady ||

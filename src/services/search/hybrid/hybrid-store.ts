@@ -1,4 +1,4 @@
-import type { BaseIndexedFileRef } from "src/globals/search-types";
+import type { BaseIndexedFileRef, DocRef } from "src/globals/search-types";
 import type {
   Chunk,
   ChunkVectorShard,
@@ -9,6 +9,8 @@ import type {
 
 export type ChunkRow = {
   id?: number;
+  docRef?: DocRef;
+  generation?: number;
   filePath: string;
   chunkIndex: number;
   startOffset: number;
@@ -20,18 +22,21 @@ export type ChunkRow = {
 };
 
 export type HybridFileSnapshotRow = {
+  docRef?: DocRef;
   filePath: string;
   plainText: string;
   generation?: number;
 };
 
 export type HybridDirtyShadowRow = {
+  docRef?: DocRef;
   filePath: string;
   plainText: string;
   generation?: number;
 };
 
 export type ChunkVectorShardRow = {
+  docRef?: DocRef;
   filePath: string;
   precision: string;
   dim: number;
@@ -50,6 +55,7 @@ export type BlobRecord = {
 export type HybridDocState = "pending" | "ready" | "lexical_only" | "failed";
 
 export type HybridIndexedFileRef = BaseIndexedFileRef & {
+  docRef?: DocRef;
   state?: HybridDocState;
   chunkCount?: number;
   vectorPrecision?: VectorPrecision | null;
@@ -98,7 +104,13 @@ export class ChunkVectorShardBuilder {
     return this.chunkIds.length === 0;
   }
 
-  build(filePath: string): ChunkVectorShard {
+  build(
+    filePath: string,
+    options?: {
+      docRef?: DocRef;
+      generation?: number;
+    },
+  ): ChunkVectorShard {
     if (this.chunkIds.length === 0) {
       throw new Error("Cannot build an empty chunk vector shard");
     }
@@ -112,11 +124,12 @@ export class ChunkVectorShardBuilder {
         scales[i] = this.scaleBlocks[i];
       }
       return {
+        docRef: options?.docRef,
         filePath,
         precision: this.precision,
         dim: this.dim,
         chunkCount: this.chunkIds.length,
-        generation: undefined,
+        generation: options?.generation,
         chunkIds: chunkIdArray,
         vectorData: flat,
         scaleData: scales,
@@ -128,11 +141,12 @@ export class ChunkVectorShardBuilder {
       flat.set(this.float16Blocks[i], i * this.dim);
     }
     return {
+      docRef: options?.docRef,
       filePath,
       precision: this.precision,
       dim: this.dim,
       chunkCount: this.chunkIds.length,
-      generation: undefined,
+      generation: options?.generation,
       chunkIds: chunkIdArray,
       vectorData: flat,
     };
@@ -185,6 +199,8 @@ export async function blobToHnsw(blob: Blob): Promise<HnswGraphData> {
 
 export function chunkToRow(c: Omit<Chunk, "id"> & { id?: number }): ChunkRow {
   const row: ChunkRow = {
+    docRef: c.docRef,
+    generation: c.generation,
     filePath: c.filePath,
     chunkIndex: c.chunkIndex,
     startOffset: c.startOffset,
@@ -201,6 +217,8 @@ export function chunkToRow(c: Omit<Chunk, "id"> & { id?: number }): ChunkRow {
 export function rowToChunk(row: ChunkRow, plainText: string): Chunk {
   return {
     id: row.id!,
+    docRef: row.docRef,
+    generation: row.generation,
     filePath: row.filePath,
     chunkIndex: row.chunkIndex,
     text: plainText.slice(row.startOffset, row.endOffset),
@@ -217,6 +235,7 @@ export function chunkVectorShardToRow(
   shard: ChunkVectorShard,
 ): ChunkVectorShardRow {
   return {
+    docRef: shard.docRef,
     filePath: shard.filePath,
     precision: shard.precision,
     dim: shard.dim,
@@ -236,6 +255,7 @@ export async function rowToChunkVectorShard(
 ): Promise<ChunkVectorShard> {
   const precision = parseVectorPrecision(row.precision);
   return {
+    docRef: row.docRef,
     filePath: row.filePath,
     precision,
     dim: row.dim,
@@ -299,6 +319,10 @@ export function buildChunkVectorShard(
   chunkIds: number[],
   vectors: StoredVector[],
   dim: number,
+  options?: {
+    docRef?: DocRef;
+    generation?: number;
+  },
 ): ChunkVectorShard {
   if (chunkIds.length !== vectors.length) {
     throw new Error("Chunk ids and vectors length mismatch");
@@ -322,11 +346,12 @@ export function buildChunkVectorShard(
       scales[i] = vector.scale;
     }
     return {
+      docRef: options?.docRef,
       filePath,
       precision,
       dim,
       chunkCount: chunkIds.length,
-      generation: undefined,
+      generation: options?.generation,
       chunkIds: chunkIdArray,
       vectorData: flat,
       scaleData: scales,
@@ -342,11 +367,12 @@ export function buildChunkVectorShard(
     flat.set(vector.vector, i * dim);
   }
   return {
+    docRef: options?.docRef,
     filePath,
     precision,
     dim,
     chunkCount: chunkIds.length,
-    generation: undefined,
+    generation: options?.generation,
     chunkIds: chunkIdArray,
     vectorData: flat,
   };

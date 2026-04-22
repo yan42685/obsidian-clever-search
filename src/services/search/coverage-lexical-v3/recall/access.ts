@@ -39,12 +39,98 @@ export function getFamilyText(base: ResidentBase, familyId: number): string {
 	return readResidentString(base, stringId);
 }
 
+export function getShardLocalFamilySlot(
+	base: ResidentBase,
+	familyId: number,
+): number {
+	return base.familyLexicon.shardLocalFamilySlotByFamilyId[familyId] ?? familyId;
+}
+
+export function getFamilyIdForShardLocalFamilySlot(
+	base: ResidentBase,
+	shardLocalFamilySlot: number,
+): number {
+	return (
+		base.familyLexicon.familyIdByShardLocalFamilySlot[shardLocalFamilySlot] ??
+		shardLocalFamilySlot
+	);
+}
+
+export function getShardLocalFamilyText(
+	base: ResidentBase,
+	shardLocalFamilySlot: number,
+): string {
+	return getFamilyText(base, getFamilyIdForShardLocalFamilySlot(base, shardLocalFamilySlot));
+}
+
 export function getDocPath(base: ResidentBase, docId: number): string {
 	return readResidentString(base, base.docTable.pathStringIds[docId] ?? 0);
 }
 
+export function getLiveDocSlot(base: ResidentBase, docId: number): number {
+	return base.docTable.liveDocSlotByDocId[docId] ?? docId;
+}
+
+export function getDocIdForLiveDocSlot(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number {
+	return base.docTable.docIdByLiveDocSlot[liveDocSlot] ?? liveDocSlot;
+}
+
+export function getDocRef(base: ResidentBase, docId: number): number | null {
+	const docRef = base.docTable.docRefsByDocId[docId];
+	return Number.isFinite(docRef) && docRef > 0 ? docRef : null;
+}
+
 export function getDocStableKey(base: ResidentBase, docId: number): string {
-	return getDocPath(base, docId);
+	const docRef = getDocRef(base, docId);
+	return docRef === null ? getDocPath(base, docId) : `docref:${docRef}`;
+}
+
+export function getLiveDocPath(base: ResidentBase, liveDocSlot: number): string {
+	const pathStringId = base.docTable.pathStringIdsByLiveDocSlot[liveDocSlot] ?? 0;
+	return readResidentString(base, pathStringId);
+}
+
+export function getLiveDocRef(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number | null {
+	const docRef = base.docTable.docRefsByLiveDocSlot[liveDocSlot];
+	return Number.isFinite(docRef) && docRef > 0 ? docRef : null;
+}
+
+export function getLiveDocStableKey(
+	base: ResidentBase,
+	liveDocSlot: number,
+): string {
+	const docRef = getLiveDocRef(base, liveDocSlot);
+	return docRef === null
+		? getLiveDocPath(base, liveDocSlot)
+		: `docref:${docRef}`;
+}
+
+export function getLiveDocGeneration(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number {
+	return base.docTable.generationByLiveDocSlot[liveDocSlot] ?? 0;
+}
+
+function resolveLiveDocSliceBounds(
+	_base: ResidentBase,
+	liveDocSlot: number,
+	params: Readonly<{
+		startByLiveDocSlot: ResidentIntegerArray;
+		countByLiveDocSlot: ResidentIntegerArray;
+		startByDocId: ResidentIntegerArray;
+		countByDocId: ResidentIntegerArray;
+	}>,
+): readonly [number, number] {
+	const start = params.startByLiveDocSlot[liveDocSlot] ?? 0;
+	const count = params.countByLiveDocSlot[liveDocSlot] ?? 0;
+	return [start, start + count];
 }
 
 export function getDocIdentityFamilyIds(
@@ -59,6 +145,23 @@ export function getDocIdentityFamilyIds(
 	);
 }
 
+export function getLiveDocIdentityFamilyIds(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number[] {
+	const [start, end] = resolveLiveDocSliceBounds(base, liveDocSlot, {
+		startByLiveDocSlot: base.docTable.identityStartByLiveDocSlot,
+		countByLiveDocSlot: base.docTable.identityCountByLiveDocSlot,
+		startByDocId: base.docTable.identityStartByDocId,
+		countByDocId: base.docTable.identityCountByDocId,
+	});
+	return sliceResidentIntegerArray(
+		base.metadataContainers.identityFamiliesByDoc,
+		start,
+		end,
+	);
+}
+
 export function getDocIdentitySourceMasks(
 	base: ResidentBase,
 	docId: number,
@@ -67,8 +170,23 @@ export function getDocIdentitySourceMasks(
 		base.metadataContainers.identitySourceMaskByDocEntry.slice(
 			base.docTable.identityStartByDocId[docId] ?? 0,
 			(base.docTable.identityStartByDocId[docId] ?? 0) +
-				(base.docTable.identityCountByDocId[docId] ?? 0),
+			(base.docTable.identityCountByDocId[docId] ?? 0),
 		),
+	);
+}
+
+export function getLiveDocIdentitySourceMasks(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number[] {
+	const [start, end] = resolveLiveDocSliceBounds(base, liveDocSlot, {
+		startByLiveDocSlot: base.docTable.identityStartByLiveDocSlot,
+		countByLiveDocSlot: base.docTable.identityCountByLiveDocSlot,
+		startByDocId: base.docTable.identityStartByDocId,
+		countByDocId: base.docTable.identityCountByDocId,
+	});
+	return Array.from(
+		base.metadataContainers.identitySourceMaskByDocEntry.slice(start, end),
 	);
 }
 
@@ -84,6 +202,23 @@ export function getDocRouteFamilyIds(
 	);
 }
 
+export function getLiveDocRouteFamilyIds(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number[] {
+	const [start, end] = resolveLiveDocSliceBounds(base, liveDocSlot, {
+		startByLiveDocSlot: base.docTable.routeStartByLiveDocSlot,
+		countByLiveDocSlot: base.docTable.routeCountByLiveDocSlot,
+		startByDocId: base.docTable.routeStartByDocId,
+		countByDocId: base.docTable.routeCountByDocId,
+	});
+	return sliceResidentIntegerArray(
+		base.metadataContainers.routeFamiliesByDoc,
+		start,
+		end,
+	);
+}
+
 export function getDocRouteSourceMasks(
 	base: ResidentBase,
 	docId: number,
@@ -92,8 +227,23 @@ export function getDocRouteSourceMasks(
 		base.metadataContainers.routeSourceMaskByDocEntry.slice(
 			base.docTable.routeStartByDocId[docId] ?? 0,
 			(base.docTable.routeStartByDocId[docId] ?? 0) +
-				(base.docTable.routeCountByDocId[docId] ?? 0),
+			(base.docTable.routeCountByDocId[docId] ?? 0),
 		),
+	);
+}
+
+export function getLiveDocRouteSourceMasks(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number[] {
+	const [start, end] = resolveLiveDocSliceBounds(base, liveDocSlot, {
+		startByLiveDocSlot: base.docTable.routeStartByLiveDocSlot,
+		countByLiveDocSlot: base.docTable.routeCountByLiveDocSlot,
+		startByDocId: base.docTable.routeStartByDocId,
+		countByDocId: base.docTable.routeCountByDocId,
+	});
+	return Array.from(
+		base.metadataContainers.routeSourceMaskByDocEntry.slice(start, end),
 	);
 }
 
@@ -109,12 +259,38 @@ export function getDocHeadingFamilyIds(
 	);
 }
 
+export function getLiveDocHeadingFamilyIds(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number[] {
+	const [start, end] = resolveLiveDocSliceBounds(base, liveDocSlot, {
+		startByLiveDocSlot: base.docTable.headingStartByLiveDocSlot,
+		countByLiveDocSlot: base.docTable.headingCountByLiveDocSlot,
+		startByDocId: base.docTable.headingStartByDocId,
+		countByDocId: base.docTable.headingCountByDocId,
+	});
+	return sliceResidentIntegerArray(
+		base.metadataContainers.headingFamiliesByDoc,
+		start,
+		end,
+	);
+}
+
 export function getDocBodyBlockIds(
 	base: ResidentBase,
 	docId: number,
 ): number[] {
 	const start = base.docTable.bodyBlockStartByDocId[docId] ?? 0;
 	const count = base.docTable.bodyBlockCountByDocId[docId] ?? 0;
+	return Array.from({ length: count }, (_, index) => start + index);
+}
+
+export function getLiveDocBodyBlockIds(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number[] {
+	const start = base.docTable.bodyBlockStartByLiveDocSlot[liveDocSlot] ?? 0;
+	const count = base.docTable.bodyBlockCountByLiveDocSlot[liveDocSlot] ?? 0;
 	return Array.from({ length: count }, (_, index) => start + index);
 }
 
@@ -125,6 +301,16 @@ export function collectBodyFamilyPostingBlockIds(
 	return collectBodyFamilyPostingBlockIdsForFamily(
 		base.bodyFamilyPosting,
 		familyId,
+	);
+}
+
+export function collectBodyFamilyPostingBlockIdsForShardLocalFamilySlot(
+	base: ResidentBase,
+	shardLocalFamilySlot: number,
+): number[] {
+	return collectBodyFamilyPostingBlockIds(
+		base,
+		getFamilyIdForShardLocalFamilySlot(base, shardLocalFamilySlot),
 	);
 }
 
@@ -189,6 +375,18 @@ export function getDocIdentityHanWitnessStringIds(
 	);
 }
 
+export function getLiveDocIdentityHanWitnessStringIds(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number[] {
+	return sliceSentinelBucket(
+		base.hanRoute.identityWitnessStartByLiveDocSlot ??
+			base.hanRoute.identityWitnessStartByDocId,
+		base.hanRoute.identityWitnessStringIds,
+		liveDocSlot,
+	);
+}
+
 export function getDocIdentityHanWitnessSourceMasks(
 	base: ResidentBase,
 	docId: number,
@@ -198,12 +396,33 @@ export function getDocIdentityHanWitnessSourceMasks(
 	return Array.from(base.hanRoute.identityWitnessSourceMaskByDocEntry.slice(start, end));
 }
 
+export function getLiveDocIdentityHanWitnessSourceMasks(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number[] {
+	const starts =
+		base.hanRoute.identityWitnessStartByLiveDocSlot ??
+		base.hanRoute.identityWitnessStartByDocId;
+	const start = starts[liveDocSlot] ?? 0;
+	const end = starts[liveDocSlot + 1] ?? start;
+	return Array.from(base.hanRoute.identityWitnessSourceMaskByDocEntry.slice(start, end));
+}
+
 export function getDocIdentityHanWitnessTexts(
 	base: ResidentBase,
 	docId: number,
 ): string[] {
 	return getDocIdentityHanWitnessStringIds(base, docId).map((stringId) =>
 		readResidentString(base, stringId),
+	);
+}
+
+export function getLiveDocIdentityHanWitnessTexts(
+	base: ResidentBase,
+	liveDocSlot: number,
+): string[] {
+	return getLiveDocIdentityHanWitnessStringIds(base, liveDocSlot).map(
+		(stringId) => readResidentString(base, stringId),
 	);
 }
 
@@ -218,6 +437,18 @@ export function getDocRouteHanWitnessStringIds(
 	);
 }
 
+export function getLiveDocRouteHanWitnessStringIds(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number[] {
+	return sliceSentinelBucket(
+		base.hanRoute.routeWitnessStartByLiveDocSlot ??
+			base.hanRoute.routeWitnessStartByDocId,
+		base.hanRoute.routeWitnessStringIds,
+		liveDocSlot,
+	);
+}
+
 export function getDocRouteHanWitnessSourceMasks(
 	base: ResidentBase,
 	docId: number,
@@ -227,12 +458,33 @@ export function getDocRouteHanWitnessSourceMasks(
 	return Array.from(base.hanRoute.routeWitnessSourceMaskByDocEntry.slice(start, end));
 }
 
+export function getLiveDocRouteHanWitnessSourceMasks(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number[] {
+	const starts =
+		base.hanRoute.routeWitnessStartByLiveDocSlot ??
+		base.hanRoute.routeWitnessStartByDocId;
+	const start = starts[liveDocSlot] ?? 0;
+	const end = starts[liveDocSlot + 1] ?? start;
+	return Array.from(base.hanRoute.routeWitnessSourceMaskByDocEntry.slice(start, end));
+}
+
 export function getDocRouteHanWitnessTexts(
 	base: ResidentBase,
 	docId: number,
 ): string[] {
 	return getDocRouteHanWitnessStringIds(base, docId).map((stringId) =>
 		readResidentString(base, stringId),
+	);
+}
+
+export function getLiveDocRouteHanWitnessTexts(
+	base: ResidentBase,
+	liveDocSlot: number,
+): string[] {
+	return getLiveDocRouteHanWitnessStringIds(base, liveDocSlot).map(
+		(stringId) => readResidentString(base, stringId),
 	);
 }
 
@@ -247,12 +499,33 @@ export function getDocHeadingHanWitnessStringIds(
 	);
 }
 
+export function getLiveDocHeadingHanWitnessStringIds(
+	base: ResidentBase,
+	liveDocSlot: number,
+): number[] {
+	return sliceSentinelBucket(
+		base.hanRoute.headingWitnessStartByLiveDocSlot ??
+			base.hanRoute.headingWitnessStartByDocId,
+		base.hanRoute.headingWitnessStringIds,
+		liveDocSlot,
+	);
+}
+
 export function getDocHeadingHanWitnessTexts(
 	base: ResidentBase,
 	docId: number,
 ): string[] {
 	return getDocHeadingHanWitnessStringIds(base, docId).map((stringId) =>
 		readResidentString(base, stringId),
+	);
+}
+
+export function getLiveDocHeadingHanWitnessTexts(
+	base: ResidentBase,
+	liveDocSlot: number,
+): string[] {
+	return getLiveDocHeadingHanWitnessStringIds(base, liveDocSlot).map(
+		(stringId) => readResidentString(base, stringId),
 	);
 }
 
@@ -316,6 +589,19 @@ export function collectPostingDocIds(
 	familyId: number,
 ): number[] {
 	return sliceSentinelBucket(postingStarts, docIds, familyId);
+}
+
+export function collectPostingDocIdsForShardLocalFamilySlot(
+	base: ResidentBase,
+	postingStarts: ResidentIntegerArray,
+	docIds: ResidentIntegerArray,
+	shardLocalFamilySlot: number,
+): number[] {
+	return collectPostingDocIds(
+		postingStarts,
+		docIds,
+		getFamilyIdForShardLocalFamilySlot(base, shardLocalFamilySlot),
+	);
 }
 
 export function collectHanMetadataDocIds(

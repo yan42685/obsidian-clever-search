@@ -6,9 +6,14 @@ import {
 	buildFuzzyLookupKeys,
 	FUZZY_RESCUE_MIN_QUERY_LENGTH,
 } from "../layout/fuzzy-rescue";
-import type { ResidentBase } from "../layout/types";
+import type { ResidentBase, ResidentFuzzyRescueSidecar } from "../layout/types";
 import type { V3QueryAnalysis, V3QueryUnit } from "../query/analysis";
-import { getFamilyText } from "./access";
+import {
+	getFamilyIdForShardLocalFamilySlot,
+	getFamilyText,
+	getShardLocalFamilySlot,
+	getShardLocalFamilyText,
+} from "./access";
 import type {
 	V3QueryFamilyMatch,
 	V3QueryUnitFamilyMatches,
@@ -40,6 +45,7 @@ export function lookupQueryUnitFamilies(
 	base: ResidentBase,
 	queryAnalysis: V3QueryAnalysis,
 	options: V3FamilyLookupOptions = {},
+	fuzzyRescueSidecar: ResidentFuzzyRescueSidecar = base.fuzzyRescue,
 ): V3QueryUnitFamilyMatches[] {
 	const familyFlagsByFamilyId = base.familyLexicon.familyFlagsByFamilyId;
 	const prefixBudgetState = createPrefixLookupBudgetState();
@@ -59,6 +65,7 @@ export function lookupQueryUnitFamilies(
 						queryUnit,
 						queryAnalysis,
 						familyFlagsByFamilyId,
+						fuzzyRescueSidecar,
 						prefixBudgetState,
 						fuzzyBudgetState,
 						allowPrefixMatch,
@@ -72,23 +79,27 @@ function lookupSortedQueryUnitFamilyMatches(
 	queryUnit: V3QueryUnit,
 	queryAnalysis: V3QueryAnalysis,
 	familyFlagsByFamilyId: Uint8Array,
+	fuzzyRescueSidecar: ResidentFuzzyRescueSidecar,
 	prefixBudgetState: PrefixLookupBudgetState,
 	fuzzyBudgetState: FuzzyLookupBudgetState,
 	allowPrefixMatch: boolean,
 	allowFuzzyMatch: boolean,
 ): V3QueryFamilyMatch[] {
 	const queryUnitText = queryUnit.text;
-	const rangeStartFamilyId = findFirstFamilyIdAtOrAfter(base, queryUnitText);
+	const rangeStartShardLocalFamilySlot = findFirstShardLocalFamilySlotAtOrAfter(
+		base,
+		queryUnitText,
+	);
 	const exactMatch = collectExactMatch(
 		base,
-		rangeStartFamilyId,
+		rangeStartShardLocalFamilySlot,
 		queryUnitText,
 		familyFlagsByFamilyId,
 	);
 	const prefixMatches = allowPrefixMatch
 		? collectBoundedPrefixMatches(
 				base,
-				rangeStartFamilyId,
+				rangeStartShardLocalFamilySlot,
 				queryUnitText,
 				familyFlagsByFamilyId,
 				prefixBudgetState,
@@ -103,27 +114,34 @@ function lookupSortedQueryUnitFamilyMatches(
 	if (!allowFuzzyMatch || !shouldAttemptFuzzyRescue(queryUnit, queryAnalysis)) {
 		return [];
 	}
-	return collectBoundedFuzzyMatches(base, queryUnitText, fuzzyBudgetState);
+	return collectBoundedFuzzyMatches(
+		base,
+		queryUnitText,
+		fuzzyBudgetState,
+		fuzzyRescueSidecar,
+	);
 }
 
 function collectExactMatch(
 	base: ResidentBase,
-	familyId: number,
+	shardLocalFamilySlot: number,
 	queryUnitText: string,
 	familyFlagsByFamilyId: Uint8Array,
 ): V3QueryFamilyMatch | null {
+	const familyId = getFamilyIdForShardLocalFamilySlot(base, shardLocalFamilySlot);
 	if (familyId >= base.familyLexicon.familyCount) {
 		return null;
 	}
 	if (getFamilySourceMask(familyFlagsByFamilyId[familyId] ?? 0) === 0) {
 		return null;
 	}
-	const familyText = getFamilyText(base, familyId);
+	const familyText = getShardLocalFamilyText(base, shardLocalFamilySlot);
 	if (familyText !== queryUnitText) {
 		return null;
 	}
 	return {
 		familyId,
+		shardLocalFamilySlot,
 		familyText,
 		matchKind: "exact",
 		editDistance: 0,
@@ -132,7 +150,7 @@ function collectExactMatch(
 
 function collectBoundedPrefixMatches(
 	base: ResidentBase,
-	rangeStartFamilyId: number,
+	rangeStartShardLocalFamilySlot: number,
 	queryUnitText: string,
 	familyFlagsByFamilyId: Uint8Array,
 	prefixBudgetState: PrefixLookupBudgetState,
@@ -145,11 +163,15 @@ function collectBoundedPrefixMatches(
 	const matches: V3QueryFamilyMatch[] = [];
 	let scannedPrefixFamilyCount = 0;
 	for (
-		let familyId = rangeStartFamilyId;
-		familyId < base.familyLexicon.familyCount;
-		familyId += 1
+		let shardLocalFamilySlot = rangeStartShardLocalFamilySlot;
+		shardLocalFamilySlot < base.familyLexicon.shardLocalFamilyCount;
+		shardLocalFamilySlot += 1
 	) {
-		const familyText = getFamilyText(base, familyId);
+		const familyId = getFamilyIdForShardLocalFamilySlot(
+			base,
+			shardLocalFamilySlot,
+		);
+		const familyText = getShardLocalFamilyText(base, shardLocalFamilySlot);
 		if (!familyText.startsWith(queryUnitText)) {
 			break;
 		}
@@ -172,6 +194,7 @@ function collectBoundedPrefixMatches(
 			matches,
 			{
 				familyId,
+				shardLocalFamilySlot,
 				familyText,
 				matchKind: "prefix",
 				editDistance: 0,
@@ -187,12 +210,13 @@ function collectBoundedFuzzyMatches(
 	base: ResidentBase,
 	queryUnitText: string,
 	fuzzyBudgetState: FuzzyLookupBudgetState,
+	fuzzyRescueSidecar: ResidentFuzzyRescueSidecar,
 ): V3QueryFamilyMatch[] {
 	if (fuzzyBudgetState.exhausted) {
 		return [];
 	}
 	const candidateMetadataFamilyIdsByDeletionKey =
-		base.fuzzyRescue.candidateMetadataFamilyIdsByDeletionKey;
+		fuzzyRescueSidecar.candidateMetadataFamilyIdsByDeletionKey;
 	if (candidateMetadataFamilyIdsByDeletionKey.size === 0) {
 		return [];
 	}
@@ -217,7 +241,8 @@ function collectBoundedFuzzyMatches(
 			if (shouldAbortFuzzyLookup(fuzzyBudgetState, verifiedCandidateCount)) {
 				return matches;
 			}
-			const familyText = getFamilyText(base, familyId);
+			const shardLocalFamilySlot = getShardLocalFamilySlot(base, familyId);
+			const familyText = getShardLocalFamilyText(base, shardLocalFamilySlot);
 			const editDistance = resolveEditDistanceAtMostOne(
 				queryUnitText,
 				familyText,
@@ -229,6 +254,7 @@ function collectBoundedFuzzyMatches(
 				matches,
 				{
 					familyId,
+					shardLocalFamilySlot,
 					familyText,
 					matchKind: "fuzzy",
 					editDistance,
@@ -282,6 +308,16 @@ function findFirstFamilyIdAtOrAfter(
 		high = middle;
 	}
 	return low;
+}
+
+function findFirstShardLocalFamilySlotAtOrAfter(
+	base: ResidentBase,
+	queryUnitText: string,
+): number {
+	return getShardLocalFamilySlot(
+		base,
+		findFirstFamilyIdAtOrAfter(base, queryUnitText),
+	);
 }
 
 function computePrefixMatchLimit(queryUnitText: string): number {

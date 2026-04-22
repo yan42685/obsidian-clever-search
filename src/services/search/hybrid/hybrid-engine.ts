@@ -353,6 +353,7 @@ export class HybridEngine {
   ): Promise<void> {
     await this.withFileWriteLock(filePath, async () => {
       await this.deleteStoredHybridPrivateData(filePath, option);
+      await this.fileSnapshotStore.markDocRegistryDeleted(filePath);
     });
   }
 
@@ -413,9 +414,17 @@ export class HybridEngine {
       }
 
       if (indexedFileRef) {
+        const movedDocEntry = await this.fileSnapshotStore.moveDocRegistryPath(
+          oldPath,
+          newPath,
+          {
+            generation: indexedFileRef.generation ?? generation,
+          },
+        );
         // Path-only move keeps the same semantic payload and generation.
         await this.putHybridIndexedFileRef({
           ...indexedFileRef,
+          docRef: movedDocEntry?.docRef ?? indexedFileRef.docRef,
           path: newPath,
           generation: indexedFileRef.generation ?? generation,
         });
@@ -928,10 +937,18 @@ export class HybridEngine {
     await this.withFileWriteLock(filePath, async () => {
       if (!this.shouldIndexPath(filePath)) {
         await this.deleteStoredHybridPrivateData(filePath, option);
+        await this.fileSnapshotStore.markDocRegistryDeleted(filePath, generation);
         return;
       }
 
       const pendingIndexedAt = Date.now();
+      const contentFingerprint = hashStableText(plainText);
+      const docRegistryEntry = await this.fileSnapshotStore.ensureDocRegistryEntry({
+        path: filePath,
+        generation,
+        deleted: false,
+        contentFingerprint,
+      });
       const previousIndexedFileRef =
         await this.fileSnapshotStore.getHybridIndexedFileRef(filePath);
       const previousState = await this.loadStoredFileIndexState(
@@ -945,6 +962,7 @@ export class HybridEngine {
         previousIndexedFileRef,
       );
       await this.putHybridIndexedFileRef({
+        docRef: docRegistryEntry.docRef,
         path: filePath,
         state: "pending",
         generation,
@@ -984,6 +1002,7 @@ export class HybridEngine {
         const indexedAt = Date.now();
         await this.persistSnapshot(filePath, plainText, generation);
         await this.putHybridIndexedFileRef({
+          docRef: docRegistryEntry.docRef,
           path: filePath,
           state: "ready",
           generation,
@@ -1003,7 +1022,7 @@ export class HybridEngine {
         await this.indexLexicalOnly(filePath, plannedChunks, generation, option, {
           lastIncrementalEmbedAt:
             previousIndexedFileRef?.lastIncrementalEmbedAt,
-        });
+        }, docRegistryEntry.docRef);
         await this.persistSnapshot(filePath, plainText, generation);
         return;
       }
@@ -1035,6 +1054,8 @@ export class HybridEngine {
                 batchChunks,
                 strict,
                 chunkStart,
+                docRegistryEntry.docRef,
+                generation,
               ),
           );
           shardBuilder.append(batchChunkIds, batchVectors);
@@ -1047,8 +1068,10 @@ export class HybridEngine {
         }
         await profileHybridStage("index.persist_vector_shard", async () => {
           await this.persistVectorShard({
-            ...shardBuilder.build(filePath),
-            generation,
+            ...shardBuilder.build(filePath, {
+              docRef: docRegistryEntry.docRef,
+              generation,
+            }),
           });
         });
         await this.persistSnapshot(filePath, plainText, generation);
@@ -1066,10 +1089,18 @@ export class HybridEngine {
         this._canSearch = false;
         this.lastIndexingFallbackNoticeKey = null;
         try {
-          await this.indexLexicalOnly(filePath, plannedChunks, generation, option);
+          await this.indexLexicalOnly(
+            filePath,
+            plannedChunks,
+            generation,
+            option,
+            undefined,
+            docRegistryEntry.docRef,
+          );
           await this.persistSnapshot(filePath, plainText, generation);
           const fallbackIndexedAt = Date.now();
           await this.putHybridIndexedFileRef({
+            docRef: docRegistryEntry.docRef,
             path: filePath,
             state: "lexical_only",
             generation,
@@ -1083,6 +1114,7 @@ export class HybridEngine {
         } catch (fallbackError) {
           const failedIndexedAt = Date.now();
           await this.putHybridIndexedFileRef({
+            docRef: docRegistryEntry.docRef,
             path: filePath,
             state: "failed",
             generation,
@@ -1101,6 +1133,7 @@ export class HybridEngine {
         await this.persistIndices();
       }
       await this.putHybridIndexedFileRef({
+        docRef: docRegistryEntry.docRef,
         path: filePath,
         state: "ready",
         generation,
@@ -1132,6 +1165,7 @@ export class HybridEngine {
       snapshotText === undefined
         ? undefined
         : {
+            docRef: indexedFileRef?.docRef,
             filePath,
             plainText: snapshotText,
             generation: indexedFileRef?.generation,
@@ -1413,10 +1447,14 @@ export class HybridEngine {
     plannedChunks: PlannedChunk[],
     strict: boolean,
     chunkIndexOffset = 0,
+    docRef?: number,
+    generation?: number,
   ): Promise<number[]> {
     const rows = plannedChunks.map((chunk, index) => {
       return chunkToRow({
         id: undefined,
+        docRef,
+        generation,
         filePath,
         chunkIndex: chunkIndexOffset + index,
         text: chunk.rawChunk.text,
@@ -1457,6 +1495,7 @@ export class HybridEngine {
     generation: number,
     option: HybridWriteOption,
     meta?: LexicalOnlyIndexedFileRefMeta,
+    docRef?: number,
   ): Promise<void> {
     for (
       let chunkStart = 0;
@@ -1470,7 +1509,14 @@ export class HybridEngine {
       await profileHybridStage(
         "index.persist_chunks_lexical_only",
         async () =>
-          await this.persistChunks(filePath, batchChunks, false, chunkStart),
+          await this.persistChunks(
+            filePath,
+            batchChunks,
+            false,
+            chunkStart,
+            docRef,
+            generation,
+          ),
       );
     }
 
@@ -1478,6 +1524,7 @@ export class HybridEngine {
       await this.persistIndices();
     }
     await this.putHybridIndexedFileRef({
+      docRef,
       path: filePath,
       state: "lexical_only",
       generation,

@@ -1,7 +1,17 @@
 import { throttle } from "throttle-debounce";
+import type { DocRef } from "src/globals/search-types";
 import { logger } from "src/utils/logger";
 
+let nextDocOperationNonce = 0;
+
+function createDocOperationId(): string {
+	const now = Date.now();
+	nextDocOperationNonce += 1;
+	return `${now}:${nextDocOperationNonce}`;
+}
+
 export abstract class DocOperation {
+	readonly id: string;
 	readonly type: "upsert" | "delete" | "move";
 	readonly path: string;
 	readonly time: number = performance.now();
@@ -11,7 +21,9 @@ export abstract class DocOperation {
 		type: "upsert" | "delete" | "move",
 		path: string,
 		sourceGeneration?: number,
+		id = createDocOperationId(),
 	) {
+		this.id = id;
 		this.type = type;
 		this.path = path;
 		this.sourceGeneration = sourceGeneration;
@@ -19,24 +31,76 @@ export abstract class DocOperation {
 }
 
 export class DocUpsertOperation extends DocOperation {
-	constructor(path: string, sourceGeneration?: number) {
-		super("upsert", path, sourceGeneration);
+	constructor(path: string, sourceGeneration?: number, id?: string) {
+		super("upsert", path, sourceGeneration, id);
 	}
 }
 
 export class DocDeleteOperation extends DocOperation {
-	constructor(path: string) {
-		super("delete", path);
+	constructor(path: string, id?: string) {
+		super("delete", path, undefined, id);
 	}
 }
 
 export class DocMoveOperation extends DocOperation {
 	readonly oldPath: string;
 
-	constructor(oldPath: string, newPath: string, sourceGeneration?: number) {
-		super("move", newPath, sourceGeneration);
+	constructor(
+		oldPath: string,
+		newPath: string,
+		sourceGeneration?: number,
+		id?: string,
+	) {
+		super("move", newPath, sourceGeneration, id);
 		this.oldPath = oldPath;
 	}
+}
+
+export type PendingDocOperationRow = {
+	id: string;
+	engine: "lexical";
+	docRef?: DocRef;
+	type: "upsert" | "delete" | "move";
+	path: string;
+	oldPath?: string;
+	sourceGeneration?: number;
+	createdAt: number;
+};
+
+export function toPendingDocOperationRow(
+	operation: DocOperation,
+	docRef?: DocRef,
+): PendingDocOperationRow {
+	return {
+		id: operation.id,
+		engine: "lexical",
+		docRef,
+		type: operation.type,
+		path: operation.path,
+		oldPath: operation instanceof DocMoveOperation ? operation.oldPath : undefined,
+		sourceGeneration: operation.sourceGeneration,
+		createdAt: Date.now(),
+	};
+}
+
+export function fromPendingDocOperationRow(
+	row: PendingDocOperationRow,
+): DocOperation | null {
+	if (row.type === "upsert") {
+		return new DocUpsertOperation(row.path, row.sourceGeneration, row.id);
+	}
+	if (row.type === "delete") {
+		return new DocDeleteOperation(row.path, row.id);
+	}
+	if (row.type === "move" && row.oldPath) {
+		return new DocMoveOperation(
+			row.oldPath,
+			row.path,
+			row.sourceGeneration,
+			row.id,
+		);
+	}
+	return null;
 }
 
 export type ReducedDirtyPath = {
@@ -59,6 +123,11 @@ export type ReducedDocOperationBatch = {
 	dirtyPaths: ReducedDirtyPath[];
 	// Stale paths are cleanup targets whose previous indexed state must be removed.
 	stalePaths: ReducedStalePath[];
+};
+
+export type FlushedDocOperationBatch = {
+	rawOperations: DocOperation[];
+	reducedBatch: ReducedDocOperationBatch;
 };
 
 type PendingDelete = {
@@ -168,7 +237,7 @@ export class DocOperationBuffer {
 	private disposed = false;
 
 	constructor(
-		private readonly handler: (operations: ReducedDocOperationBatch) => Promise<void>,
+		private readonly handler: (batch: FlushedDocOperationBatch) => Promise<void>,
 		private readonly autoFlushThreshold: number,
 		private readonly autoFlushDelayMs = 2000,
 	) {}
@@ -215,10 +284,14 @@ export class DocOperationBuffer {
 					return;
 				}
 
-				const operations = reduceDocOperations(this.operations);
+				const rawOperations = [...this.operations];
+				const operations = reduceDocOperations(rawOperations);
 				this.operations.length = 0;
 
-				await this.handler(operations);
+				await this.handler({
+					rawOperations,
+					reducedBatch: operations,
+				});
 				logger.debug("flushed reduced doc operations");
 			});
 		this.flushQueue = current.then(

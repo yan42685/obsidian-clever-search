@@ -7,6 +7,7 @@ import {
 import {
   HybridEmbeddingRecoveryManager,
   type HybridFailedEmbeddingSummary,
+  type HybridRecoveryEntry,
 } from "./hybrid-embedding-recovery-manager";
 import { HybridRecoveryStateStore } from "./hybrid-recovery-state-store";
 
@@ -86,6 +87,14 @@ export class HybridRecoveryCoordinator {
       .listDeferredEntries()
       .filter((entry) => this.options.canRetryPath(entry.path))
       .map((entry) => entry.path);
+  }
+
+  getEntry(path: string): HybridRecoveryEntry | null {
+    const entry = this.recoveryManager.getEntry(path);
+    if (!entry || !this.options.canRetryPath(path)) {
+      return null;
+    }
+    return entry;
   }
 
   resetRuntimeState(): void {

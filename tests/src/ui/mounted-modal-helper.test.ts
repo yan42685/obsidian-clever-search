@@ -61,6 +61,26 @@ describe("mounted modal helper", () => {
 		expect(usesDirectFileSubItems(item)).toBe(true);
 	});
 
+	test("forces stale-grace hybrid items to reload subitems until shadow-backed items are ready", () => {
+		const { EngineType, FileItem } = require("src/globals/search-types");
+		const { usesDirectFileSubItems } = require("src/ui/mounted-modal-helper");
+		const item = new FileItem(
+			EngineType.HYBRID,
+			"notes/stale.md",
+			["alpha"],
+			["alpha"],
+			[],
+			"nothing",
+			false,
+		);
+		item.freshnessState = "stale_grace";
+
+		expect(usesDirectFileSubItems(item)).toBe(false);
+
+		item.nativeSubItemsReady = true;
+		expect(usesDirectFileSubItems(item)).toBe(true);
+	});
+
 	test("hybrid query session waits for rerank gate after early prepare result", async () => {
 		const { SearchResult, SearchType } = require("src/globals/search-types");
 		const { HybridQuerySessionController } = require("src/ui/mounted-modal-helper");
@@ -596,6 +616,9 @@ describe("mounted modal helper", () => {
 			([event]: [string]) => event === EventEnum.HYBRID_RUNTIME_STATUS_CHANGED,
 		)?.[1];
 		expect(runtimeStatusCallback).toBeDefined();
+		if (!runtimeStatusCallback) {
+			throw new Error("missing runtime status callback");
+		}
 		runtimeStatusCallback();
 		runtimeStatusCallback();
 		runtimeStatusCallback();

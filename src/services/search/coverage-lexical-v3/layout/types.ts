@@ -13,22 +13,40 @@ export type ResidentStringArena = Readonly<{
 
 export type ResidentDocTable = Readonly<{
 	docCount: number;
+	liveDocCount: number;
+	docRefsByDocId: Float64Array;
+	docRefsByLiveDocSlot: Float64Array;
+	liveDocSlotByDocId: ResidentIntegerArray;
+	docIdByLiveDocSlot: ResidentIntegerArray;
 	pathStringIds: ResidentIntegerArray;
+	pathStringIdsByLiveDocSlot: ResidentIntegerArray;
 	generationByDocId: Float64Array;
+	generationByLiveDocSlot: Float64Array;
 	identityStartByDocId: ResidentIntegerArray;
 	identityCountByDocId: ResidentIntegerArray;
+	identityStartByLiveDocSlot: ResidentIntegerArray;
+	identityCountByLiveDocSlot: ResidentIntegerArray;
 	routeStartByDocId: ResidentIntegerArray;
 	routeCountByDocId: ResidentIntegerArray;
+	routeStartByLiveDocSlot: ResidentIntegerArray;
+	routeCountByLiveDocSlot: ResidentIntegerArray;
 	headingStartByDocId: ResidentIntegerArray;
 	headingCountByDocId: ResidentIntegerArray;
+	headingStartByLiveDocSlot: ResidentIntegerArray;
+	headingCountByLiveDocSlot: ResidentIntegerArray;
 	bodyBlockStartByDocId: ResidentIntegerArray;
 	bodyBlockCountByDocId: ResidentIntegerArray;
+	bodyBlockStartByLiveDocSlot: ResidentIntegerArray;
+	bodyBlockCountByLiveDocSlot: ResidentIntegerArray;
 }>;
 
 export type ResidentFamilyKind = "latin" | "han" | "mixed" | "other";
 
 export type ResidentFamilyLexicon = Readonly<{
 	familyCount: number;
+	shardLocalFamilyCount: number;
+	shardLocalFamilySlotByFamilyId: ResidentIntegerArray;
+	familyIdByShardLocalFamilySlot: ResidentIntegerArray;
 	familyStringIds: ResidentIntegerArray;
 	familyFlagsByFamilyId: Uint8Array;
 }>;
@@ -67,10 +85,24 @@ export type ResidentBodyBlockArena = Readonly<{
 	familySupportMaskByEntry: Uint8Array;
 }>;
 
+export type ResidentBodyFamilySupportSidecar = Readonly<{
+	familySupportStartByBlockId: ResidentIntegerArray;
+	familySupportFamilyIds: ResidentIntegerArray;
+	familySupportMaskByEntry: Uint8Array;
+	entryCount: number;
+	bytes: number;
+}>;
+
 export type ResidentExactTapeArena = Readonly<{
 	familyIds: ResidentIntegerArray;
 }> &
 	ResidentBlockPositionLane;
+
+export type ResidentExactTapeSidecar = ResidentExactTapeArena &
+	Readonly<{
+		entryCount: number;
+		bytes: number;
+	}>;
 
 export type ResidentAdaptivePostingField = Readonly<{
 	singletonTermIds: ResidentIntegerArray;
@@ -93,6 +125,30 @@ export type ResidentFuzzyRescueSidecar = Readonly<{
 	bytes: number;
 }>;
 
+export type ResidentHanWitnessSidecar = Readonly<{
+	identityWitnessStartByDocId: ResidentIntegerArray;
+	identityWitnessStartByLiveDocSlot?: ResidentIntegerArray;
+	identityWitnessStringIds: ResidentIntegerArray;
+	identityWitnessSourceMaskByDocEntry: Uint8Array;
+	routeWitnessStartByDocId: ResidentIntegerArray;
+	routeWitnessStartByLiveDocSlot?: ResidentIntegerArray;
+	routeWitnessStringIds: ResidentIntegerArray;
+	routeWitnessSourceMaskByDocEntry: Uint8Array;
+	headingWitnessStartByDocId: ResidentIntegerArray;
+	headingWitnessStartByLiveDocSlot?: ResidentIntegerArray;
+	headingWitnessStringIds: ResidentIntegerArray;
+	bodyWitnessOccurrenceStartByBlockId: ResidentIntegerArray;
+	bodyWitnessOccurrenceStringIds: ResidentIntegerArray;
+	bodyWitnessPositionEncodingByBlockId: Uint8Array;
+	bodyWitnessPositionStartByBlockId: ResidentIntegerArray;
+	bodyWitnessPositionDeltaU8Tape: Uint8Array;
+	bodyWitnessPositionDeltaU16Tape: Uint16Array;
+	bodyWitnessPositionDeltaU32Tape: Uint32Array;
+	metadataWitnessEntryCount: number;
+	bodyWitnessEntryCount: number;
+	bytes: number;
+}>;
+
 export type ResidentHanRouteArena = Readonly<{
 	bigramIds: Uint32Array;
 	metadataPostingStarts: ResidentIntegerArray;
@@ -103,12 +159,15 @@ export type ResidentHanRouteArena = Readonly<{
 	metadataCharDocIds: ResidentIntegerArray;
 	bodyCharAdaptivePostings: ResidentAdaptivePostingField;
 	identityWitnessStartByDocId: ResidentIntegerArray;
+	identityWitnessStartByLiveDocSlot?: ResidentIntegerArray;
 	identityWitnessStringIds: ResidentIntegerArray;
 	identityWitnessSourceMaskByDocEntry: Uint8Array;
 	routeWitnessStartByDocId: ResidentIntegerArray;
+	routeWitnessStartByLiveDocSlot?: ResidentIntegerArray;
 	routeWitnessStringIds: ResidentIntegerArray;
 	routeWitnessSourceMaskByDocEntry: Uint8Array;
 	headingWitnessStartByDocId: ResidentIntegerArray;
+	headingWitnessStartByLiveDocSlot?: ResidentIntegerArray;
 	headingWitnessStringIds: ResidentIntegerArray;
 	bodyWitnessOccurrenceStartByBlockId: ResidentIntegerArray;
 	bodyWitnessOccurrenceStringIds: ResidentIntegerArray;

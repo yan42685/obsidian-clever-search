@@ -20,8 +20,12 @@ type FamilyBuildInput = Readonly<{
 export function buildFamilyLexicon(
 	families: readonly FamilyBuildInput[],
 ): ResidentFamilyLexicon {
+	const shardLocalFamilySlots = families.map((_, familyId) => familyId);
 	return {
 		familyCount: families.length,
+		shardLocalFamilyCount: families.length,
+		shardLocalFamilySlotByFamilyId: buildIntegerArray(shardLocalFamilySlots),
+		familyIdByShardLocalFamilySlot: buildIntegerArray(shardLocalFamilySlots),
 		familyStringIds: buildIntegerArray(families.map((family) => family.stringId)),
 		familyFlagsByFamilyId: Uint8Array.from(
 			families.map((family) => packFamilyFlags(family.text, family.sourceMask)),
@@ -33,6 +37,8 @@ export function estimateFamilyLexiconBytes(
 	lexicon: ResidentFamilyLexicon,
 ): number {
 	return (
+		lexicon.shardLocalFamilySlotByFamilyId.byteLength +
+		lexicon.familyIdByShardLocalFamilySlot.byteLength +
 		lexicon.familyStringIds.byteLength +
 		lexicon.familyFlagsByFamilyId.byteLength
 	);

@@ -56,15 +56,112 @@ import { Database } from "src/services/database/database";
 import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 
 type SnapshotRow = {
+  docRef?: number;
   filePath: string;
   plainText: string;
   generation?: number;
 };
 
+type LexicalIndexedMetadataRow = {
+  docRef?: number;
+  filePath: string;
+  generation?: number;
+  aliasesText?: string;
+  tagsText?: string;
+  headingsText?: string;
+};
+
+type LexicalFuzzyRescueRow = {
+  id: string;
+  indexedMetadataFamilyCount: number;
+  deletionKeyCount: number;
+  bytes: number;
+  entries: ReadonlyArray<{
+    deletionKey: string;
+    familyIds: Uint32Array;
+  }>;
+};
+
+type LexicalBodyFamilySupportRow = {
+  id: string;
+  entryCount: number;
+  bytes: number;
+  familySupportStartByBlockId: Uint8Array | Uint16Array | Uint32Array;
+  familySupportFamilyIds: Uint8Array | Uint16Array | Uint32Array;
+  familySupportMaskByEntry: Uint8Array;
+};
+
+type LexicalBodyEvidenceRow = {
+  blockId: number;
+  exactFamilyIds: readonly number[];
+  exactTokenPositions: readonly number[];
+  familySupportFamilyIds: readonly number[];
+  familySupportMaskByEntry: readonly number[];
+};
+
+type LexicalHanDocEvidenceRow = {
+  docId: number;
+  identityWitnessStringIds: readonly number[];
+  identityWitnessSourceMaskByDocEntry: readonly number[];
+  routeWitnessStringIds: readonly number[];
+  routeWitnessSourceMaskByDocEntry: readonly number[];
+  headingWitnessStringIds: readonly number[];
+};
+
+type LexicalHanBodyEvidenceRow = {
+  blockId: number;
+  bodyWitnessStringIds: readonly number[];
+  bodyWitnessStartOffsets: readonly number[];
+};
+
+type LexicalExactTapeRow = {
+  id: string;
+  entryCount: number;
+  bytes: number;
+  familyIds: Uint8Array | Uint16Array | Uint32Array;
+  positionEncodingByBlockId: Uint8Array;
+  positionStartByBlockId: Uint8Array | Uint16Array | Uint32Array;
+  positionDeltaU8Tape: Uint8Array;
+  positionDeltaU16Tape: Uint16Array;
+  positionDeltaU32Tape: Uint32Array;
+};
+
+type LexicalHanWitnessRow = {
+  id: string;
+  metadataWitnessEntryCount: number;
+  bodyWitnessEntryCount: number;
+  bytes: number;
+  identityWitnessStartByDocId: Uint8Array | Uint16Array | Uint32Array;
+  identityWitnessStringIds: Uint8Array | Uint16Array | Uint32Array;
+  identityWitnessSourceMaskByDocEntry: Uint8Array;
+  routeWitnessStartByDocId: Uint8Array | Uint16Array | Uint32Array;
+  routeWitnessStringIds: Uint8Array | Uint16Array | Uint32Array;
+  routeWitnessSourceMaskByDocEntry: Uint8Array;
+  headingWitnessStartByDocId: Uint8Array | Uint16Array | Uint32Array;
+  headingWitnessStringIds: Uint8Array | Uint16Array | Uint32Array;
+  bodyWitnessOccurrenceStartByBlockId: Uint8Array | Uint16Array | Uint32Array;
+  bodyWitnessOccurrenceStringIds: Uint8Array | Uint16Array | Uint32Array;
+  bodyWitnessPositionEncodingByBlockId: Uint8Array;
+  bodyWitnessPositionStartByBlockId: Uint8Array | Uint16Array | Uint32Array;
+  bodyWitnessPositionDeltaU8Tape: Uint8Array;
+  bodyWitnessPositionDeltaU16Tape: Uint16Array;
+  bodyWitnessPositionDeltaU32Tape: Uint32Array;
+};
+
 type HybridIndexedFileRefRow = {
   path: string;
+  docRef?: number;
   generation?: number;
   state?: string;
+};
+
+type DocRegistryRow = {
+  docRef: number;
+  path: string;
+  deleted: boolean;
+  liveGeneration: number;
+  contentFingerprint?: string;
+  updatedAt: number;
 };
 
 function createFilePathTable(initialRows: SnapshotRow[] = []) {
@@ -158,10 +255,16 @@ function createHybridIndexedRefTable(initialRows: HybridIndexedFileRefRow[] = []
         rows.set(row.path, { ...row });
       }
     },
+    async put(row: HybridIndexedFileRefRow) {
+      rows.set(row.path, { ...row });
+    },
     async bulkDelete(paths: readonly string[]) {
       for (const path of paths) {
         rows.delete(path);
       }
+    },
+    async clear() {
+      rows.clear();
     },
     orderBy(field: string) {
       if (field !== ":id") {
@@ -197,21 +300,208 @@ function createHybridIndexedRefTable(initialRows: HybridIndexedFileRefRow[] = []
   };
 }
 
+function createDocRegistryStore(initialRows: DocRegistryRow[] = []) {
+  const rows = new Map<string, DocRegistryRow>(
+    initialRows.map((row) => [row.path, { ...row }]),
+  );
+  let nextDocRef =
+    initialRows.reduce((max, row) => Math.max(max, row.docRef), 0) + 1;
+
+  return {
+    rows,
+    async get(path: string) {
+      const row = rows.get(path);
+      return row ? { ...row } : undefined;
+    },
+    async ensureEntry(params: {
+      docRef?: number;
+      path: string;
+      generation?: number;
+      deleted?: boolean;
+      contentFingerprint?: string;
+    }) {
+      const existing = rows.get(params.path);
+      const nextRow: DocRegistryRow = existing
+        ? {
+            ...existing,
+            deleted: params.deleted ?? existing.deleted,
+            liveGeneration: params.generation ?? existing.liveGeneration,
+            contentFingerprint:
+              params.contentFingerprint ?? existing.contentFingerprint,
+            updatedAt: Date.now(),
+          }
+        : {
+            docRef: params.docRef ?? nextDocRef++,
+            path: params.path,
+            deleted: params.deleted ?? false,
+            liveGeneration: params.generation ?? 0,
+            contentFingerprint: params.contentFingerprint,
+            updatedAt: Date.now(),
+          };
+      if (params.docRef !== undefined && params.docRef >= nextDocRef) {
+        nextDocRef = params.docRef + 1;
+      }
+      rows.set(nextRow.path, nextRow);
+      return { ...nextRow };
+    },
+    async ensureEntries(
+      params: Array<{
+        docRef?: number;
+        path: string;
+        generation?: number;
+        deleted?: boolean;
+        contentFingerprint?: string;
+      }>,
+    ) {
+      const nextRows = new Map<string, DocRegistryRow>();
+      for (const param of params) {
+        const row = await this.ensureEntry(param);
+        nextRows.set(row.path, row);
+      }
+      return nextRows;
+    },
+    async movePath(
+      oldPath: string,
+      newPath: string,
+      options?: {
+        generation?: number;
+        contentFingerprint?: string;
+      },
+    ) {
+      const existing = rows.get(oldPath);
+      if (!existing) {
+        return undefined;
+      }
+      rows.delete(oldPath);
+      const nextRow: DocRegistryRow = {
+        ...existing,
+        path: newPath,
+        deleted: false,
+        liveGeneration: options?.generation ?? existing.liveGeneration,
+        contentFingerprint:
+          options?.contentFingerprint ?? existing.contentFingerprint,
+        updatedAt: Date.now(),
+      };
+      rows.set(newPath, nextRow);
+      return { ...nextRow };
+    },
+    async markDeleted(path: string, generation?: number) {
+      const existing = rows.get(path);
+      if (!existing) {
+        return;
+      }
+      rows.set(path, {
+        ...existing,
+        deleted: true,
+        liveGeneration: generation ?? existing.liveGeneration,
+        updatedAt: Date.now(),
+      });
+    },
+  };
+}
+
+function createSingletonKeyTable<T extends { id: string }>(initialRows: T[] = []) {
+  const rows = new Map<string, T>(initialRows.map((row) => [row.id, { ...row }]));
+  return {
+    rows,
+    async get(id: string) {
+      const row = rows.get(id);
+      return row ? { ...row } : undefined;
+    },
+    async put(row: T) {
+      rows.set(row.id, { ...row });
+    },
+    async toArray() {
+      return Array.from(rows.values()).map((row) => ({ ...row }));
+    },
+  };
+}
+
+function createBlockIdTable<T extends { blockId: number }>(initialRows: T[] = []) {
+  const rows = new Map<number, T>(
+    initialRows.map((row) => [row.blockId, { ...row }]),
+  );
+  return {
+    rows,
+    async bulkGet(blockIds: readonly number[]) {
+      return blockIds.map((blockId) => {
+        const row = rows.get(blockId);
+        return row ? { ...row } : undefined;
+      });
+    },
+    async bulkPut(nextRows: T[]) {
+      for (const row of nextRows) {
+        rows.set(row.blockId, { ...row });
+      }
+    },
+    async toArray() {
+      return Array.from(rows.values()).map((row) => ({ ...row }));
+    },
+  };
+}
+
+function createDocIdTable<T extends { docId: number }>(initialRows: T[] = []) {
+  const rows = new Map<number, T>(
+    initialRows.map((row) => [row.docId, { ...row }]),
+  );
+  return {
+    rows,
+    async bulkGet(docIds: readonly number[]) {
+      return docIds.map((docId) => {
+        const row = rows.get(docId);
+        return row ? { ...row } : undefined;
+      });
+    },
+    async bulkPut(nextRows: T[]) {
+      for (const row of nextRows) {
+        rows.set(row.docId, { ...row });
+      }
+    },
+    async toArray() {
+      return Array.from(rows.values()).map((row) => ({ ...row }));
+    },
+  };
+}
+
 function createStoreHarness(options?: {
   files?: TFile[];
   fileSnapshots?: SnapshotRow[];
+  lexicalIndexedMetadata?: LexicalIndexedMetadataRow[];
+  lexicalFuzzyRescue?: LexicalFuzzyRescueRow[];
+  lexicalBodyFamilySupport?: LexicalBodyFamilySupportRow[];
+  lexicalBodyEvidence?: LexicalBodyEvidenceRow[];
+  lexicalHanDocEvidence?: LexicalHanDocEvidenceRow[];
+  lexicalHanBodyEvidence?: LexicalHanBodyEvidenceRow[];
+  lexicalExactTapes?: LexicalExactTapeRow[];
+  lexicalHanWitness?: LexicalHanWitnessRow[];
   hybridDirtyShadows?: SnapshotRow[];
   hybridIndexedFileRefs?: HybridIndexedFileRefRow[];
+  docRegistry?: DocRegistryRow[];
   reads?: Record<string, string>;
 }) {
   const files = new Map<string, TFile>(
     (options?.files ?? []).map((file) => [file.path, file]),
   );
   const fileSnapshots = createFilePathTable(options?.fileSnapshots);
+  const lexicalIndexedMetadata = createFilePathTable(
+    options?.lexicalIndexedMetadata,
+  );
+  const lexicalFuzzyRescue = createSingletonKeyTable(
+    options?.lexicalFuzzyRescue,
+  );
+  const lexicalBodyFamilySupport = createSingletonKeyTable(
+    options?.lexicalBodyFamilySupport,
+  );
+  const lexicalBodyEvidence = createBlockIdTable(options?.lexicalBodyEvidence);
+  const lexicalHanDocEvidence = createDocIdTable(options?.lexicalHanDocEvidence);
+  const lexicalHanBodyEvidence = createBlockIdTable(options?.lexicalHanBodyEvidence);
+  const lexicalExactTapes = createSingletonKeyTable(options?.lexicalExactTapes);
+  const lexicalHanWitness = createSingletonKeyTable(options?.lexicalHanWitness);
   const hybridDirtyShadows = createFilePathTable(options?.hybridDirtyShadows);
   const hybridIndexedFileRefs = createHybridIndexedRefTable(
     options?.hybridIndexedFileRefs,
   );
+  const docRegistry = createDocRegistryStore(options?.docRegistry);
   const reads = options?.reads ?? {};
   const cachedRead = jest.fn(async (file: TFile) => reads[file.path] ?? "");
   const vault = {
@@ -221,9 +511,23 @@ function createStoreHarness(options?: {
   const database = {
     db: {
       fileSnapshots,
+      lexicalIndexedMetadata,
+      lexicalFuzzyRescue,
+      lexicalBodyFamilySupport,
+      lexicalBodyEvidence,
+      lexicalHanDocEvidence,
+      lexicalHanBodyEvidence,
+      lexicalExactTapes,
+      lexicalHanWitness,
       hybridDirtyShadows,
       hybridIndexedFileRefs,
     },
+    ensureDocRegistryEntry: jest.fn(async (params) => await docRegistry.ensureEntry(params)),
+    ensureDocRegistryEntries: jest.fn(async (params) => await docRegistry.ensureEntries(params)),
+    getDocRegistryEntry: jest.fn(async (path: string) => await docRegistry.get(path)),
+    listDocRegistryEntries: jest.fn(async () => Array.from(docRegistry.rows.values()).map((row) => ({ ...row }))),
+    moveDocRegistryPath: jest.fn(async (oldPath: string, newPath: string, options?: { generation?: number; contentFingerprint?: string }) => await docRegistry.movePath(oldPath, newPath, options)),
+    markDocRegistryDeleted: jest.fn(async (path: string, generation?: number) => await docRegistry.markDeleted(path, generation)),
   };
 
   mockInstanceMap.clear();
@@ -238,6 +542,7 @@ function createStoreHarness(options?: {
     store,
     vault,
     database,
+    docRegistry,
   };
 }
 
@@ -375,6 +680,334 @@ describe("FileSnapshotStore", () => {
     });
     await expect(database.db.hybridIndexedFileRefs.get(stalePath)).resolves.toBeUndefined();
   });
+
+  test("assigns and reuses a stable docRef across hybrid refs and indexed snapshots", async () => {
+    const file = new TFile("docs/stable.md", "stable body", 220);
+    const { store, database, docRegistry } = createStoreHarness({
+      files: [file],
+      reads: {
+        [file.path]: "stable body",
+      },
+    });
+
+    await store.putHybridIndexedFileRef({
+      path: file.path,
+      generation: 220,
+      state: "ready",
+    });
+    await store.publishIndexedTexts([
+      {
+        path: file.path,
+        generation: 220,
+        text: "stable body",
+      },
+    ]);
+
+    const indexedRef = await database.db.hybridIndexedFileRefs.get(file.path);
+    const snapshot = await database.db.fileSnapshots.get(file.path);
+
+    expect(indexedRef?.docRef).toBeDefined();
+    expect(snapshot?.docRef).toBe(indexedRef?.docRef);
+    expect(docRegistry.rows.get(file.path)).toEqual(
+      expect.objectContaining({
+        docRef: indexedRef?.docRef,
+        path: file.path,
+        liveGeneration: 220,
+        deleted: false,
+      }),
+    );
+
+    await store.putHybridIndexedFileRef({
+      path: file.path,
+      generation: 221,
+      state: "ready",
+    });
+
+    const nextIndexedRef = await database.db.hybridIndexedFileRefs.get(file.path);
+    expect(nextIndexedRef?.docRef).toBe(indexedRef?.docRef);
+  });
+
+  test("publishes and reloads lexical fuzzy rescue sidecars", async () => {
+    const { store, database } = createStoreHarness();
+
+    await store.publishLexicalFuzzyRescue({
+      candidateMetadataFamilyIdsByDeletionKey: new Map([
+        ["obsidan", Uint32Array.from([3, 7])],
+        ["runtim", Uint32Array.from([9])],
+      ]),
+      indexedMetadataFamilyCount: 3,
+      deletionKeyCount: 2,
+      bytes: 42,
+    });
+
+    const storedRow = await database.db.lexicalFuzzyRescue.get("active");
+    expect(storedRow).toEqual(
+      expect.objectContaining({
+        id: "active",
+        indexedMetadataFamilyCount: 3,
+        deletionKeyCount: 2,
+        bytes: 42,
+      }),
+    );
+
+    const sidecar = await store.readLexicalFuzzyRescue();
+    expect(sidecar.indexedMetadataFamilyCount).toBe(3);
+    expect(sidecar.deletionKeyCount).toBe(2);
+    expect(sidecar.bytes).toBe(42);
+    expect(sidecar.candidateMetadataFamilyIdsByDeletionKey.get("obsidan")).toEqual(
+      Uint32Array.from([3, 7]),
+    );
+    expect(sidecar.candidateMetadataFamilyIdsByDeletionKey.get("runtim")).toEqual(
+      Uint32Array.from([9]),
+    );
+  });
+
+  test("publishes and reloads lexical body family support sidecars", async () => {
+    const { store, database } = createStoreHarness();
+
+    await store.publishLexicalBodyFamilySupport({
+      familySupportStartByBlockId: Uint8Array.from([0, 2, 3]),
+      familySupportFamilyIds: Uint16Array.from([4, 9, 12]),
+      familySupportMaskByEntry: Uint8Array.from([1, 3, 2]),
+      entryCount: 3,
+      bytes: 11,
+    });
+
+    const storedRow = await database.db.lexicalBodyFamilySupport.get("active");
+    expect(storedRow).toEqual(
+      expect.objectContaining({
+        id: "active",
+        entryCount: 3,
+        bytes: 11,
+      }),
+    );
+    expect(storedRow?.familySupportStartByBlockId).toEqual(
+      Uint8Array.from([0, 2, 3]),
+    );
+    expect(storedRow?.familySupportFamilyIds).toEqual(
+      Uint16Array.from([4, 9, 12]),
+    );
+    expect(storedRow?.familySupportMaskByEntry).toEqual(
+      Uint8Array.from([1, 3, 2]),
+    );
+
+    const sidecar = await store.readLexicalBodyFamilySupport();
+    expect(sidecar.entryCount).toBe(3);
+    expect(sidecar.bytes).toBe(11);
+    expect(sidecar.familySupportStartByBlockId).toEqual(
+      Uint8Array.from([0, 2, 3]),
+    );
+    expect(sidecar.familySupportFamilyIds).toEqual(
+      Uint16Array.from([4, 9, 12]),
+    );
+    expect(sidecar.familySupportMaskByEntry).toEqual(
+      Uint8Array.from([1, 3, 2]),
+    );
+  });
+
+  test("publishes and reloads lexical body evidence for shortlisted blocks", async () => {
+    const { store, database } = createStoreHarness();
+
+    await store.publishLexicalBodyEvidence([
+      {
+        blockId: 3,
+        exactFamilyIds: [4, 9],
+        exactTokenPositions: [1, 7],
+        familySupportFamilyIds: [4, 9],
+        familySupportMaskByEntry: [1, 3],
+      },
+      {
+        blockId: 8,
+        exactFamilyIds: [11],
+        exactTokenPositions: [2],
+        familySupportFamilyIds: [11],
+        familySupportMaskByEntry: [2],
+      },
+    ]);
+
+    expect(database.db.lexicalBodyEvidence.rows.size).toBe(2);
+
+    const evidenceByBlockId = await store.readLexicalBodyEvidenceForBlocks([
+      8, 3, 99,
+    ]);
+
+    expect(evidenceByBlockId.get(3)).toEqual({
+      exactFamilyIds: [4, 9],
+      exactTokenPositions: [1, 7],
+      familySupportEntries: [
+        { familyId: 4, supportMask: 1 },
+        { familyId: 9, supportMask: 3 },
+      ],
+    });
+    expect(evidenceByBlockId.get(8)).toEqual({
+      exactFamilyIds: [11],
+      exactTokenPositions: [2],
+      familySupportEntries: [{ familyId: 11, supportMask: 2 }],
+    });
+    expect(evidenceByBlockId.has(99)).toBe(false);
+  });
+
+  test("publishes and reloads lexical Han doc evidence", async () => {
+    const { store, database } = createStoreHarness();
+
+    await store.publishLexicalHanDocEvidence([
+      {
+        docId: 1,
+        identityWitnessStringIds: [3, 5],
+        identityWitnessSourceMaskByDocEntry: [1, 2],
+        routeWitnessStringIds: [7],
+        routeWitnessSourceMaskByDocEntry: [4],
+        headingWitnessStringIds: [9],
+      },
+    ]);
+
+    expect(database.db.lexicalHanDocEvidence.rows.size).toBe(1);
+
+    const evidenceByDocId = await store.readLexicalHanDocEvidenceForDocs([1, 2]);
+
+    expect(evidenceByDocId.get(1)).toEqual({
+      identityWitnessStringIds: [3, 5],
+      identityWitnessSourceMasks: [1, 2],
+      routeWitnessStringIds: [7],
+      routeWitnessSourceMasks: [4],
+      headingWitnessStringIds: [9],
+    });
+    expect(evidenceByDocId.has(2)).toBe(false);
+  });
+
+  test("publishes and reloads lexical Han body evidence for shortlisted blocks", async () => {
+    const { store, database } = createStoreHarness();
+
+    await store.publishLexicalHanBodyEvidence([
+      {
+        blockId: 4,
+        bodyWitnessStringIds: [11, 13],
+        bodyWitnessStartOffsets: [0, 6],
+      },
+    ]);
+
+    expect(database.db.lexicalHanBodyEvidence.rows.size).toBe(1);
+
+    const evidenceByBlockId = await store.readLexicalHanBodyEvidenceForBlocks([
+      4, 5,
+    ]);
+
+    expect(evidenceByBlockId.get(4)).toEqual({
+      bodyWitnessStringIds: [11, 13],
+      bodyWitnessStartOffsets: [0, 6],
+    });
+    expect(evidenceByBlockId.has(5)).toBe(false);
+  });
+
+  test("publishes and reloads lexical exact tape sidecars", async () => {
+    const { store, database } = createStoreHarness();
+
+    await store.publishLexicalExactTapes({
+      familyIds: Uint16Array.from([2, 7, 11]),
+      positionEncodingByBlockId: Uint8Array.from([0, 1]),
+      positionStartByBlockId: Uint8Array.from([0, 2]),
+      positionDeltaU8Tape: Uint8Array.from([3, 4]),
+      positionDeltaU16Tape: Uint16Array.from([1200]),
+      positionDeltaU32Tape: Uint32Array.from([70000]),
+      entryCount: 3,
+      bytes: 19,
+    });
+
+    const storedRow = await database.db.lexicalExactTapes.get("active");
+    expect(storedRow).toEqual(
+      expect.objectContaining({
+        id: "active",
+        entryCount: 3,
+        bytes: 19,
+      }),
+    );
+    expect(storedRow?.familyIds).toEqual(Uint16Array.from([2, 7, 11]));
+    expect(storedRow?.positionEncodingByBlockId).toEqual(Uint8Array.from([0, 1]));
+    expect(storedRow?.positionStartByBlockId).toEqual(Uint8Array.from([0, 2]));
+    expect(storedRow?.positionDeltaU8Tape).toEqual(Uint8Array.from([3, 4]));
+    expect(storedRow?.positionDeltaU16Tape).toEqual(Uint16Array.from([1200]));
+    expect(storedRow?.positionDeltaU32Tape).toEqual(Uint32Array.from([70000]));
+
+    const sidecar = await store.readLexicalExactTapes();
+    expect(sidecar.entryCount).toBe(3);
+    expect(sidecar.bytes).toBe(19);
+    expect(sidecar.familyIds).toEqual(Uint16Array.from([2, 7, 11]));
+    expect(sidecar.positionEncodingByBlockId).toEqual(Uint8Array.from([0, 1]));
+    expect(sidecar.positionStartByBlockId).toEqual(Uint8Array.from([0, 2]));
+    expect(sidecar.positionDeltaU8Tape).toEqual(Uint8Array.from([3, 4]));
+    expect(sidecar.positionDeltaU16Tape).toEqual(Uint16Array.from([1200]));
+    expect(sidecar.positionDeltaU32Tape).toEqual(Uint32Array.from([70000]));
+  });
+
+  test("publishes and reloads lexical han witness sidecars", async () => {
+    const { store, database } = createStoreHarness();
+
+    await store.publishLexicalHanWitnesses({
+      identityWitnessStartByDocId: Uint8Array.from([0, 2]),
+      identityWitnessStringIds: Uint16Array.from([3, 5]),
+      identityWitnessSourceMaskByDocEntry: Uint8Array.from([1, 2]),
+      routeWitnessStartByDocId: Uint8Array.from([0, 1]),
+      routeWitnessStringIds: Uint16Array.from([7]),
+      routeWitnessSourceMaskByDocEntry: Uint8Array.from([4]),
+      headingWitnessStartByDocId: Uint8Array.from([0, 1]),
+      headingWitnessStringIds: Uint16Array.from([9]),
+      bodyWitnessOccurrenceStartByBlockId: Uint8Array.from([0, 2]),
+      bodyWitnessOccurrenceStringIds: Uint16Array.from([11, 13]),
+      bodyWitnessPositionEncodingByBlockId: Uint8Array.from([0]),
+      bodyWitnessPositionStartByBlockId: Uint8Array.from([0]),
+      bodyWitnessPositionDeltaU8Tape: Uint8Array.from([2, 4]),
+      bodyWitnessPositionDeltaU16Tape: Uint16Array.from([1200]),
+      bodyWitnessPositionDeltaU32Tape: Uint32Array.from([70000]),
+      metadataWitnessEntryCount: 4,
+      bodyWitnessEntryCount: 2,
+      bytes: 33,
+    });
+
+    const storedRow = await database.db.lexicalHanWitness.get("active");
+    expect(storedRow).toEqual(
+      expect.objectContaining({
+        id: "active",
+        metadataWitnessEntryCount: 4,
+        bodyWitnessEntryCount: 2,
+        bytes: 33,
+      }),
+    );
+
+    const sidecar = await store.readLexicalHanWitnesses();
+    expect(sidecar.metadataWitnessEntryCount).toBe(4);
+    expect(sidecar.bodyWitnessEntryCount).toBe(2);
+    expect(sidecar.bytes).toBe(33);
+    expect(sidecar.identityWitnessStartByDocId).toEqual(Uint8Array.from([0, 2]));
+    expect(sidecar.identityWitnessStringIds).toEqual(Uint16Array.from([3, 5]));
+    expect(sidecar.identityWitnessSourceMaskByDocEntry).toEqual(
+      Uint8Array.from([1, 2]),
+    );
+    expect(sidecar.routeWitnessStartByDocId).toEqual(Uint8Array.from([0, 1]));
+    expect(sidecar.routeWitnessStringIds).toEqual(Uint16Array.from([7]));
+    expect(sidecar.routeWitnessSourceMaskByDocEntry).toEqual(
+      Uint8Array.from([4]),
+    );
+    expect(sidecar.headingWitnessStartByDocId).toEqual(Uint8Array.from([0, 1]));
+    expect(sidecar.headingWitnessStringIds).toEqual(Uint16Array.from([9]));
+    expect(sidecar.bodyWitnessOccurrenceStartByBlockId).toEqual(
+      Uint8Array.from([0, 2]),
+    );
+    expect(sidecar.bodyWitnessOccurrenceStringIds).toEqual(
+      Uint16Array.from([11, 13]),
+    );
+    expect(sidecar.bodyWitnessPositionEncodingByBlockId).toEqual(
+      Uint8Array.from([0]),
+    );
+    expect(sidecar.bodyWitnessPositionStartByBlockId).toEqual(
+      Uint8Array.from([0]),
+    );
+    expect(sidecar.bodyWitnessPositionDeltaU8Tape).toEqual(Uint8Array.from([2, 4]));
+    expect(sidecar.bodyWitnessPositionDeltaU16Tape).toEqual(Uint16Array.from([1200]));
+    expect(sidecar.bodyWitnessPositionDeltaU32Tape).toEqual(
+      Uint32Array.from([70000]),
+    );
+  });
+
   test("getRuntimeMemoryEstimate reports resident breakdown and slot reuse", async () => {
     const first = new TFile("docs/one.md", "alpha", 100);
     const second = new TFile("docs/two.md", "beta beta", 200);
@@ -398,7 +1031,7 @@ describe("FileSnapshotStore", () => {
     expect(estimateAfterDelete.largestEntries[0]).toEqual(
       expect.objectContaining({
         path: second.path,
-        textBytes: Buffer.byteLength("beta beta", "utf8"),
+        textBytes: "beta beta".length * 2,
       }),
     );
 
@@ -406,11 +1039,11 @@ describe("FileSnapshotStore", () => {
 
     const estimate = store.getRuntimeMemoryEstimate();
     const expectedPathBytes =
-      Buffer.byteLength(second.path, "utf8") +
-      Buffer.byteLength(third.path, "utf8");
+      second.path.length * 2 +
+      third.path.length * 2;
     const expectedTextBytes =
-      Buffer.byteLength("beta beta", "utf8") +
-      Buffer.byteLength("gamma", "utf8");
+      "beta beta".length * 2 +
+      "gamma".length * 2;
     expect(estimate.pathBytes).toBe(expectedPathBytes);
     expect(estimate.currentTextBytes).toBe(expectedTextBytes);
     expect(estimate.generationBytes).toBe(16);

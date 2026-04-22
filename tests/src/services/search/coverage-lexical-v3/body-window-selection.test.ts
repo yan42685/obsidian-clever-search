@@ -22,6 +22,7 @@ import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layou
 
 type PositionedFamilyOccurrence = Readonly<{
 	familyId: number;
+	shardLocalFamilySlot: number;
 	ordinalPosition: number;
 	localPosition: number;
 	localEndPosition: number;
@@ -96,6 +97,7 @@ function buildExactPositionedOccurrences(
 		const approxLength = Math.max(1, readFamilyApproxLength(base, familyId));
 		const occurrence = {
 			familyId,
+			shardLocalFamilySlot: familyId,
 			ordinalPosition: index,
 			localPosition: cursor,
 			localEndPosition: cursor + approxLength,
@@ -428,6 +430,9 @@ function toBlockShortlistItem(
 		(representative) => ({
 			queryUnitIndex: representative.unitIndex,
 			familyId: representative.match.familyId,
+			shardLocalFamilySlot:
+				representative.match.shardLocalFamilySlot ??
+				representative.match.familyId,
 			familyText: representative.match.familyText,
 			matchKind: representative.match.matchKind,
 			blockId: representative.blockId,

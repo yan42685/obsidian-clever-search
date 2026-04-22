@@ -1,16 +1,38 @@
 import { TFile, Vault, htmlToMarkdown } from "obsidian";
+import type {
+	LexicalHanBodyEvidenceRow,
+	LexicalHanDocEvidenceRow,
+	DocRegistryRow,
+	LexicalBodyEvidenceRow,
+	LexicalBodyFamilySupportRow,
+	LexicalExactTapeRow,
+	LexicalFuzzyRescueRow,
+	LexicalHanWitnessRow,
+	LexicalIndexedMetadataRow,
+} from "src/services/database/database";
 import type { HybridIndexedFileRef } from "src/services/search/hybrid/hybrid-store";
+import type {
+	ResidentBodyFamilySupportSidecar,
+	ResidentExactTapeSidecar,
+	ResidentFuzzyRescueSidecar,
+	ResidentHanWitnessSidecar,
+} from "src/services/search/coverage-lexical-v3/layout/types";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import type { Database } from "src/services/database/database";
+import { EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR } from "../coverage-lexical-v3/layout/body-blocks";
+import { EMPTY_RESIDENT_EXACT_TAPE_SIDECAR } from "../coverage-lexical-v3/layout/exact-tapes";
+import { EMPTY_RESIDENT_HAN_WITNESS_SIDECAR } from "../coverage-lexical-v3/layout/han-route";
 
 type PersistedFileSnapshotRow = {
+	docRef?: number;
 	filePath: string;
 	plainText: string;
 	generation?: number;
 };
 
 type PersistedFileShadowRow = {
+	docRef?: number;
 	filePath: string;
 	plainText: string;
 	generation?: number;
@@ -27,12 +49,68 @@ type IndexedTextPublishRequest = {
 	text?: string;
 };
 
+type IndexedMetadataRequest = {
+	path: string;
+	generation?: number;
+};
+
+type IndexedMetadataPublishRequest = {
+	path: string;
+	generation?: number;
+	aliasesText?: string;
+	tagsText?: string;
+	headingsText?: string;
+};
+
+type EnsureDocRegistryEntryRequest = {
+	docRef?: number;
+	path: string;
+	generation?: number;
+	deleted?: boolean;
+	contentFingerprint?: string;
+};
+
 type CurrentFileEntry = {
 	path: string;
 	slot: number;
 	text: string;
 	generation?: number;
 };
+
+export type IndexedMetadataSnapshot = Readonly<{
+	aliasesText?: string;
+	tagsText?: string;
+	headingsText?: string;
+}>;
+
+export type LexicalBodyEvidenceSnapshot = Readonly<{
+	exactFamilyIds: readonly number[];
+	exactTokenPositions: readonly number[];
+	familySupportEntries: ReadonlyArray<
+		Readonly<{
+			familyId: number;
+			supportMask: number;
+		}>
+	>;
+}>;
+
+export type LexicalHanDocEvidenceSnapshot = Readonly<{
+	identityWitnessStringIds: readonly number[];
+	identityWitnessSourceMasks: readonly number[];
+	routeWitnessStringIds: readonly number[];
+	routeWitnessSourceMasks: readonly number[];
+	headingWitnessStringIds: readonly number[];
+}>;
+
+export type LexicalHanBodyEvidenceSnapshot = Readonly<{
+	bodyWitnessStringIds: readonly number[];
+	bodyWitnessStartOffsets: readonly number[];
+}>;
+
+const ACTIVE_LEXICAL_FUZZY_RESCUE_ID = "active";
+const ACTIVE_LEXICAL_BODY_FAMILY_SUPPORT_ID = "active";
+const ACTIVE_LEXICAL_EXACT_TAPE_ID = "active";
+const ACTIVE_LEXICAL_HAN_WITNESS_ID = "active";
 
 export type FileSnapshotRuntimeMemoryEstimate = {
 	capacityBytes: number;
@@ -108,6 +186,37 @@ export class FileSnapshotStore {
 		);
 	}
 
+	async readIndexedMetadata(
+		requests: ReadonlyArray<IndexedMetadataRequest>,
+	): Promise<Map<string, IndexedMetadataSnapshot>> {
+		const uniquePaths = Array.from(new Set(requests.map((request) => request.path)));
+		if (uniquePaths.length === 0) {
+			return new Map<string, IndexedMetadataSnapshot>();
+		}
+		const expectedGenerations = new Map(
+			requests.map((request) => [request.path, request.generation] as const),
+		);
+		const rows = await this.database.db.lexicalIndexedMetadata.bulkGet(uniquePaths);
+		const metadataByPath = new Map<string, IndexedMetadataSnapshot>();
+		for (let index = 0; index < uniquePaths.length; index += 1) {
+			const row = rows[index];
+			if (!row) {
+				continue;
+			}
+			const path = uniquePaths[index];
+			const expectedGeneration = expectedGenerations.get(path);
+			if (!this.isGenerationMatch(row.generation, expectedGeneration)) {
+				continue;
+			}
+			metadataByPath.set(path, {
+				aliasesText: row.aliasesText,
+				tagsText: row.tagsText,
+				headingsText: row.headingsText,
+			});
+		}
+		return metadataByPath;
+	}
+
 	async inspectIndexedTextAvailability(
 		path: string,
 		expectedGeneration?: number,
@@ -145,6 +254,342 @@ export class FileSnapshotStore {
 		files: ReadonlyArray<IndexedTextPublishRequest>,
 	): Promise<void> {
 		await this.commitCurrentFilesAsIndexed(files);
+	}
+
+	async publishIndexedMetadata(
+		files: ReadonlyArray<IndexedMetadataPublishRequest>,
+	): Promise<void> {
+		if (files.length === 0) {
+			return;
+		}
+		const dedupedFiles = new Map<string, IndexedMetadataPublishRequest>();
+		for (const file of files) {
+			dedupedFiles.set(file.path, file);
+		}
+		const normalizedFiles = [...dedupedFiles.values()];
+		const docRegistryEntries = await this.database.ensureDocRegistryEntries(
+			normalizedFiles.map((file) => ({
+				path: file.path,
+				generation: file.generation,
+				deleted: false,
+			})),
+		);
+		const rows: LexicalIndexedMetadataRow[] = normalizedFiles.map((file) => ({
+			docRef: docRegistryEntries.get(file.path)?.docRef,
+			filePath: file.path,
+			generation: file.generation,
+			aliasesText: file.aliasesText ?? "",
+			tagsText: file.tagsText ?? "",
+			headingsText: file.headingsText ?? "",
+		}));
+		await this.database.db.lexicalIndexedMetadata.bulkPut(rows);
+	}
+
+	async readLexicalFuzzyRescue(): Promise<ResidentFuzzyRescueSidecar> {
+		const row = await this.database.db.lexicalFuzzyRescue.get(
+			ACTIVE_LEXICAL_FUZZY_RESCUE_ID,
+		);
+		if (row == null) {
+			return {
+				candidateMetadataFamilyIdsByDeletionKey: new Map(),
+				indexedMetadataFamilyCount: 0,
+				deletionKeyCount: 0,
+				bytes: 0,
+			};
+		}
+		return {
+			candidateMetadataFamilyIdsByDeletionKey: new Map(
+				row.entries.map((entry) => [entry.deletionKey, entry.familyIds]),
+			),
+			indexedMetadataFamilyCount: row.indexedMetadataFamilyCount,
+			deletionKeyCount: row.deletionKeyCount,
+			bytes: row.bytes,
+		};
+	}
+
+	async publishLexicalFuzzyRescue(
+		sidecar: ResidentFuzzyRescueSidecar,
+	): Promise<void> {
+		const row: LexicalFuzzyRescueRow = {
+			id: ACTIVE_LEXICAL_FUZZY_RESCUE_ID,
+			indexedMetadataFamilyCount: sidecar.indexedMetadataFamilyCount,
+			deletionKeyCount: sidecar.deletionKeyCount,
+			bytes: sidecar.bytes,
+			entries: [...sidecar.candidateMetadataFamilyIdsByDeletionKey.entries()].map(
+				([deletionKey, familyIds]) => ({
+					deletionKey,
+					familyIds,
+				}),
+			),
+		};
+		await this.database.db.lexicalFuzzyRescue.put(row);
+	}
+
+	async readLexicalBodyFamilySupport(): Promise<ResidentBodyFamilySupportSidecar> {
+		const row = await this.database.db.lexicalBodyFamilySupport.get(
+			ACTIVE_LEXICAL_BODY_FAMILY_SUPPORT_ID,
+		);
+		if (row == null) {
+			return EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR;
+		}
+		return {
+			familySupportStartByBlockId: row.familySupportStartByBlockId,
+			familySupportFamilyIds: row.familySupportFamilyIds,
+			familySupportMaskByEntry: row.familySupportMaskByEntry,
+			entryCount: row.entryCount,
+			bytes: row.bytes,
+		};
+	}
+
+	async publishLexicalBodyFamilySupport(
+		sidecar: ResidentBodyFamilySupportSidecar,
+	): Promise<void> {
+		const row: LexicalBodyFamilySupportRow = {
+			id: ACTIVE_LEXICAL_BODY_FAMILY_SUPPORT_ID,
+			entryCount: sidecar.entryCount,
+			bytes: sidecar.bytes,
+			familySupportStartByBlockId: sidecar.familySupportStartByBlockId,
+			familySupportFamilyIds: sidecar.familySupportFamilyIds,
+			familySupportMaskByEntry: sidecar.familySupportMaskByEntry,
+		};
+		await this.database.db.lexicalBodyFamilySupport.put(row);
+	}
+
+	async readLexicalBodyEvidenceForBlocks(
+		blockIds: ReadonlyArray<number>,
+	): Promise<ReadonlyMap<number, LexicalBodyEvidenceSnapshot>> {
+		const uniqueBlockIds = Array.from(new Set(blockIds));
+		if (uniqueBlockIds.length === 0) {
+			return new Map<number, LexicalBodyEvidenceSnapshot>();
+		}
+		const rows = await this.database.db.lexicalBodyEvidence.bulkGet(uniqueBlockIds);
+		const evidenceByBlockId = new Map<number, LexicalBodyEvidenceSnapshot>();
+		for (let index = 0; index < uniqueBlockIds.length; index += 1) {
+			const row = rows[index];
+			if (row == null) {
+				continue;
+			}
+			evidenceByBlockId.set(uniqueBlockIds[index], {
+				exactFamilyIds: row.exactFamilyIds,
+				exactTokenPositions: row.exactTokenPositions,
+				familySupportEntries: row.familySupportFamilyIds.map(
+					(familyId, supportIndex) => ({
+						familyId,
+						supportMask: row.familySupportMaskByEntry[supportIndex] ?? 0,
+					}),
+				),
+			});
+		}
+		return evidenceByBlockId;
+	}
+
+	async publishLexicalBodyEvidence(
+		rows: ReadonlyArray<LexicalBodyEvidenceRow>,
+	): Promise<void> {
+		if (rows.length === 0) {
+			return;
+		}
+		await this.database.db.lexicalBodyEvidence.bulkPut(
+			rows.map((row) => ({
+				blockId: row.blockId,
+				exactFamilyIds: [...row.exactFamilyIds],
+				exactTokenPositions: [...row.exactTokenPositions],
+				familySupportFamilyIds: [...row.familySupportFamilyIds],
+				familySupportMaskByEntry: [...row.familySupportMaskByEntry],
+			})),
+		);
+	}
+
+	async readLexicalHanDocEvidenceForDocs(
+		docIds: ReadonlyArray<number>,
+	): Promise<ReadonlyMap<number, LexicalHanDocEvidenceSnapshot>> {
+		const uniqueDocIds = Array.from(new Set(docIds));
+		if (uniqueDocIds.length === 0) {
+			return new Map<number, LexicalHanDocEvidenceSnapshot>();
+		}
+		const rows = await this.database.db.lexicalHanDocEvidence.bulkGet(uniqueDocIds);
+		const evidenceByDocId = new Map<number, LexicalHanDocEvidenceSnapshot>();
+		for (let index = 0; index < uniqueDocIds.length; index += 1) {
+			const row = rows[index];
+			if (row == null) {
+				continue;
+			}
+			evidenceByDocId.set(uniqueDocIds[index], {
+				identityWitnessStringIds: row.identityWitnessStringIds,
+				identityWitnessSourceMasks: row.identityWitnessSourceMaskByDocEntry,
+				routeWitnessStringIds: row.routeWitnessStringIds,
+				routeWitnessSourceMasks: row.routeWitnessSourceMaskByDocEntry,
+				headingWitnessStringIds: row.headingWitnessStringIds,
+			});
+		}
+		return evidenceByDocId;
+	}
+
+	async publishLexicalHanDocEvidence(
+		rows: ReadonlyArray<LexicalHanDocEvidenceRow>,
+	): Promise<void> {
+		if (rows.length === 0) {
+			return;
+		}
+		await this.database.db.lexicalHanDocEvidence.bulkPut(
+			rows.map((row) => ({
+				docId: row.docId,
+				identityWitnessStringIds: [...row.identityWitnessStringIds],
+				identityWitnessSourceMaskByDocEntry: [
+					...row.identityWitnessSourceMaskByDocEntry,
+				],
+				routeWitnessStringIds: [...row.routeWitnessStringIds],
+				routeWitnessSourceMaskByDocEntry: [
+					...row.routeWitnessSourceMaskByDocEntry,
+				],
+				headingWitnessStringIds: [...row.headingWitnessStringIds],
+			})),
+		);
+	}
+
+	async readLexicalHanBodyEvidenceForBlocks(
+		blockIds: ReadonlyArray<number>,
+	): Promise<ReadonlyMap<number, LexicalHanBodyEvidenceSnapshot>> {
+		const uniqueBlockIds = Array.from(new Set(blockIds));
+		if (uniqueBlockIds.length === 0) {
+			return new Map<number, LexicalHanBodyEvidenceSnapshot>();
+		}
+		const rows = await this.database.db.lexicalHanBodyEvidence.bulkGet(
+			uniqueBlockIds,
+		);
+		const evidenceByBlockId = new Map<number, LexicalHanBodyEvidenceSnapshot>();
+		for (let index = 0; index < uniqueBlockIds.length; index += 1) {
+			const row = rows[index];
+			if (row == null) {
+				continue;
+			}
+			evidenceByBlockId.set(uniqueBlockIds[index], {
+				bodyWitnessStringIds: row.bodyWitnessStringIds,
+				bodyWitnessStartOffsets: row.bodyWitnessStartOffsets,
+			});
+		}
+		return evidenceByBlockId;
+	}
+
+	async publishLexicalHanBodyEvidence(
+		rows: ReadonlyArray<LexicalHanBodyEvidenceRow>,
+	): Promise<void> {
+		if (rows.length === 0) {
+			return;
+		}
+		await this.database.db.lexicalHanBodyEvidence.bulkPut(
+			rows.map((row) => ({
+				blockId: row.blockId,
+				bodyWitnessStringIds: [...row.bodyWitnessStringIds],
+				bodyWitnessStartOffsets: [...row.bodyWitnessStartOffsets],
+			})),
+		);
+	}
+
+	async readLexicalExactTapes(): Promise<ResidentExactTapeSidecar> {
+		const row = await this.database.db.lexicalExactTapes.get(
+			ACTIVE_LEXICAL_EXACT_TAPE_ID,
+		);
+		if (row == null) {
+			return EMPTY_RESIDENT_EXACT_TAPE_SIDECAR;
+		}
+		return {
+			familyIds: row.familyIds,
+			positionEncodingByBlockId: row.positionEncodingByBlockId,
+			positionStartByBlockId: row.positionStartByBlockId,
+			positionDeltaU8Tape: row.positionDeltaU8Tape,
+			positionDeltaU16Tape: row.positionDeltaU16Tape,
+			positionDeltaU32Tape: row.positionDeltaU32Tape,
+			entryCount: row.entryCount,
+			bytes: row.bytes,
+		};
+	}
+
+	async publishLexicalExactTapes(
+		sidecar: ResidentExactTapeSidecar,
+	): Promise<void> {
+		const row: LexicalExactTapeRow = {
+			id: ACTIVE_LEXICAL_EXACT_TAPE_ID,
+			entryCount: sidecar.entryCount,
+			bytes: sidecar.bytes,
+			familyIds: sidecar.familyIds,
+			positionEncodingByBlockId: sidecar.positionEncodingByBlockId,
+			positionStartByBlockId: sidecar.positionStartByBlockId,
+			positionDeltaU8Tape: sidecar.positionDeltaU8Tape,
+			positionDeltaU16Tape: sidecar.positionDeltaU16Tape,
+			positionDeltaU32Tape: sidecar.positionDeltaU32Tape,
+		};
+		await this.database.db.lexicalExactTapes.put(row);
+	}
+
+	async readLexicalHanWitnesses(): Promise<ResidentHanWitnessSidecar> {
+		const row = await this.database.db.lexicalHanWitness.get(
+			ACTIVE_LEXICAL_HAN_WITNESS_ID,
+		);
+		if (row == null) {
+			return EMPTY_RESIDENT_HAN_WITNESS_SIDECAR;
+		}
+		return {
+			identityWitnessStartByDocId: row.identityWitnessStartByDocId,
+			identityWitnessStringIds: row.identityWitnessStringIds,
+			identityWitnessSourceMaskByDocEntry:
+				row.identityWitnessSourceMaskByDocEntry,
+			routeWitnessStartByDocId: row.routeWitnessStartByDocId,
+			routeWitnessStringIds: row.routeWitnessStringIds,
+			routeWitnessSourceMaskByDocEntry:
+				row.routeWitnessSourceMaskByDocEntry,
+			headingWitnessStartByDocId: row.headingWitnessStartByDocId,
+			headingWitnessStringIds: row.headingWitnessStringIds,
+			bodyWitnessOccurrenceStartByBlockId:
+				row.bodyWitnessOccurrenceStartByBlockId,
+			bodyWitnessOccurrenceStringIds: row.bodyWitnessOccurrenceStringIds,
+			bodyWitnessPositionEncodingByBlockId:
+				row.bodyWitnessPositionEncodingByBlockId,
+			bodyWitnessPositionStartByBlockId:
+				row.bodyWitnessPositionStartByBlockId,
+			bodyWitnessPositionDeltaU8Tape: row.bodyWitnessPositionDeltaU8Tape,
+			bodyWitnessPositionDeltaU16Tape: row.bodyWitnessPositionDeltaU16Tape,
+			bodyWitnessPositionDeltaU32Tape: row.bodyWitnessPositionDeltaU32Tape,
+			metadataWitnessEntryCount: row.metadataWitnessEntryCount,
+			bodyWitnessEntryCount: row.bodyWitnessEntryCount,
+			bytes: row.bytes,
+		};
+	}
+
+	async publishLexicalHanWitnesses(
+		sidecar: ResidentHanWitnessSidecar,
+	): Promise<void> {
+		const row: LexicalHanWitnessRow = {
+			id: ACTIVE_LEXICAL_HAN_WITNESS_ID,
+			metadataWitnessEntryCount: sidecar.metadataWitnessEntryCount,
+			bodyWitnessEntryCount: sidecar.bodyWitnessEntryCount,
+			bytes: sidecar.bytes,
+			identityWitnessStartByDocId: sidecar.identityWitnessStartByDocId,
+			identityWitnessStringIds: sidecar.identityWitnessStringIds,
+			identityWitnessSourceMaskByDocEntry:
+				sidecar.identityWitnessSourceMaskByDocEntry,
+			routeWitnessStartByDocId: sidecar.routeWitnessStartByDocId,
+			routeWitnessStringIds: sidecar.routeWitnessStringIds,
+			routeWitnessSourceMaskByDocEntry:
+				sidecar.routeWitnessSourceMaskByDocEntry,
+			headingWitnessStartByDocId: sidecar.headingWitnessStartByDocId,
+			headingWitnessStringIds: sidecar.headingWitnessStringIds,
+			bodyWitnessOccurrenceStartByBlockId:
+				sidecar.bodyWitnessOccurrenceStartByBlockId,
+			bodyWitnessOccurrenceStringIds:
+				sidecar.bodyWitnessOccurrenceStringIds,
+			bodyWitnessPositionEncodingByBlockId:
+				sidecar.bodyWitnessPositionEncodingByBlockId,
+			bodyWitnessPositionStartByBlockId:
+				sidecar.bodyWitnessPositionStartByBlockId,
+			bodyWitnessPositionDeltaU8Tape:
+				sidecar.bodyWitnessPositionDeltaU8Tape,
+			bodyWitnessPositionDeltaU16Tape:
+				sidecar.bodyWitnessPositionDeltaU16Tape,
+			bodyWitnessPositionDeltaU32Tape:
+				sidecar.bodyWitnessPositionDeltaU32Tape,
+		};
+		await this.database.db.lexicalHanWitness.put(row);
 	}
 
 	async notifyHybridIndexedRefsChanged(
@@ -194,8 +639,47 @@ export class FileSnapshotStore {
 		await this.database.db.hybridDirtyShadows.bulkDelete(stalePaths);
 	}
 
+	async ensureDocRegistryEntry(
+		request: EnsureDocRegistryEntryRequest,
+	): Promise<DocRegistryRow> {
+		return await this.database.ensureDocRegistryEntry(request);
+	}
+
+	async getDocRegistryEntry(
+		path: string,
+	): Promise<DocRegistryRow | undefined> {
+		return await this.database.getDocRegistryEntry(path);
+	}
+
+	async moveDocRegistryPath(
+		oldPath: string,
+		newPath: string,
+		options?: {
+			generation?: number;
+			contentFingerprint?: string;
+		},
+	): Promise<DocRegistryRow | undefined> {
+		return await this.database.moveDocRegistryPath(oldPath, newPath, options);
+	}
+
+	async markDocRegistryDeleted(
+		path: string,
+		generation?: number,
+	): Promise<void> {
+		await this.database.markDocRegistryDeleted(path, generation);
+	}
+
 	async putHybridIndexedFileRef(ref: HybridIndexedFileRef): Promise<void> {
-		await this.database.db.hybridIndexedFileRefs.put(ref);
+		const docRegistryEntry = await this.database.ensureDocRegistryEntry({
+			docRef: ref.docRef,
+			path: ref.path,
+			generation: ref.generation,
+			deleted: false,
+		});
+		await this.database.db.hybridIndexedFileRefs.put({
+			...ref,
+			docRef: ref.docRef ?? docRegistryEntry.docRef,
+		});
 		if (ref.state !== "pending") {
 			await this.notifyHybridIndexedRefsChanged([ref.path]);
 		}
@@ -244,6 +728,11 @@ export class FileSnapshotStore {
 			this.deleteCurrentFile(filePath);
 		}
 		await this.deletePersistedFiles(filePaths);
+		await Promise.all(
+			filePaths.map(async (filePath) => {
+				await this.database.markDocRegistryDeleted(filePath);
+			}),
+		);
 	}
 
 	async retainOnlyFiles(validPaths: ReadonlySet<string>): Promise<void> {
@@ -259,6 +748,12 @@ export class FileSnapshotStore {
 			(row: { filePath: string }) => row.filePath,
 		);
 		await this.deleteRowsNotIn(
+			() => this.database.db.lexicalIndexedMetadata,
+			(paths) => this.database.db.lexicalIndexedMetadata.bulkDelete(paths),
+			validPaths,
+			(row: { filePath: string }) => row.filePath,
+		);
+		await this.deleteRowsNotIn(
 			() => this.database.db.hybridIndexedFileRefs,
 			(paths) => this.database.db.hybridIndexedFileRefs.bulkDelete(paths),
 			validPaths,
@@ -269,6 +764,14 @@ export class FileSnapshotStore {
 			(paths) => this.database.db.hybridDirtyShadows.bulkDelete(paths),
 			validPaths,
 			(row: { filePath: string }) => row.filePath,
+		);
+		const docRegistryEntries = await this.database.listDocRegistryEntries();
+		await Promise.all(
+			docRegistryEntries
+				.filter((row) => !validPaths.has(row.path))
+				.map(async (row) => {
+					await this.database.markDocRegistryDeleted(row.path);
+				}),
 		);
 	}
 
@@ -463,6 +966,16 @@ export class FileSnapshotStore {
 		if (rows.length === 0) {
 			return;
 		}
+		const docRegistryEntries = await this.database.ensureDocRegistryEntries(
+			persistedFiles.map((file) => ({
+				path: file.path,
+				generation: file.generation,
+				deleted: false,
+			})),
+		);
+		for (const row of rows) {
+			row.docRef = docRegistryEntries.get(row.filePath)?.docRef;
+		}
 		await this.preserveIndexedGenerationShadows(persistedFiles);
 		await this.database.db.fileSnapshots.bulkPut(rows);
 	}
@@ -495,6 +1008,7 @@ export class FileSnapshotStore {
 		const uniquePaths = Array.from(new Set(filePaths));
 		await Promise.all([
 			this.database.db.fileSnapshots.bulkDelete(uniquePaths),
+			this.database.db.lexicalIndexedMetadata.bulkDelete(uniquePaths),
 			this.database.db.hybridDirtyShadows.bulkDelete(uniquePaths),
 		]);
 	}
@@ -681,6 +1195,7 @@ export class FileSnapshotStore {
 				continue;
 			}
 			shadowRows.push({
+				docRef: currentRow.docRef ?? indexedRef.docRef,
 				filePath: currentRow.filePath,
 				plainText: currentRow.plainText,
 				generation: currentRow.generation,

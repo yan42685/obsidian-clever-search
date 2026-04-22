@@ -25,6 +25,7 @@ import {
 	type PreparedHybridRecall,
 } from "../search/hybrid/hybrid-engine";
 import { LexicalEngine } from "../search/lexical-engine";
+import { FileSnapshotStore } from "../search/shared/file-snapshot-store";
 import { TruncateOption } from "../search/truncate-option";
 import { throttle } from "throttle-debounce";
 import { MyNotice } from "./transformed-api";
@@ -65,6 +66,7 @@ export class SearchService {
 	private readonly setting = getInstance(OuterSetting);
 	private readonly dataProvider = getInstance(DataProvider);
 	private readonly lexicalEngine = getInstance(LexicalEngine);
+	private readonly fileSnapshotStore = getInstance(FileSnapshotStore);
 	private readonly lineHighlighter = getInstance(LineHighlighter);
 	private readonly viewRegistry = getInstance(ViewRegistry);
 	readonly hybridEngine = new HybridEngine();
@@ -312,6 +314,68 @@ export class SearchService {
 		);
 	}
 
+	private async decorateHybridSearchResult(
+		result: SearchResult,
+	): Promise<SearchResult> {
+		const hybridItems = result.items.filter(
+			(item): item is FileItem =>
+				item instanceof FileItem && item.engineType === EngineType.HYBRID,
+		);
+		if (hybridItems.length === 0) {
+			return result;
+		}
+
+		const freshnessByPath = await getInstance(
+			DataManager,
+		).getHybridFileFreshnessMap(hybridItems.map((item) => item.path));
+		for (const item of hybridItems) {
+			const freshness = freshnessByPath.get(item.path);
+			if (!freshness) {
+				item.freshnessState = "lexical_only";
+				item.freshnessReason = "shadow_missing";
+				item.snapshotGeneration = undefined;
+				item.snapshotSource = "live";
+				item.bannerKey = null;
+				item.bannerMessage = null;
+				continue;
+			}
+
+			item.freshnessState = freshness.state;
+			item.freshnessReason = freshness.reason;
+			item.snapshotGeneration = freshness.snapshotGeneration;
+			item.snapshotSource = freshness.snapshotSource;
+			item.nativeSubItemsReady =
+				freshness.state === "stale_grace" ? false : item.nativeSubItemsReady;
+			const banner = this.buildHybridItemBanner(item);
+			item.bannerKey = banner.key;
+			item.bannerMessage = banner.message;
+		}
+
+		return result;
+	}
+
+	private buildHybridItemBanner(item: FileItem): {
+		key: FileItem["bannerKey"];
+		message: string | null;
+	} {
+		if (item.freshnessState !== "stale_grace") {
+			return {
+				key: null,
+				message: null,
+			};
+		}
+		if (item.freshnessReason === "embedding_wait_interval") {
+			return {
+				key: "hybridNotice.fileEmbeddingWaitInterval",
+				message: null,
+			};
+		}
+		return {
+			key: "hybridNotice.fileEmbeddingUpdating",
+			message: null,
+		};
+	}
+
 	private resolveHybridFallbackNoticeKey(
 		...noticeKeys: Array<SearchResult["hybridFallbackNoticeKey"]>
 	): SearchResult["hybridFallbackNoticeKey"] {
@@ -524,7 +588,7 @@ export class SearchService {
 		);
 		return {
 			prepared,
-				result: this.buildHybridSearchResult(
+				result: await this.decorateHybridSearchResult(this.buildHybridSearchResult(
 					sourcePath,
 					earlyItems,
 					prepared.fallbackNoticeMessage,
@@ -539,7 +603,7 @@ export class SearchService {
 					prepared.fallbackIssueMessage,
 					options.noticeContext ?? "default",
 					prepared.fallbackNoticeKey,
-				),
+				)),
 			};
 	}
 
@@ -570,7 +634,8 @@ export class SearchService {
 			});
 		}
 		if (mode === "lexical-lane") {
-			return this.buildHybridSearchResult(
+			return await this.decorateHybridSearchResult(
+				this.buildHybridSearchResult(
 				sourcePath,
 				this.hybridEngine.buildItemsFromPreparedRecall(prepared, prepared.topK),
 				prepared.fallbackNoticeMessage,
@@ -585,6 +650,7 @@ export class SearchService {
 				prepared.fallbackIssueMessage,
 				options.noticeContext ?? "default",
 				prepared.fallbackNoticeKey,
+			),
 			);
 		}
 		const finalized = await this.hybridEngine.finalizePreparedRecall(
@@ -610,7 +676,8 @@ export class SearchService {
 				noticeContext: options.noticeContext ?? "default",
 			});
 		}
-		return this.buildHybridSearchResult(
+		return await this.decorateHybridSearchResult(
+			this.buildHybridSearchResult(
 			sourcePath,
 			finalized.items,
 			finalized.fallbackNoticeMessage,
@@ -625,6 +692,7 @@ export class SearchService {
 			finalized.fallbackIssueMessage,
 			options.noticeContext ?? "default",
 			finalized.fallbackNoticeKey,
+		),
 		);
 	}
 
@@ -725,6 +793,13 @@ export class SearchService {
 		queryText: string,
 		fileItem: FileItem,
 	): Promise<FileSubItem[]> {
+		if (
+			fileItem.engineType === EngineType.HYBRID &&
+			fileItem.freshnessState === "stale_grace"
+		) {
+			return await this.getHybridShadowSnapshotSubItems(queryText, fileItem);
+		}
+
 		const path = fileItem.path;
 		const nativeSubItems = await this.lexicalEngine.getNativeFileSubItems(
 			queryText,
@@ -774,6 +849,67 @@ export class SearchService {
 
 		fileItem.nativeSubItemsReady = true;
 		return fileSubItems;
+	}
+
+	private async getHybridShadowSnapshotSubItems(
+		queryText: string,
+		fileItem: FileItem,
+	): Promise<FileSubItem[]> {
+		if (fileItem.snapshotGeneration === undefined) {
+			fileItem.nativeSubItemsReady = true;
+			return fileItem.subItems;
+		}
+
+		const snapshotTexts = await this.fileSnapshotStore.readIndexedTexts([
+			{
+				path: fileItem.path,
+				generation: fileItem.snapshotGeneration,
+			},
+		]);
+		const snapshotText = snapshotTexts.get(fileItem.path);
+		if (!snapshotText) {
+			fileItem.nativeSubItemsReady = true;
+			return fileItem.subItems;
+		}
+
+		const lines = snapshotText
+			.split(FileUtil.SPLIT_EOL)
+			.map((text, index) => new Line(text, index));
+		const tempFileItem = new FileItem(
+			EngineType.HYBRID,
+			fileItem.path,
+			fileItem.queryTerms,
+			fileItem.matchedTerms,
+			[],
+			"nothing",
+		);
+		const matchedLines = await this.lexicalEngine.searchLinesByFileItem(
+			lines,
+			"subItem",
+			queryText,
+			tempFileItem,
+			SearchService.LEXICAL_SUBITEM_MAX_LINES,
+		);
+		const shadowSubItems = this.lineHighlighter
+			.parseAll(
+				lines,
+				matchedLines,
+				TruncateOption.forType("subItem", queryText),
+				false,
+			)
+			.map((itemContext) => {
+				const subItem = new FileSubItem(
+					itemContext.text,
+					itemContext.row,
+					itemContext.col,
+				);
+				subItem.snippet = itemContext.text;
+				return subItem;
+			});
+		fileItem.subItems = shadowSubItems;
+		fileItem.nativeSubItemsReady = true;
+		fileItem.snapshotSource = "shadow";
+		return shadowSubItems;
 	}
 
 	private getLexicalFileCandidateLimit(maxDisplayItems: number): number {

@@ -9,6 +9,13 @@ const textEncoder = new TextEncoder();
 
 export const FUZZY_RESCUE_MIN_QUERY_LENGTH = 6;
 
+export const EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR: ResidentFuzzyRescueSidecar = {
+	candidateMetadataFamilyIdsByDeletionKey: new Map(),
+	indexedMetadataFamilyCount: 0,
+	deletionKeyCount: 0,
+	bytes: 0,
+};
+
 export function buildResidentFuzzyRescueSidecar(params: Readonly<{
 	familyTexts: readonly string[];
 	familyFlagsByFamilyId: Uint8Array;

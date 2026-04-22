@@ -4,12 +4,13 @@ import { encodeHanBigramId, encodeHanCharId, isSingletonHanStopChar } from "../q
 import { collectCandidateResidualSingletonHanTarget } from "../singleton-han";
 import type { V3QueryAnalysis } from "../query/analysis";
 import {
-	collectBodyFamilyPostingBlockIds,
+	collectBodyFamilyPostingBlockIdsForShardLocalFamilySlot,
 	collectHanBodyBlockIdsByChar,
 	collectHanBodyBlockIds,
 	collectHanMetadataDocIdsByChar,
 	collectHanMetadataDocIds,
-	collectPostingDocIds,
+	collectPostingDocIdsForShardLocalFamilySlot,
+	getLiveDocSlot,
 } from "./access";
 import { planHanSurfaceGroupRecallsAfterFamilyLookup } from "./han-surface-groups";
 import type {
@@ -30,28 +31,31 @@ export function recallCandidateDocs(
 	const recallByDocId = new Map<number, RecallBucket>();
 	for (const unitMatches of unitFamilyMatches) {
 		for (const match of unitMatches.matches) {
-			for (const docId of collectPostingDocIds(
+			for (const docId of collectPostingDocIdsForShardLocalFamilySlot(
+				base,
 				base.metadataContainers.identityPostings.postingStarts,
 				base.metadataContainers.identityPostings.docIds,
-				match.familyId,
+				match.shardLocalFamilySlot,
 			)) {
 				getOrCreateRecallBucket(recallByDocId, docId).identity.add(
 					unitMatches.queryUnitIndex,
 				);
 			}
-			for (const docId of collectPostingDocIds(
+			for (const docId of collectPostingDocIdsForShardLocalFamilySlot(
+				base,
 				base.metadataContainers.routePostings.postingStarts,
 				base.metadataContainers.routePostings.docIds,
-				match.familyId,
+				match.shardLocalFamilySlot,
 			)) {
 				getOrCreateRecallBucket(recallByDocId, docId).route.add(
 					unitMatches.queryUnitIndex,
 				);
 			}
-			for (const docId of collectPostingDocIds(
+			for (const docId of collectPostingDocIdsForShardLocalFamilySlot(
+				base,
 				base.metadataContainers.headingPostings.postingStarts,
 				base.metadataContainers.headingPostings.docIds,
-				match.familyId,
+				match.shardLocalFamilySlot,
 			)) {
 				getOrCreateRecallBucket(recallByDocId, docId).heading.add(
 					unitMatches.queryUnitIndex,
@@ -62,7 +66,10 @@ export function recallCandidateDocs(
 
 	for (const unitMatches of unitFamilyMatches) {
 		for (const match of unitMatches.matches) {
-			for (const blockId of collectBodyFamilyPostingBlockIds(base, match.familyId)) {
+			for (const blockId of collectBodyFamilyPostingBlockIdsForShardLocalFamilySlot(
+				base,
+				match.shardLocalFamilySlot,
+			)) {
 				const docId = base.bodyBlocks.docIdByBlockId[blockId] ?? -1;
 				if (docId < 0) {
 					continue;
@@ -106,6 +113,7 @@ export function recallCandidateDocs(
 				.sort((left, right) => left.blockId - right.blockId);
 			return {
 				docId,
+				liveDocSlot: getLiveDocSlot(base, docId),
 				matchedIdentityUnitIndices: [...bucket.identity].sort((left, right) => left - right),
 				matchedRouteUnitIndices: [...bucket.route].sort((left, right) => left - right),
 				matchedHeadingUnitIndices: [...bucket.heading].sort((left, right) => left - right),
@@ -434,10 +442,11 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 			continue;
 		}
 		for (const match of unitMatches.matches) {
-			for (const docId of collectPostingDocIds(
+			for (const docId of collectPostingDocIdsForShardLocalFamilySlot(
+				base,
 				base.metadataContainers.identityPostings.postingStarts,
 				base.metadataContainers.identityPostings.docIds,
-				match.familyId,
+				match.shardLocalFamilySlot,
 			)) {
 				const scope = singletonScopesByDocId.get(docId);
 				if (scope == null) {
@@ -446,10 +455,11 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 				scope.matchedFamilyUnitIndices.add(unitMatches.queryUnitIndex);
 				scope.hasMetadataFamilyAnchor = true;
 			}
-			for (const docId of collectPostingDocIds(
+			for (const docId of collectPostingDocIdsForShardLocalFamilySlot(
+				base,
 				base.metadataContainers.routePostings.postingStarts,
 				base.metadataContainers.routePostings.docIds,
-				match.familyId,
+				match.shardLocalFamilySlot,
 			)) {
 				const scope = singletonScopesByDocId.get(docId);
 				if (scope == null) {
@@ -458,7 +468,10 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 				scope.matchedFamilyUnitIndices.add(unitMatches.queryUnitIndex);
 				scope.hasMetadataFamilyAnchor = true;
 			}
-			for (const blockId of collectBodyFamilyPostingBlockIds(base, match.familyId)) {
+			for (const blockId of collectBodyFamilyPostingBlockIdsForShardLocalFamilySlot(
+				base,
+				match.shardLocalFamilySlot,
+			)) {
 				const docId = base.bodyBlocks.docIdByBlockId[blockId] ?? -1;
 				const scope = singletonScopesByDocId.get(docId);
 				if (scope == null) {

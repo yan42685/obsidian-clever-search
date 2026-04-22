@@ -1,4 +1,4 @@
-import { renderV3DirectSubitemCandidate } from "src/services/search/coverage-lexical-v3/direct-subitems/renderer";
+﻿import { renderV3DirectSubitemCandidate } from "src/services/search/coverage-lexical-v3/direct-subitems/renderer";
 import type {
 	V3DirectSubitemAtom,
 	V3DirectSubitemCandidate,
@@ -50,6 +50,7 @@ function createCandidate(
 		anchorTier: overrides.anchorTier ?? "real_lexical",
 		coveredRealPrimaryCount: overrides.coveredRealPrimaryCount ?? 1,
 		confirmedSurfaceGroupCount: overrides.confirmedSurfaceGroupCount ?? 0,
+		singletonHanCompletionTier: overrides.singletonHanCompletionTier ?? "none",
 		matchedOpaqueBigramCount: overrides.matchedOpaqueBigramCount ?? 0,
 		opaqueCoverageRatio: overrides.opaqueCoverageRatio ?? 0,
 		preservesQueryOrder: overrides.preservesQueryOrder ?? true,
@@ -122,7 +123,7 @@ describe("coverage lexical v3 direct subitems renderer", () => {
 	});
 
 	test("keeps multiple opaque bigrams from the same Han surface group visible", () => {
-		const snapshotText = "这是赢宋风格的窄体字。";
+		const snapshotText = "这是一段赢宋风格的窄体字。";
 		const winSongStart = snapshotText.indexOf("赢宋");
 		const condensedStart = snapshotText.indexOf("窄体");
 		const payload = renderV3DirectSubitemCandidate({
@@ -167,3 +168,5 @@ describe("coverage lexical v3 direct subitems renderer", () => {
 		expect(highlighted).toContain("窄体");
 	});
 });
+
+

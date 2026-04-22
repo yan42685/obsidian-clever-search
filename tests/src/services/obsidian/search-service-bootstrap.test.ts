@@ -58,6 +58,10 @@ jest.mock("src/services/search/lexical-engine", () => ({
 	LexicalEngine: class LexicalEngine {},
 }));
 
+jest.mock("src/services/search/shared/file-snapshot-store", () => ({
+	FileSnapshotStore: class FileSnapshotStore {},
+}));
+
 jest.mock("src/services/search/highlighter", () => ({
 	LineHighlighter: class LineHighlighter {},
 }));
@@ -123,6 +127,9 @@ describe("SearchService bootstrap gate", () => {
 		const { OuterSetting } = require("src/globals/plugin-setting");
 		const { DataProvider } = require("src/services/obsidian/user-data/data-provider");
 		const { LexicalEngine } = require("src/services/search/lexical-engine");
+		const {
+			FileSnapshotStore,
+		} = require("src/services/search/shared/file-snapshot-store");
 		const { LineHighlighter } = require("src/services/search/highlighter");
 		const {
 			ViewRegistry,
@@ -172,6 +179,10 @@ describe("SearchService bootstrap gate", () => {
 		const viewRegistry = {
 			viewTypeByPath: jest.fn(() => ViewType.MARKDOWN),
 		};
+		const fileSnapshotStore = {
+			readIndexedTexts: jest.fn().mockResolvedValue(new Map()),
+			readIndexedMetadata: jest.fn().mockResolvedValue(new Map()),
+		};
 		const dataManager = {
 			flushPendingDocOperations: jest.fn(async () => undefined),
 			getLexicalAvailabilityState: jest.fn(() => ({
@@ -216,6 +227,7 @@ describe("SearchService bootstrap gate", () => {
 		mockInstanceMap.set(OuterSetting, setting);
 		mockInstanceMap.set(DataProvider, dataProvider);
 		mockInstanceMap.set(LexicalEngine, lexicalEngine);
+		mockInstanceMap.set(FileSnapshotStore, fileSnapshotStore);
 		mockInstanceMap.set(LineHighlighter, lineHighlighter);
 		mockInstanceMap.set(ViewRegistry, viewRegistry);
 		mockInstanceMap.set(DataManager, dataManager);

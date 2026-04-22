@@ -1,12 +1,22 @@
-jest.mock("src/services/search/tokenizer", () => ({
+﻿jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
 }));
 
 import type { IndexedDocument } from "src/globals/search-types";
-import type { CoverageLexicalV3SearchResult } from "src/services/search/coverage-lexical-v3/engine";
+import type {
+	CoverageLexicalV3PreparedSearch,
+	CoverageLexicalV3SearchResult,
+} from "src/services/search/coverage-lexical-v3/engine";
 import { CoverageLexicalV3FileSearchEngine } from "src/services/search/coverage-lexical-v3/file-search-engine";
 import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
-import type { EvidencePackingProfile } from "src/services/search/coverage-lexical-v3/ranking/types";
+import type {
+	V3QueryAnalysis,
+	V3QuerySurfaceGroup,
+} from "src/services/search/coverage-lexical-v3/query/analysis";
+import type {
+	EvidencePackingProfile,
+	RealizedQueryUnitFamily,
+} from "src/services/search/coverage-lexical-v3/ranking/types";
 import { container } from "tsyringe";
 
 const { Tokenizer } = jest.requireMock("src/services/search/tokenizer") as {
@@ -27,6 +37,116 @@ function createDocument(
 		headings: overrides.headings,
 		generation: overrides.generation ?? 1,
 		size: overrides.size,
+	};
+}
+
+function createLatinSurfaceGroup(index: number, text: string): V3QuerySurfaceGroup {
+	return {
+		index,
+		text,
+		kind: "latin",
+		hanBigramTexts: [],
+		coveredCharMask: [],
+		queryResidualUniqueBigrams: [],
+		hasQueryResidualHanCoverage: false,
+	};
+}
+
+function createHanSurfaceGroup(
+	index: number,
+	text: string,
+	overrides: Partial<Pick<V3QuerySurfaceGroup, "coveredCharMask" | "queryResidualUniqueBigrams">> = {},
+): V3QuerySurfaceGroup {
+	const chars = Array.from(text);
+	const hanBigramTexts = chars.slice(0, -1).map((_, charIndex) => {
+		return chars[charIndex] + chars[charIndex + 1];
+	});
+	const queryResidualUniqueBigrams = overrides.queryResidualUniqueBigrams ?? hanBigramTexts;
+	return {
+		index,
+		text,
+		kind: "han",
+		hanBigramTexts,
+		coveredCharMask:
+			overrides.coveredCharMask ?? Array.from({ length: chars.length }, () => false),
+		queryResidualUniqueBigrams,
+		hasQueryResidualHanCoverage: queryResidualUniqueBigrams.length > 0,
+	};
+}
+
+function createLatinQueryAnalysis(queryText: string, terms: readonly string[]): V3QueryAnalysis {
+	return {
+		queryText,
+		normalizedQueryText: queryText,
+		querySingletonHanChar: null,
+		querySingletonHanCodePoint: null,
+		querySingletonHanRecallEligible: false,
+		surfaceGroups: terms.map((term, index) => createLatinSurfaceGroup(index, term)),
+		primaryUnits: terms.map((term, index) => ({
+			index,
+			text: term,
+			source: "surface" as const,
+			surfaceGroupIndex: index,
+		})),
+		hanBackstopGroups: [],
+		surfaceCoverageShapeKey:
+			terms.length === 0 ? "" : Array.from({ length: terms.length }, () => "l").join(""),
+	};
+}
+
+function createHanQueryAnalysis(
+	queryText: string,
+	surfaceGroup: V3QuerySurfaceGroup,
+	primaryUnitText: string | null,
+): V3QueryAnalysis {
+	return {
+		queryText,
+		normalizedQueryText: queryText,
+		querySingletonHanChar: null,
+		querySingletonHanCodePoint: null,
+		querySingletonHanRecallEligible: false,
+		surfaceGroups: [surfaceGroup],
+		primaryUnits:
+			primaryUnitText == null
+				? []
+				: [
+					{
+						index: 0,
+						text: primaryUnitText,
+						source: "han_tokenizer_real" as const,
+						surfaceGroupIndex: surfaceGroup.index,
+					},
+				],
+		hanBackstopGroups: [],
+		surfaceCoverageShapeKey: "h",
+	};
+}
+
+function createRealizedFamily(
+	overrides: Partial<RealizedQueryUnitFamily> &
+		Pick<
+			RealizedQueryUnitFamily,
+			"queryUnitIndex" | "queryUnitText" | "familyId" | "familyText"
+		>,
+): RealizedQueryUnitFamily {
+	return {
+		queryUnitIndex: overrides.queryUnitIndex,
+		queryUnitText: overrides.queryUnitText,
+		querySurfaceGroupIndex: overrides.querySurfaceGroupIndex ?? null,
+		familyId: overrides.familyId,
+		shardLocalFamilySlot: overrides.shardLocalFamilySlot ?? overrides.familyId,
+		familyText: overrides.familyText,
+		matchKind: overrides.matchKind ?? "exact",
+		editDistance: overrides.editDistance ?? 0,
+		identityMetadataSource: overrides.identityMetadataSource ?? "none",
+		routeMetadataSource: overrides.routeMetadataSource ?? "none",
+		metadataPackingSource: overrides.metadataPackingSource ?? "none",
+		bodyPrefixSupportKind: overrides.bodyPrefixSupportKind ?? "none",
+		inIdentity: overrides.inIdentity ?? false,
+		inRoute: overrides.inRoute ?? false,
+		inHeading: overrides.inHeading ?? false,
+		inBestBodyWindow: overrides.inBestBodyWindow ?? false,
+		inBodyResidue: overrides.inBodyResidue ?? false,
 	};
 }
 
@@ -52,7 +172,26 @@ function createPackingProfile(
 		strongestHanSurfaceCompletionTier:
 			overrides.strongestHanSurfaceCompletionTier ?? "none",
 		hanSurfaceCompletionGroups: overrides.hanSurfaceCompletionGroups ?? [],
+		singletonHanCompletion: overrides.singletonHanCompletion ?? {
+			singletonHanChar: null,
+			singletonHanCharIndex: null,
+			singletonHanSurfaceGroupIndex: null,
+			matched: false,
+			matchSource: "none",
+			bestAnchorKind: "none",
+			bestAnchorDistance: null,
+			sameBlockAsAnchor: false,
+			sameBlockAsBestBodyWindow: false,
+			tier: "none",
+		},
+		hanStrongRescueGroupCount: overrides.hanStrongRescueGroupCount ?? 0,
+		hanWeakRescueGroupCount: overrides.hanWeakRescueGroupCount ?? 0,
+		hanRescueSupportWeightTotal: overrides.hanRescueSupportWeightTotal ?? 0,
+		hasOnlyWeakHanRescue: overrides.hasOnlyWeakHanRescue ?? false,
+		hasAnyHanRescueAssessment: overrides.hasAnyHanRescueAssessment ?? false,
+		hanRescueAssessments: overrides.hanRescueAssessments ?? [],
 		prefixCompletionGainTotal: overrides.prefixCompletionGainTotal ?? 0,
+		compoundBackedPrefixCount: overrides.compoundBackedPrefixCount ?? 0,
 		compoundPrefixCount: overrides.compoundPrefixCount ?? 0,
 		fuzzyUnitCount: overrides.fuzzyUnitCount ?? 0,
 		fuzzyEditDistanceTotal: overrides.fuzzyEditDistanceTotal ?? 0,
@@ -78,13 +217,63 @@ function createPackingProfile(
 }
 
 function installTokenizer(): void {
-	container.registerInstance(Tokenizer, {
-		tokenizeSequence: (text: string) =>
-			text
-				.split(/\s+/u)
-				.map((token) => token.trim())
-				.filter((token) => token.length > 0),
-	} as unknown as Tokenizer);
+	container.registerInstance(
+		Tokenizer,
+		{
+			tokenizeSequence: (text: string) =>
+				text
+					.split(/\s+/u)
+					.map((token) => token.trim())
+					.filter((token) => token.length > 0),
+		} as unknown as InstanceType<typeof Tokenizer>,
+	);
+}
+
+function createSnapshotStoreStub() {
+	return {
+		readIndexedTexts: jest.fn(async () => new Map<string, string>()),
+		readIndexedMetadata: jest.fn(async () => new Map()),
+		readCurrentTexts: jest.fn(async () => new Map<string, string>()),
+		publishIndexedTexts: jest.fn(async () => undefined),
+		publishLexicalIndexedMetadata: jest.fn(async () => undefined),
+		publishLexicalFuzzyRescue: jest.fn(async () => undefined),
+		publishLexicalBodyEvidence: jest.fn(async () => undefined),
+		publishLexicalHanDocEvidence: jest.fn(async () => undefined),
+		publishLexicalHanBodyEvidence: jest.fn(async () => undefined),
+	};
+}
+
+function attachMockSearchPipeline(
+	engine: CoverageLexicalV3FileSearchEngine,
+	result: CoverageLexicalV3SearchResult,
+): void {
+	const preparedSearch: CoverageLexicalV3PreparedSearch = {
+		queryText: result.recallState.queryAnalysis.queryText,
+		queryTerms: result.recallState.queryAnalysis.primaryUnits.map((unit) => unit.text),
+		queryAnalysis: result.recallState.queryAnalysis,
+		unitFamilyMatches: [],
+		guardedCandidateDocs: [],
+	};
+	const prepareSearch = jest.fn(() => preparedSearch);
+	const hydrateRankingEvidenceForCandidates = jest.fn(async () => ({
+		hydratedEvidenceByDocId: new Map<number, unknown>(),
+	}));
+	const rankPreparedSearch = jest.fn(() => result);
+	(engine as unknown as {
+		engine: {
+			prepareSearch: typeof prepareSearch;
+			rankPreparedSearch: typeof rankPreparedSearch;
+			getResidentBase: () => ResidentBase | null;
+		};
+		hydrateRankingEvidenceForCandidates: typeof hydrateRankingEvidenceForCandidates;
+	}).engine = {
+		prepareSearch,
+		rankPreparedSearch,
+		getResidentBase: () => null,
+	};
+	(engine as unknown as {
+		hydrateRankingEvidenceForCandidates: typeof hydrateRankingEvidenceForCandidates;
+	}).hydrateRankingEvidenceForCandidates = hydrateRankingEvidenceForCandidates;
 }
 
 function sliceHighlights(
@@ -115,6 +304,8 @@ describe("coverage lexical v3 file search engine metadata highlights", () => {
 
 	test("searchFiles highlights basename exact matches and folder prefix matches by realized family text", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
+		const snapshotStore = createSnapshotStoreStub();
+		(engine as unknown as { getFileSnapshotStore: () => typeof snapshotStore }).getFileSnapshotStore = () => snapshotStore;
 		await engine.reIndexAll([
 			createDocument({
 				path: "infra/runtime/runtime-note.md",
@@ -123,67 +314,30 @@ describe("coverage lexical v3 file search engine metadata highlights", () => {
 				content: "placeholder",
 			}),
 		]);
-		const search = jest.fn(() =>
+		attachMockSearchPipeline(
+			engine,
 			createMockEngineResult(
-				{
-					queryText: "runtime",
-					normalizedQueryText: "runtime",
-					surfaceGroups: [
-						{
-							index: 0,
-							text: "runtime",
-							kind: "latin",
-							hanBigramTexts: [],
-							coveredCharMask: [],
-							queryResidualUniqueBigrams: [],
-							hasQueryResidualHanCoverage: false,
-						},
-					],
-					primaryUnits: [
-						{
-							index: 0,
-							text: "runtime",
-							source: "surface",
-							surfaceGroupIndex: 0,
-						},
-					],
-					hanBackstopGroups: [],
-					surfaceCoverageShapeKey: "l",
-				},
+				createLatinQueryAnalysis("runtime", ["runtime"]),
 				createPackingProfile({
 					docId: 0,
 					path: "infra/runtime/runtime-note.md",
 					realizedFamilies: [
-						{
+						createRealizedFamily({
 							queryUnitIndex: 0,
 							queryUnitText: "runtime",
 							querySurfaceGroupIndex: 0,
 							familyId: 1,
 							familyText: "runtime",
-							matchKind: "exact",
-							editDistance: 0,
 							identityMetadataSource: "basename",
 							routeMetadataSource: "folder",
 							metadataPackingSource: "basename",
 							inIdentity: true,
 							inRoute: true,
-							inHeading: false,
-							inBestBodyWindow: false,
-							inBodyResidue: false,
-						},
+						}),
 					],
 				}),
 			),
 		);
-		(engine as unknown as {
-			engine: {
-				search: typeof search;
-				getResidentBase: () => ResidentBase | null;
-			};
-		}).engine = {
-			search,
-			getResidentBase: () => null,
-		};
 
 		const matchedFiles = await engine.searchFiles({
 			queryText: "runtime",
@@ -202,6 +356,8 @@ describe("coverage lexical v3 file search engine metadata highlights", () => {
 
 	test("searchFiles highlights fuzzy metadata matches as weak ranges", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
+		const snapshotStore = createSnapshotStoreStub();
+		(engine as unknown as { getFileSnapshotStore: () => typeof snapshotStore }).getFileSnapshotStore = () => snapshotStore;
 		await engine.reIndexAll([
 			createDocument({
 				path: "notes/runtime-obsidian.md",
@@ -210,43 +366,15 @@ describe("coverage lexical v3 file search engine metadata highlights", () => {
 				content: "placeholder",
 			}),
 		]);
-		const search = jest.fn(() =>
+		attachMockSearchPipeline(
+			engine,
 			createMockEngineResult(
-				{
-					queryText: "obsidan runtime",
-					normalizedQueryText: "obsidan runtime",
-					surfaceGroups: [
-						{
-							index: 0,
-							text: "obsidan",
-							kind: "latin",
-							hanBigramTexts: [],
-							coveredCharMask: [],
-							queryResidualUniqueBigrams: [],
-							hasQueryResidualHanCoverage: false,
-						},
-						{
-							index: 1,
-							text: "runtime",
-							kind: "latin",
-							hanBigramTexts: [],
-							coveredCharMask: [],
-							queryResidualUniqueBigrams: [],
-							hasQueryResidualHanCoverage: false,
-						},
-					],
-					primaryUnits: [
-						{ index: 0, text: "obsidan", source: "surface", surfaceGroupIndex: 0 },
-						{ index: 1, text: "runtime", source: "surface", surfaceGroupIndex: 1 },
-					],
-					hanBackstopGroups: [],
-					surfaceCoverageShapeKey: "ll",
-				},
+				createLatinQueryAnalysis("obsidan runtime", ["obsidan", "runtime"]),
 				createPackingProfile({
 					docId: 0,
 					path: "notes/runtime-obsidian.md",
 					realizedFamilies: [
-						{
+						createRealizedFamily({
 							queryUnitIndex: 0,
 							queryUnitText: "obsidan",
 							querySurfaceGroupIndex: 0,
@@ -255,44 +383,25 @@ describe("coverage lexical v3 file search engine metadata highlights", () => {
 							matchKind: "fuzzy",
 							editDistance: 1,
 							identityMetadataSource: "basename",
-							routeMetadataSource: "none",
 							metadataPackingSource: "basename",
 							inIdentity: true,
-							inRoute: false,
-							inHeading: false,
-							inBestBodyWindow: false,
-							inBodyResidue: false,
-						},
-						{
+						}),
+						createRealizedFamily({
 							queryUnitIndex: 1,
 							queryUnitText: "runtime",
 							querySurfaceGroupIndex: 1,
 							familyId: 2,
 							familyText: "runtime",
-							matchKind: "exact",
-							editDistance: 0,
 							identityMetadataSource: "basename",
 							routeMetadataSource: "folder",
 							metadataPackingSource: "basename",
 							inIdentity: true,
 							inRoute: true,
-							inHeading: false,
-							inBestBodyWindow: false,
-							inBodyResidue: false,
-						},
+						}),
 					],
 				}),
 			),
 		);
-		(engine as unknown as {
-			engine: {
-				search: typeof search;
-				getResidentBase: () => ResidentBase | null;
-			};
-		}).engine = {
-			search,
-			getResidentBase: () => null,
-		};
 
 		const matchedFiles = await engine.searchFiles({
 			queryText: "obsidan runtime",
@@ -301,158 +410,104 @@ describe("coverage lexical v3 file search engine metadata highlights", () => {
 			maxItemResults: 5,
 		});
 
-		expect(
-			sliceHighlights(
-				"obsidian runtime guide",
-				matchedFiles[0]?.basenameWeakHighlightRanges,
-			),
-		).toContain("obsidian");
-		expect(
-			sliceHighlights(
-				"obsidian runtime guide",
-				matchedFiles[0]?.basenameHighlightRanges,
-			),
-		).toContain("runtime");
+		expect(sliceHighlights("obsidian runtime guide", matchedFiles[0]?.basenameWeakHighlightRanges)).toContain("obsidian");
+		expect(sliceHighlights("obsidian runtime guide", matchedFiles[0]?.basenameHighlightRanges)).toContain("runtime");
 	});
 
 	test("searchFiles prefers a full Han surface over the shorter covered real term in basename", async () => {
+		const fullSurface = "\u751f\u547d\u529b";
+		const shorterTerm = "\u751f\u547d";
+		const basename = "\u751f\u547d\u529b\u624b\u518c";
 		const engine = new CoverageLexicalV3FileSearchEngine();
+		const snapshotStore = createSnapshotStoreStub();
+		(engine as unknown as { getFileSnapshotStore: () => typeof snapshotStore }).getFileSnapshotStore = () => snapshotStore;
 		await engine.reIndexAll([
 			createDocument({
 				path: "zh/cache-guide.md",
-				basename: "生命力档案",
+				basename,
 				folder: "zh/",
 				content: "placeholder",
 			}),
 		]);
-		const search = jest.fn(() =>
+		attachMockSearchPipeline(
+			engine,
 			createMockEngineResult(
-				{
-					queryText: "生命力",
-					normalizedQueryText: "生命力",
-					surfaceGroups: [
-						{
-							index: 0,
-							text: "生命力",
-							kind: "han",
-							hanBigramTexts: ["生命", "命力"],
-							coveredCharMask: [true, true, false],
-							queryResidualUniqueBigrams: ["命力"],
-							hasQueryResidualHanCoverage: true,
-						},
-					],
-					primaryUnits: [
-						{
-							index: 0,
-							text: "生命",
-							source: "han_tokenizer_real",
-							surfaceGroupIndex: 0,
-						},
-					],
-					hanBackstopGroups: [],
-					surfaceCoverageShapeKey: "h",
-				},
+				createHanQueryAnalysis(
+					fullSurface,
+					createHanSurfaceGroup(0, fullSurface, {
+						coveredCharMask: [true, true, false],
+						queryResidualUniqueBigrams: ["\u547d\u529b"],
+					}),
+					shorterTerm,
+				),
 				createPackingProfile({
 					docId: 0,
 					path: "zh/cache-guide.md",
 					realizedFamilies: [
-						{
+						createRealizedFamily({
 							queryUnitIndex: 0,
-							queryUnitText: "生命",
+							queryUnitText: shorterTerm,
 							querySurfaceGroupIndex: 0,
 							familyId: 1,
-							familyText: "生命",
-							matchKind: "exact",
-							editDistance: 0,
+							familyText: shorterTerm,
 							identityMetadataSource: "basename",
-							routeMetadataSource: "none",
 							metadataPackingSource: "basename",
 							inIdentity: true,
-							inRoute: false,
-							inHeading: false,
-							inBestBodyWindow: false,
-							inBodyResidue: false,
-						},
+						}),
 					],
 				}),
 			),
 		);
-		(engine as unknown as {
-			engine: {
-				search: typeof search;
-				getResidentBase: () => ResidentBase | null;
-			};
-		}).engine = {
-			search,
-			getResidentBase: () => null,
-		};
 
 		const matchedFiles = await engine.searchFiles({
-			queryText: "生命力",
+			queryText: fullSurface,
 			isPrefixMatch: true,
 			isFuzzy: false,
 			maxItemResults: 5,
 		});
 
-		const highlights = sliceHighlights("生命力档案", matchedFiles[0]?.basenameHighlightRanges);
-		expect(highlights).toContain("生命力");
-		expect(highlights).not.toContain("生命");
+		const highlights = sliceHighlights(basename, matchedFiles[0]?.basenameHighlightRanges);
+		expect(highlights).toContain(fullSurface);
+		expect(highlights).not.toContain(shorterTerm);
 	});
 
 	test("searchFiles keeps Han opaque bigram highlights inside the best single witness", async () => {
+		const fullSurface = "\u751f\u547d\u529b";
+		const basename = "\u751f\u547d";
+		const folder = "\u8d44\u6599/\u547d\u529b/";
+		const path = folder + basename + ".md";
 		const engine = new CoverageLexicalV3FileSearchEngine();
+		const snapshotStore = createSnapshotStoreStub();
+		(engine as unknown as { getFileSnapshotStore: () => typeof snapshotStore }).getFileSnapshotStore = () => snapshotStore;
 		await engine.reIndexAll([
 			createDocument({
-				path: "资料/命力/生命.md",
-				basename: "生命",
-				folder: "资料/命力/",
+				path,
+				basename,
+				folder,
 				content: "placeholder",
 			}),
 		]);
-		const search = jest.fn(() =>
+		attachMockSearchPipeline(
+			engine,
 			createMockEngineResult(
-				{
-					queryText: "生命力",
-					normalizedQueryText: "生命力",
-					surfaceGroups: [
-						{
-							index: 0,
-							text: "生命力",
-							kind: "han",
-							hanBigramTexts: ["生命", "命力"],
-							coveredCharMask: [false, false, false],
-							queryResidualUniqueBigrams: ["生命", "命力"],
-							hasQueryResidualHanCoverage: true,
-						},
-					],
-					primaryUnits: [],
-					hanBackstopGroups: [],
-					surfaceCoverageShapeKey: "h",
-				},
+				createHanQueryAnalysis(fullSurface, createHanSurfaceGroup(0, fullSurface), null),
 				createPackingProfile({
 					docId: 0,
-					path: "资料/命力/生命.md",
+					path,
 				}),
 			),
 		);
-		(engine as unknown as {
-			engine: {
-				search: typeof search;
-				getResidentBase: () => ResidentBase | null;
-			};
-		}).engine = {
-			search,
-			getResidentBase: () => null,
-		};
 
 		const matchedFiles = await engine.searchFiles({
-			queryText: "生命力",
+			queryText: fullSurface,
 			isPrefixMatch: true,
 			isFuzzy: false,
 			maxItemResults: 5,
 		});
 
-		expect(sliceHighlights("生命", matchedFiles[0]?.basenameHighlightRanges)).toEqual(["生命"]);
-		expect(sliceHighlights("资料/命力/", matchedFiles[0]?.folderHighlightRanges)).toEqual([]);
+		expect(sliceHighlights(basename, matchedFiles[0]?.basenameHighlightRanges)).toEqual([
+			basename,
+		]);
+		expect(sliceHighlights(folder, matchedFiles[0]?.folderHighlightRanges)).toEqual([]);
 	});
 });
