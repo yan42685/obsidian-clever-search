@@ -77,6 +77,83 @@ const {
 	computeRelativeRatio,
 } = legacyFixtureModule;
 
+function attachCoverageLexicalV3BenchmarkPersistence(engine: {
+	addDocuments(documents: Array<Record<string, unknown>>): Promise<void>;
+	notifyIndexedTextsCommitted?: (
+		files: ReadonlyArray<{
+			path: string;
+			generation?: number;
+		}>,
+	) => void;
+}): void {
+	const { FileSnapshotStore } = require(
+		"src/services/search/shared/file-snapshot-store",
+	) as {
+		FileSnapshotStore: new () => unknown;
+	};
+	const originalAddDocuments = engine.addDocuments.bind(engine);
+	engine.addDocuments = async (documents: Array<Record<string, unknown>>) => {
+		await originalAddDocuments(documents);
+		const snapshotStore = container.resolve(FileSnapshotStore) as {
+			publishIndexedTexts?: (
+				files: ReadonlyArray<{
+					path: string;
+					generation?: number;
+					text?: string;
+				}>,
+			) => Promise<void>;
+			publishIndexedMetadata?: (
+				files: ReadonlyArray<{
+					path: string;
+					generation?: number;
+					aliasesText?: string;
+					tagsText?: string;
+					headingsText?: string;
+				}>,
+			) => Promise<void>;
+		};
+		await snapshotStore.publishIndexedTexts?.(
+			documents.map((document) => ({
+				path: String(document.path),
+				generation:
+					typeof document.generation === "number"
+						? document.generation
+						: undefined,
+				text:
+					typeof document.content === "string" ? document.content : undefined,
+			})),
+		);
+		await snapshotStore.publishIndexedMetadata?.(
+			documents.map((document) => ({
+				path: String(document.path),
+				generation:
+					typeof document.generation === "number"
+						? document.generation
+						: undefined,
+				aliasesText:
+					typeof document.aliases === "string"
+						? document.aliases
+						: undefined,
+				tagsText:
+					typeof document.tags === "string" ? document.tags : undefined,
+				headingsText:
+					typeof document.headings === "string"
+						? document.headings
+						: undefined,
+			})),
+		);
+		engine.notifyIndexedTextsCommitted?.(
+			documents.map((document) => ({
+				path: String(document.path),
+				generation:
+					typeof document.generation === "number"
+						? document.generation
+						: undefined,
+			})),
+		);
+	};
+}
+
 describe("coverage lexical v3 automation benchmark", () => {
 	beforeEach(() => {
 		if ("reset" in container && typeof (container as any).reset === "function") {
@@ -134,6 +211,7 @@ describe("coverage lexical v3 automation benchmark", () => {
 			tokenizer,
 			"coverage-lexical",
 		);
+		attachCoverageLexicalV3BenchmarkPersistence(coverageV3);
 		const coverageV3Result = await runBenchmark(
 			"CoverageLexical(V3)",
 			coverageV3,

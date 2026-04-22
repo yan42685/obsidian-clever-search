@@ -285,6 +285,78 @@ type EngineLike = {
 		| null;
 };
 
+const benchmarkTextEncoder = new TextEncoder();
+
+function estimateBenchmarkValueBytes(
+	value: unknown,
+	visited = new WeakSet<object>(),
+): number {
+	if (value === null || value === undefined) {
+		return 0;
+	}
+	if (typeof value === "string") {
+		return benchmarkTextEncoder.encode(value).length;
+	}
+	if (typeof value === "number") {
+		return 8;
+	}
+	if (typeof value === "boolean") {
+		return 4;
+	}
+	if (typeof value === "bigint") {
+		return benchmarkTextEncoder.encode(value.toString()).length;
+	}
+	if (value instanceof Blob) {
+		return value.size;
+	}
+	if (value instanceof Date) {
+		return benchmarkTextEncoder.encode(value.toISOString()).length;
+	}
+	if (value instanceof ArrayBuffer) {
+		return value.byteLength;
+	}
+	if (ArrayBuffer.isView(value)) {
+		return value.byteLength;
+	}
+	if (Array.isArray(value)) {
+		return value.reduce(
+			(sum, item) => sum + estimateBenchmarkValueBytes(item, visited),
+			0,
+		);
+	}
+	if (typeof value === "object") {
+		if (visited.has(value)) {
+			return 0;
+		}
+		visited.add(value);
+		return Object.entries(value).reduce((sum, [key, childValue]) => {
+			return (
+				sum +
+				benchmarkTextEncoder.encode(key).length +
+				estimateBenchmarkValueBytes(childValue, visited)
+			);
+		}, 0);
+	}
+	return benchmarkTextEncoder.encode(String(value)).length;
+}
+
+function getBenchmarkPersistedLexicalBytes(): number {
+	try {
+		const { FileSnapshotStore } = require(
+			"src/services/search/shared/file-snapshot-store",
+		) as {
+			FileSnapshotStore: new () => unknown;
+		};
+		const snapshotStore = container.resolve(FileSnapshotStore) as {
+			getBenchmarkPersistedLexicalBytes?: () => number;
+		};
+		const persistedBytes = snapshotStore.getBenchmarkPersistedLexicalBytes?.();
+		return typeof persistedBytes === "number" && Number.isFinite(persistedBytes) && persistedBytes > 0 ? persistedBytes : 0;
+	} catch {
+		return 0;
+	}
+}
+
 /**
  * Stage 1 benchmark classification note:
  * - Product guardrails: coverage_guardrail, quality_guardrail, mixed_anchor,
@@ -2332,6 +2404,52 @@ function registerBenchmarkFileSnapshotStore(
 		FileSnapshotStore: new () => unknown;
 	};
 	const currentTexts = new Map<string, string>();
+	const indexedTexts = new Map<
+		string,
+		{
+			generation?: number;
+			text?: string;
+		}
+	>();
+	const indexedMetadata = new Map<
+		string,
+		{
+			generation?: number;
+			aliasesText?: string;
+			tagsText?: string;
+			headingsText?: string;
+		}
+	>();
+	const lexicalBodyEvidence = new Map<number, unknown>();
+	const lexicalHanDocEvidence = new Map<number, unknown>();
+	const lexicalHanBodyEvidence = new Map<number, unknown>();
+	let lexicalFuzzyRescue: unknown = null;
+	let benchmarkPersistedLexicalBytes = 0;
+
+	const recomputePersistedLexicalBytes = () => {
+		benchmarkPersistedLexicalBytes =
+			estimateBenchmarkValueBytes(
+				[...indexedTexts.entries()].map(([path, row]) => ({
+					path,
+					generation: row.generation,
+					text: row.text,
+				})),
+			) +
+			estimateBenchmarkValueBytes(
+				[...indexedMetadata.entries()].map(([path, row]) => ({
+					path,
+					generation: row.generation,
+					aliasesText: row.aliasesText,
+					tagsText: row.tagsText,
+					headingsText: row.headingsText,
+				})),
+			) +
+			estimateBenchmarkValueBytes(lexicalFuzzyRescue) +
+			estimateBenchmarkValueBytes([...lexicalBodyEvidence.values()]) +
+			estimateBenchmarkValueBytes([...lexicalHanDocEvidence.values()]) +
+			estimateBenchmarkValueBytes([...lexicalHanBodyEvidence.values()]);
+	};
+
 	for (const document of documents) {
 		currentTexts.set(document.path, document.content ?? "");
 	}
@@ -2350,6 +2468,168 @@ function registerBenchmarkFileSnapshotStore(
 			}
 			return result;
 		},
+		publishIndexedTexts: async (
+			files: ReadonlyArray<{
+				path: string;
+				generation?: number;
+				text?: string;
+			}>,
+		) => {
+			for (const file of files) {
+				indexedTexts.set(file.path, {
+					generation: file.generation,
+					text: file.text,
+				});
+			}
+			recomputePersistedLexicalBytes();
+		},
+		readIndexedTexts: async (
+			requests: ReadonlyArray<{
+				path: string;
+				generation?: number;
+			}>,
+		) => {
+			const result = new Map<string, string>();
+			for (const request of requests) {
+				const row = indexedTexts.get(request.path);
+				if (!row) {
+					continue;
+				}
+				if (
+					request.generation !== undefined &&
+					row.generation !== undefined &&
+					row.generation !== request.generation
+				) {
+					continue;
+				}
+				if (typeof row.text === "string") {
+					result.set(request.path, row.text);
+				}
+			}
+			return result;
+		},
+		publishIndexedMetadata: async (
+			files: ReadonlyArray<{
+				path: string;
+				generation?: number;
+				aliasesText?: string;
+				tagsText?: string;
+				headingsText?: string;
+			}>,
+		) => {
+			for (const file of files) {
+				indexedMetadata.set(file.path, {
+					generation: file.generation,
+					aliasesText: file.aliasesText,
+					tagsText: file.tagsText,
+					headingsText: file.headingsText,
+				});
+			}
+			recomputePersistedLexicalBytes();
+		},
+		readIndexedMetadata: async (
+			requests: ReadonlyArray<{
+				path: string;
+				generation?: number;
+			}>,
+		) => {
+			const result = new Map<
+				string,
+				{
+					aliasesText?: string;
+					tagsText?: string;
+					headingsText?: string;
+				}
+			>();
+			for (const request of requests) {
+				const row = indexedMetadata.get(request.path);
+				if (!row) {
+					continue;
+				}
+				if (
+					request.generation !== undefined &&
+					row.generation !== undefined &&
+					row.generation !== request.generation
+				) {
+					continue;
+				}
+				result.set(request.path, {
+					aliasesText: row.aliasesText,
+					tagsText: row.tagsText,
+					headingsText: row.headingsText,
+				});
+			}
+			return result;
+		},
+		publishLexicalFuzzyRescue: async (sidecar: unknown) => {
+			lexicalFuzzyRescue = sidecar;
+			recomputePersistedLexicalBytes();
+		},
+		readLexicalFuzzyRescue: async () => lexicalFuzzyRescue,
+		publishLexicalBodyEvidence: async (
+			rows: ReadonlyArray<{
+				blockId: number;
+			}>,
+		) => {
+			lexicalBodyEvidence.clear();
+			for (const row of rows) {
+				lexicalBodyEvidence.set(row.blockId, row);
+			}
+			recomputePersistedLexicalBytes();
+		},
+		readLexicalBodyEvidenceForBlocks: async (blockIds: readonly number[]) => {
+			const result = new Map<number, unknown>();
+			for (const blockId of blockIds) {
+				const row = lexicalBodyEvidence.get(blockId);
+				if (row !== undefined) {
+					result.set(blockId, row);
+				}
+			}
+			return result;
+		},
+		publishLexicalHanDocEvidence: async (
+			rows: ReadonlyArray<{
+				docId: number;
+			}>,
+		) => {
+			lexicalHanDocEvidence.clear();
+			for (const row of rows) {
+				lexicalHanDocEvidence.set(row.docId, row);
+			}
+			recomputePersistedLexicalBytes();
+		},
+		readLexicalHanDocEvidenceForDocs: async (docIds: readonly number[]) => {
+			const result = new Map<number, unknown>();
+			for (const docId of docIds) {
+				const row = lexicalHanDocEvidence.get(docId);
+				if (row !== undefined) {
+					result.set(docId, row);
+				}
+			}
+			return result;
+		},
+		publishLexicalHanBodyEvidence: async (
+			rows: ReadonlyArray<{
+				blockId: number;
+			}>,
+		) => {
+			lexicalHanBodyEvidence.clear();
+			for (const row of rows) {
+				lexicalHanBodyEvidence.set(row.blockId, row);
+			}
+			recomputePersistedLexicalBytes();
+		},
+		readLexicalHanBodyEvidenceForBlocks: async (blockIds: readonly number[]) => {
+			const result = new Map<number, unknown>();
+			for (const blockId of blockIds) {
+				const row = lexicalHanBodyEvidence.get(blockId);
+				if (row !== undefined) {
+					result.set(blockId, row);
+				}
+			}
+			return result;
+		},
+		getBenchmarkPersistedLexicalBytes: () => benchmarkPersistedLexicalBytes,
 	} as any);
 }
 
@@ -2616,20 +2896,21 @@ function buildBenchmarkGateRecord(
 }
 
 function estimateIndexBytes(engine: EngineLike): number {
+	const benchmarkPersistedLexicalBytes = getBenchmarkPersistedLexicalBytes();
 	if (typeof engine.estimateIndexBytes === "function") {
 		const estimated = engine.estimateIndexBytes();
 		if (typeof estimated === "number" && Number.isFinite(estimated) && estimated > 0) {
-			return estimated;
+			return estimated + benchmarkPersistedLexicalBytes;
 		}
 	}
 	const snapshot = engine.serialize();
 	if (!snapshot) {
-		return 0;
+		return benchmarkPersistedLexicalBytes;
 	}
 	try {
-		return Buffer.byteLength(JSON.stringify(snapshot));
+		return Buffer.byteLength(JSON.stringify(snapshot)) + benchmarkPersistedLexicalBytes;
 	} catch {
-		return 0;
+		return benchmarkPersistedLexicalBytes;
 	}
 }
 
