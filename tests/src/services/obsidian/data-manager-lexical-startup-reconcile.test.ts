@@ -5,6 +5,7 @@ import type { DocRegistryRow } from "src/services/database/database";
 import {
   DocMoveOperation,
   DocUpsertOperation,
+  type LexicalMutationJournalRow,
   type PendingDocOperationRow,
 } from "src/services/obsidian/user-data/doc-operation-buffer";
 import type { IndexRecoveryStateRow } from "src/services/obsidian/user-data/index-recovery-state";
@@ -137,6 +138,7 @@ function createHarness(params: {
   indexedSnapshotTexts?: ReadonlyMap<string, string>;
   previousLexicalRecoveryStates?: readonly IndexRecoveryStateRow[];
   previousPendingDocOperations?: readonly PendingDocOperationRow[];
+  previousLexicalMutationJournal?: readonly LexicalMutationJournalRow[];
   previousLexicalQueryEvidenceReady?: boolean;
   previousLexicalQueryEvidenceReadyVersion?: number | null;
 }) {
@@ -152,6 +154,9 @@ function createHarness(params: {
   );
   const pendingDocOperationRows = new Map(
     (params.previousPendingDocOperations ?? []).map((row) => [row.id, { ...row }]),
+  );
+  const lexicalMutationJournalRows = new Map(
+    (params.previousLexicalMutationJournal ?? []).map((row) => [row.id, { ...row }]),
   );
   let lexicalQueryEvidenceReadyVersion =
     params.previousLexicalQueryEvidenceReadyVersion ??
@@ -304,6 +309,30 @@ function createHarness(params: {
         }
       }
     }),
+    putLexicalMutationJournalEntry: jest.fn(async (row: LexicalMutationJournalRow) => {
+      lexicalMutationJournalRows.set(row.id, { ...row });
+    }),
+    getLexicalMutationJournalEntries: jest.fn(async (engine?: "lexical") =>
+      Array.from(lexicalMutationJournalRows.values())
+        .filter((row) => !engine || row.engine === engine)
+        .map((row) => ({ ...row })),
+    ),
+    deleteLexicalMutationJournalEntries: jest.fn(async (ids: readonly string[]) => {
+      for (const id of ids) {
+        lexicalMutationJournalRows.delete(id);
+      }
+    }),
+    clearLexicalMutationJournalEntries: jest.fn(async (engine?: "lexical") => {
+      if (!engine) {
+        lexicalMutationJournalRows.clear();
+        return;
+      }
+      for (const [id, row] of Array.from(lexicalMutationJournalRows.entries())) {
+        if (row.engine === engine) {
+          lexicalMutationJournalRows.delete(id);
+        }
+      }
+    }),
     hasLexicalQueryEvidenceReadyMarker: jest.fn(
       async (expectedVersion = CURRENT_LEXICAL_QUERY_EVIDENCE_READY_VERSION) =>
         lexicalQueryEvidenceReadyVersion === expectedVersion,
@@ -385,6 +414,7 @@ function createHarness(params: {
     database: manager.database,
     indexRecoveryRows,
     pendingDocOperationRows,
+    lexicalMutationJournalRows,
   };
 }
 
@@ -571,6 +601,9 @@ describe("DataManager lexical startup reconcile", () => {
     expect(
       harness.database.setLexicalQueryEvidenceReadyMarker,
     ).toHaveBeenCalledWith(CURRENT_LEXICAL_QUERY_EVIDENCE_READY_VERSION);
+    expect(
+      harness.database.clearLexicalMutationJournalEntries,
+    ).toHaveBeenCalledWith("lexical");
     await expect(
       harness.database.hasLexicalQueryEvidenceReadyMarker(),
     ).resolves.toBe(true);
@@ -1194,7 +1227,7 @@ describe("DataManager lexical startup reconcile", () => {
     expect(harness.indexRecoveryRows.size).toBe(0);
   });
 
-  test("receiveDocOperation persists a pending lexical doc operation row", async () => {
+  test("receiveDocOperation queues a pending lexical upsert and persistence writes the expected rows", async () => {
     const file = createFile("docs/pending-upsert.md", "body", 990);
     const harness = createHarness({
       files: [file],
@@ -1204,10 +1237,16 @@ describe("DataManager lexical startup reconcile", () => {
     const operation = new DocUpsertOperation(file.path, file.stat.mtime, "op:1");
 
     DataManager.prototype.receiveDocOperation.call(harness.manager, operation);
-    await Promise.resolve();
-    await Promise.resolve();
 
     expect(harness.manager.docOperationsBuffer.add).toHaveBeenCalledWith(
+      operation,
+    );
+    await DataManager.prototype["persistPendingLexicalDocOperation"].call(
+      harness.manager,
+      operation,
+    );
+    await DataManager.prototype["persistLexicalMutationJournalEntry"].call(
+      harness.manager,
       operation,
     );
     expect(harness.database.putPendingDocOperation).toHaveBeenCalledWith(
@@ -1216,6 +1255,16 @@ describe("DataManager lexical startup reconcile", () => {
         engine: "lexical",
         docRef: 1,
         type: "upsert",
+        path: file.path,
+        sourceGeneration: file.stat.mtime,
+      }),
+    );
+    expect(harness.database.putLexicalMutationJournalEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "op:1",
+        engine: "lexical",
+        docRef: 1,
+        kind: "replace",
         path: file.path,
         sourceGeneration: file.stat.mtime,
       }),
@@ -1251,7 +1300,7 @@ describe("DataManager lexical startup reconcile", () => {
     ]);
   });
 
-  test("receiveDocOperation persists move operations with the old-path docRef", async () => {
+  test("receiveDocOperation queues lexical move persistence with the old-path docRef", async () => {
     const file = createFile("docs/new-home.md", "body", 995);
     const harness = createHarness({
       files: [file],
@@ -1276,8 +1325,16 @@ describe("DataManager lexical startup reconcile", () => {
     );
 
     DataManager.prototype.receiveDocOperation.call(harness.manager, operation);
-    await Promise.resolve();
-    await Promise.resolve();
+
+    expect(harness.manager.docOperationsBuffer.add).toHaveBeenCalledWith(operation);
+    await DataManager.prototype["persistPendingLexicalDocOperation"].call(
+      harness.manager,
+      operation,
+    );
+    await DataManager.prototype["persistLexicalMutationJournalEntry"].call(
+      harness.manager,
+      operation,
+    );
 
     expect(harness.database.putPendingDocOperation).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1289,8 +1346,59 @@ describe("DataManager lexical startup reconcile", () => {
         path: file.path,
       }),
     );
+    expect(harness.database.putLexicalMutationJournalEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "op:move:1",
+        engine: "lexical",
+        docRef: 9,
+        kind: "move",
+        oldPath: "docs/old-home.md",
+        path: file.path,
+      }),
+    );
   });
 
+  test("restorePersistedLexicalMutationJournalEntries remaps journal rows through docRef", async () => {
+    const file = createFile("docs/journal-restore.md", "body", 1011);
+    const harness = createHarness({
+      files: [file],
+      texts: new Map([[file.path, "body"]]),
+      previousIndexedFileRefs: [],
+      previousPendingDocOperations: [
+        {
+          id: "pending:shadow:1",
+          engine: "lexical",
+          type: "delete",
+          path: "docs/should-not-win.md",
+          createdAt: 1,
+        },
+      ],
+      previousLexicalMutationJournal: [
+        {
+          id: "journal:1",
+          engine: "lexical",
+          kind: "replace",
+          path: file.path,
+          sourceGeneration: file.stat.mtime,
+          createdAt: 1,
+        },
+      ],
+    });
+
+    const restored =
+      await DataManager.prototype["restorePersistedLexicalMutationJournalEntries"].call(
+        harness.manager,
+      );
+
+    expect(restored.hadRows).toBe(true);
+    expect(restored.operations).toHaveLength(1);
+    expect(restored.operations[0]).toEqual(
+      expect.objectContaining({
+        path: file.path,
+        sourceGeneration: file.stat.mtime,
+      }),
+    );
+  });
   test("healLexicalBootstrapPlan restores persisted pending lexical operations when no other heal work is needed", async () => {
     const file = createFile("docs/pending-move.md", "body", 1010);
     const harness = createHarness({

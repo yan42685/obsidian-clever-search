@@ -5,6 +5,7 @@ import { EventEnum } from "src/globals/enums";
 import { OuterSetting } from "src/globals/plugin-setting";
 import type {
   BaseIndexedFileRef,
+  DocRef,
   FileItemFreshnessReason,
   FileItemFreshnessState,
   FileItemSnapshotSource,
@@ -67,14 +68,18 @@ import { t, type LocaleKey } from "../translations/locale-helper";
 import { SearchService } from "../search-service";
 import { DataProvider, type IndexedDocumentFailure } from "./data-provider";
 import {
+  fromLexicalMutationJournalRow,
   fromPendingDocOperationRow,
+  DocDeleteOperation,
   DocMoveOperation,
   type FlushedDocOperationBatch,
   type DocOperation,
   DocUpsertOperation,
+  type LexicalMutationJournalRow,
   type PendingDocOperationRow,
   type ReducedDocOperationBatch,
   reduceDocOperations,
+  toLexicalMutationJournalRow,
   toPendingDocOperationRow,
   DocOperationBuffer,
 } from "./doc-operation-buffer";
@@ -1227,9 +1232,9 @@ export class DataManager {
     }
 
     await this.maintainHybridFreshness();
-    await this.deletePersistedPendingLexicalDocOperations(
-      rawOperations.map((operation) => operation.id),
-    );
+    const persistedOperationIds = rawOperations.map((operation) => operation.id);
+    await this.deletePersistedPendingLexicalDocOperations(persistedOperationIds);
+    await this.deletePersistedLexicalMutationJournalEntries(persistedOperationIds);
   };
 
   private docOperationsBuffer = new DocOperationBuffer(
@@ -1291,6 +1296,7 @@ export class DataManager {
     }
     this.docOperationsBuffer.add(operation);
     void this.persistPendingLexicalDocOperation(operation);
+    void this.persistLexicalMutationJournalEntry(operation);
   }
 
   private async runSearchBootstrapPipeline(): Promise<SearchBootstrapCompletionSummary> {
@@ -1803,6 +1809,7 @@ export class DataManager {
       await this.database.setLexicalQueryEvidenceReadyMarker(
         LEXICAL_QUERY_EVIDENCE_READY_VERSION,
       );
+      await this.clearPersistedLexicalMutationJournalEntries();
       return;
     }
     const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
@@ -1811,6 +1818,7 @@ export class DataManager {
       await this.database.setLexicalQueryEvidenceReadyMarker(
         LEXICAL_QUERY_EVIDENCE_READY_VERSION,
       );
+      await this.clearPersistedLexicalMutationJournalEntries();
       return;
     }
     await this.database.deleteLexicalSearchSnapshot();
@@ -1906,6 +1914,24 @@ export class DataManager {
     }
   }
 
+  private async resolveLexicalDocOperationDocRef(
+    operation: DocOperation,
+  ): Promise<DocRef | undefined> {
+    if (operation instanceof DocMoveOperation) {
+      return (await this.getLexicalDocRegistryEntry(operation.oldPath))?.docRef;
+    }
+    if (operation instanceof DocUpsertOperation) {
+      return (
+        await this.ensureLexicalDocRegistryEntry({
+          path: operation.path,
+          generation: operation.sourceGeneration,
+          deleted: false,
+        })
+      )?.docRef;
+    }
+    return (await this.getLexicalDocRegistryEntry(operation.path))?.docRef;
+  }
+
   private async persistPendingLexicalDocOperation(
     operation: DocOperation,
   ): Promise<void> {
@@ -1916,23 +1942,33 @@ export class DataManager {
       return;
     }
     try {
-      const docRef =
-        operation instanceof DocMoveOperation
-          ? (await this.getLexicalDocRegistryEntry(operation.oldPath))?.docRef
-          : operation instanceof DocUpsertOperation
-            ? (
-                await this.ensureLexicalDocRegistryEntry({
-                  path: operation.path,
-                  generation: operation.sourceGeneration,
-                  deleted: false,
-                })
-              )?.docRef
-            : (await this.getLexicalDocRegistryEntry(operation.path))?.docRef;
+      const docRef = await this.resolveLexicalDocOperationDocRef(operation);
       await database.putPendingDocOperation(
         toPendingDocOperationRow(operation, docRef),
       );
     } catch (error) {
       logger.warn("failed to persist pending lexical doc operation:", error);
+    }
+  }
+
+  private async persistLexicalMutationJournalEntry(
+    operation: DocOperation,
+  ): Promise<void> {
+    const database = this.database as Database & {
+      putLexicalMutationJournalEntry?: (
+        row: LexicalMutationJournalRow,
+      ) => Promise<void>;
+    };
+    if (!database.putLexicalMutationJournalEntry) {
+      return;
+    }
+    try {
+      const docRef = await this.resolveLexicalDocOperationDocRef(operation);
+      await database.putLexicalMutationJournalEntry(
+        toLexicalMutationJournalRow(operation, docRef),
+      );
+    } catch (error) {
+      logger.warn("failed to persist lexical mutation journal entry:", error);
     }
   }
 
@@ -1955,6 +1991,27 @@ export class DataManager {
     }
   }
 
+  private async deletePersistedLexicalMutationJournalEntries(
+    ids: readonly string[],
+  ): Promise<void> {
+    if (ids.length === 0) {
+      return;
+    }
+    const database = this.database as Database & {
+      deleteLexicalMutationJournalEntries?: (
+        ids: readonly string[],
+      ) => Promise<void>;
+    };
+    if (!database.deleteLexicalMutationJournalEntries) {
+      return;
+    }
+    try {
+      await database.deleteLexicalMutationJournalEntries(ids);
+    } catch (error) {
+      logger.warn("failed to delete lexical mutation journal entries:", error);
+    }
+  }
+
   private async clearPersistedPendingLexicalDocOperations(): Promise<void> {
     const database = this.database as Database & {
       clearPendingDocOperations?: (
@@ -1968,6 +2025,22 @@ export class DataManager {
       await database.clearPendingDocOperations("lexical");
     } catch (error) {
       logger.warn("failed to clear pending lexical doc operations:", error);
+    }
+  }
+
+  private async clearPersistedLexicalMutationJournalEntries(): Promise<void> {
+    const database = this.database as Database & {
+      clearLexicalMutationJournalEntries?: (
+        engine?: LexicalMutationJournalRow["engine"],
+      ) => Promise<void>;
+    };
+    if (!database.clearLexicalMutationJournalEntries) {
+      return;
+    }
+    try {
+      await database.clearLexicalMutationJournalEntries("lexical");
+    } catch (error) {
+      logger.warn("failed to clear lexical mutation journal entries:", error);
     }
   }
 
@@ -1990,10 +2063,37 @@ export class DataManager {
     }
   }
 
-  private async restorePersistedPendingLexicalDocOperations(): Promise<
-    DocOperation[]
+  private async listPersistedLexicalMutationJournalEntries(): Promise<
+    LexicalMutationJournalRow[]
   > {
-    const rows = await this.listPersistedPendingLexicalDocOperations();
+    const database = this.database as Database & {
+      getLexicalMutationJournalEntries?: (
+        engine?: LexicalMutationJournalRow["engine"],
+      ) => Promise<LexicalMutationJournalRow[]>;
+    };
+    if (!database.getLexicalMutationJournalEntries) {
+      return [];
+    }
+    try {
+      return await database.getLexicalMutationJournalEntries("lexical");
+    } catch (error) {
+      logger.warn("failed to load lexical mutation journal entries:", error);
+      return [];
+    }
+  }
+
+  private async restorePersistedLexicalDocOperationsFromRows<
+    TRow extends {
+      id: string;
+      docRef?: DocRef;
+      path: string;
+      createdAt: number;
+    },
+  >(
+    rows: readonly TRow[],
+    createOperation: (row: TRow) => DocOperation | null,
+    deleteRows: (ids: readonly string[]) => Promise<void>,
+  ): Promise<DocOperation[]> {
     if (rows.length === 0) {
       return [];
     }
@@ -2007,7 +2107,7 @@ export class DataManager {
     );
     const operations: DocOperation[] = [];
     const invalidIds: string[] = [];
-    for (const row of rows.sort((left, right) => {
+    for (const row of [...rows].sort((left, right) => {
       if (left.createdAt !== right.createdAt) {
         return left.createdAt - right.createdAt;
       }
@@ -2022,31 +2122,57 @@ export class DataManager {
               ...row,
               path: registryEntry.path,
             };
-      if (
-        (normalizedRow.type === "upsert" || normalizedRow.type === "move") &&
-        !currFiles.has(normalizedRow.path)
-      ) {
-        invalidIds.push(row.id);
-        continue;
-      }
-      if (
-        normalizedRow.type === "delete" &&
-        currFiles.has(normalizedRow.path)
-      ) {
-        invalidIds.push(row.id);
-        continue;
-      }
-      const operation = fromPendingDocOperationRow(normalizedRow);
+      const operation = createOperation(normalizedRow);
       if (!operation) {
+        invalidIds.push(row.id);
+        continue;
+      }
+      if (
+        (operation instanceof DocUpsertOperation ||
+          operation instanceof DocMoveOperation) &&
+        !currFiles.has(operation.path)
+      ) {
+        invalidIds.push(row.id);
+        continue;
+      }
+      if (
+        operation instanceof DocDeleteOperation &&
+        currFiles.has(operation.path)
+      ) {
         invalidIds.push(row.id);
         continue;
       }
       operations.push(operation);
     }
     if (invalidIds.length > 0) {
-      await this.deletePersistedPendingLexicalDocOperations(invalidIds);
+      await deleteRows(invalidIds);
     }
     return operations;
+  }
+
+  private async restorePersistedPendingLexicalDocOperations(): Promise<
+    DocOperation[]
+  > {
+    return await this.restorePersistedLexicalDocOperationsFromRows(
+      await this.listPersistedPendingLexicalDocOperations(),
+      fromPendingDocOperationRow,
+      async (ids) => await this.deletePersistedPendingLexicalDocOperations(ids),
+    );
+  }
+
+  private async restorePersistedLexicalMutationJournalEntries(): Promise<{
+    hadRows: boolean;
+    operations: DocOperation[];
+  }> {
+    const rows = await this.listPersistedLexicalMutationJournalEntries();
+    return {
+      hadRows: rows.length > 0,
+      operations: await this.restorePersistedLexicalDocOperationsFromRows(
+        rows,
+        fromLexicalMutationJournalRow,
+        async (ids) => await this.deletePersistedLexicalMutationJournalEntries(ids),
+      ),
+    };
   }
 
   private async listLexicalRecoveryStates(): Promise<IndexRecoveryStateRow[]> {
@@ -2783,10 +2909,18 @@ export class DataManager {
       restoredFailureCount > 0 &&
       this.shouldAutoRetryRestoredLexicalFailures(plan);
     if (this.shouldReplayPersistedPendingLexicalDocOperations(plan)) {
-      this.lexicalStartupPendingOperations =
-        await this.restorePersistedPendingLexicalDocOperations();
+      const journalRestore =
+        await this.restorePersistedLexicalMutationJournalEntries();
+      if (journalRestore.hadRows) {
+        await this.clearPersistedPendingLexicalDocOperations();
+        this.lexicalStartupPendingOperations = journalRestore.operations;
+      } else {
+        this.lexicalStartupPendingOperations =
+          await this.restorePersistedPendingLexicalDocOperations();
+      }
     } else {
       await this.clearPersistedPendingLexicalDocOperations();
+      await this.clearPersistedLexicalMutationJournalEntries();
     }
   }
 

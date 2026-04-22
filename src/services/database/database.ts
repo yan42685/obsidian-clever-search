@@ -13,7 +13,7 @@ import {
   type IndexRecoveryStateRow,
 } from "src/services/obsidian/user-data/index-recovery-state";
 import type { IndexArtifactStateRow } from "src/services/obsidian/user-data/index-artifact-state";
-import type { PendingDocOperationRow } from "src/services/obsidian/user-data/doc-operation-buffer";
+import type { LexicalMutationJournalRow, PendingDocOperationRow } from "src/services/obsidian/user-data/doc-operation-buffer";
 import type {
   BlobRecord,
   ChunkRow,
@@ -180,6 +180,7 @@ export class Database {
       { name: "hybridIndexedFileRefs", table: this.db.hybridIndexedFileRefs },
       { name: "indexRecoveryState", table: this.db.indexRecoveryState },
       { name: "indexArtifactState", table: this.db.indexArtifactState },
+      { name: "lexicalMutationJournal", table: this.db.lexicalMutationJournal },
       { name: "pendingDocOperations", table: this.db.pendingDocOperations },
       { name: "hybridTokenStats", table: this.db.hybridTokenStats },
       { name: "hybridTokenSavings", table: this.db.hybridTokenSavings },
@@ -444,6 +445,52 @@ export class Database {
     await this.db.indexRecoveryState.delete(oldId);
   }
 
+  async putLexicalMutationJournalEntry(
+    row: LexicalMutationJournalRow,
+  ): Promise<void> {
+    await this.db.lexicalMutationJournal.put(row);
+  }
+
+  async getLexicalMutationJournalEntries(
+    engine?: LexicalMutationJournalRow["engine"],
+  ): Promise<LexicalMutationJournalRow[]> {
+    if (!engine) {
+      return await this.db.lexicalMutationJournal.toArray();
+    }
+    return await this.db.lexicalMutationJournal
+      .where("engine")
+      .equals(engine)
+      .toArray();
+  }
+
+  async deleteLexicalMutationJournalEntries(
+    ids: readonly string[],
+  ): Promise<void> {
+    if (ids.length === 0) {
+      return;
+    }
+    await this.db.lexicalMutationJournal.bulkDelete(Array.from(ids));
+  }
+
+  async clearLexicalMutationJournalEntries(
+    engine?: LexicalMutationJournalRow["engine"],
+  ): Promise<void> {
+    if (!engine) {
+      await this.db.lexicalMutationJournal.clear();
+      return;
+    }
+    const ids = (
+      await this.db.lexicalMutationJournal
+        .where("engine")
+        .equals(engine)
+        .primaryKeys()
+    ) as string[];
+    if (ids.length === 0) {
+      return;
+    }
+    await this.db.lexicalMutationJournal.bulkDelete(ids);
+  }
+
   async putPendingDocOperation(row: PendingDocOperationRow): Promise<void> {
     await this.db.pendingDocOperations.put(row);
   }
@@ -693,7 +740,7 @@ export class Database {
 class DexieWrapper extends Dexie {
   // Dexie keeps one decimal place for version() and multiplies by 10 when opening IndexedDB.
   // Use 0.1 increments here so app-level schema bumps stay readable while mapping to IDB integers.
-  private static readonly _dbVersion = 28.2;
+  private static readonly _dbVersion = 28.3;
   private static readonly dbNamePrefix = "clever-search/";
   static readonly docRegistryNextRefKey = "nextDocRef";
   static readonly lexicalQueryEvidenceReadyKey = "lexicalQueryEvidenceReady";
@@ -724,6 +771,7 @@ class DexieWrapper extends Dexie {
   hybridIndexedFileRefs!: Dexie.Table<HybridIndexedFileRefRow, string>;
   indexRecoveryState!: Dexie.Table<IndexRecoveryStateRow, string>;
   indexArtifactState!: Dexie.Table<IndexArtifactStateRow, string>;
+  lexicalMutationJournal!: Dexie.Table<LexicalMutationJournalRow, string>;
   pendingDocOperations!: Dexie.Table<PendingDocOperationRow, string>;
   hybridTokenStats!: Dexie.Table<HybridTokenRecord, number>;
   hybridTokenSavings!: Dexie.Table<HybridTokenSavingRecord, number>;
@@ -745,6 +793,7 @@ class DexieWrapper extends Dexie {
         hybridIndexedFileRefs: "path",
         indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
         indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
+        lexicalMutationJournal: "id, engine, kind, path, createdAt, [engine+path]",
         pendingDocOperations: "id, engine, type, path, createdAt, [engine+path]",
         hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
         hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",

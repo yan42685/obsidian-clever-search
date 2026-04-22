@@ -67,6 +67,17 @@ export type PendingDocOperationRow = {
 	createdAt: number;
 };
 
+export type LexicalMutationJournalRow = {
+	id: string;
+	engine: "lexical";
+	docRef?: DocRef;
+	kind: "replace" | "delete" | "move";
+	path: string;
+	oldPath?: string;
+	sourceGeneration?: number;
+	createdAt: number;
+};
+
 export function toPendingDocOperationRow(
 	operation: DocOperation,
 	docRef?: DocRef,
@@ -76,6 +87,27 @@ export function toPendingDocOperationRow(
 		engine: "lexical",
 		docRef,
 		type: operation.type,
+		path: operation.path,
+		oldPath: operation instanceof DocMoveOperation ? operation.oldPath : undefined,
+		sourceGeneration: operation.sourceGeneration,
+		createdAt: Date.now(),
+	};
+}
+
+export function toLexicalMutationJournalRow(
+	operation: DocOperation,
+	docRef?: DocRef,
+): LexicalMutationJournalRow {
+	return {
+		id: operation.id,
+		engine: "lexical",
+		docRef,
+		kind:
+			operation instanceof DocUpsertOperation
+				? "replace"
+				: operation instanceof DocDeleteOperation
+					? "delete"
+					: "move",
 		path: operation.path,
 		oldPath: operation instanceof DocMoveOperation ? operation.oldPath : undefined,
 		sourceGeneration: operation.sourceGeneration,
@@ -93,6 +125,26 @@ export function fromPendingDocOperationRow(
 		return new DocDeleteOperation(row.path, row.id);
 	}
 	if (row.type === "move" && row.oldPath) {
+		return new DocMoveOperation(
+			row.oldPath,
+			row.path,
+			row.sourceGeneration,
+			row.id,
+		);
+	}
+	return null;
+}
+
+export function fromLexicalMutationJournalRow(
+	row: LexicalMutationJournalRow,
+): DocOperation | null {
+	if (row.kind === "replace") {
+		return new DocUpsertOperation(row.path, row.sourceGeneration, row.id);
+	}
+	if (row.kind === "delete") {
+		return new DocDeleteOperation(row.path, row.id);
+	}
+	if (row.kind === "move" && row.oldPath) {
 		return new DocMoveOperation(
 			row.oldPath,
 			row.path,
