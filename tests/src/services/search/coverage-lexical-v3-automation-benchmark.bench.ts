@@ -15,8 +15,215 @@ jest.mock("src/services/database/database", () => ({
 
 jest.mock("src/services/search/shared/file-snapshot-store", () => ({
 	FileSnapshotStore: class MockFileSnapshotStore {
+		private static currentTexts = new Map<string, string>();
+		private static lexicalFuzzyRescue: unknown = null;
+		private static lexicalBodyEvidence = new Map<
+			number,
+			{
+				exactFamilyIds: number[];
+				exactTokenPositions: number[];
+				familySupportEntries: Array<{ familyId: number; supportMask: number }>;
+			}
+		>();
+		private static lexicalHanDocEvidence = new Map<
+			number,
+			{
+				identityWitnessStringIds: number[];
+				identityWitnessSourceMasks: number[];
+				routeWitnessStringIds: number[];
+				routeWitnessSourceMasks: number[];
+				headingWitnessStringIds: number[];
+			}
+		>();
+		private static lexicalHanBodyEvidence = new Map<
+			number,
+			{
+				bodyWitnessStringIds: number[];
+				bodyWitnessStartOffsets: number[];
+			}
+		>();
+
+		static reset(): void {
+			MockFileSnapshotStore.currentTexts.clear();
+			MockFileSnapshotStore.lexicalFuzzyRescue = null;
+			MockFileSnapshotStore.lexicalBodyEvidence.clear();
+			MockFileSnapshotStore.lexicalHanDocEvidence.clear();
+			MockFileSnapshotStore.lexicalHanBodyEvidence.clear();
+		}
+
 		readCurrentTexts(): Promise<Map<string, string>> {
-			return Promise.resolve(new Map());
+			return Promise.resolve(new Map(MockFileSnapshotStore.currentTexts));
+		}
+
+		publishIndexedTexts(
+			files: ReadonlyArray<{
+				path: string;
+				text?: string;
+			}>,
+		): Promise<void> {
+			for (const file of files) {
+				MockFileSnapshotStore.currentTexts.set(file.path, file.text ?? "");
+			}
+			return Promise.resolve();
+		}
+
+		publishIndexedMetadata(): Promise<void> {
+			return Promise.resolve();
+		}
+
+		publishLexicalFuzzyRescue(sidecar: unknown): Promise<void> {
+			MockFileSnapshotStore.lexicalFuzzyRescue = sidecar;
+			return Promise.resolve();
+		}
+
+		readLexicalFuzzyRescue(): Promise<unknown> {
+			return Promise.resolve(MockFileSnapshotStore.lexicalFuzzyRescue);
+		}
+
+		publishLexicalBodyEvidence(
+			rows: ReadonlyArray<{
+				blockId: number;
+				exactFamilyIds: readonly number[];
+				exactTokenPositions: readonly number[];
+				familySupportFamilyIds: readonly number[];
+				familySupportMaskByEntry: readonly number[];
+			}>,
+		): Promise<void> {
+			for (const row of rows) {
+				MockFileSnapshotStore.lexicalBodyEvidence.set(row.blockId, {
+					exactFamilyIds: [...row.exactFamilyIds],
+					exactTokenPositions: [...row.exactTokenPositions],
+					familySupportEntries: row.familySupportFamilyIds.map((familyId, index) => ({
+						familyId,
+						supportMask: row.familySupportMaskByEntry[index] ?? 0,
+					})),
+				});
+			}
+			return Promise.resolve();
+		}
+
+		readLexicalBodyEvidenceForBlocks(
+			blockIds: ReadonlyArray<number>,
+		): Promise<
+			ReadonlyMap<
+				number,
+				{
+					exactFamilyIds: readonly number[];
+					exactTokenPositions: readonly number[];
+					familySupportEntries: ReadonlyArray<{
+						familyId: number;
+						supportMask: number;
+					}>;
+				}
+			>
+		> {
+			const out = new Map<number, {
+				exactFamilyIds: readonly number[];
+				exactTokenPositions: readonly number[];
+				familySupportEntries: ReadonlyArray<{
+					familyId: number;
+					supportMask: number;
+				}>;
+			}>();
+			for (const blockId of new Set(blockIds)) {
+				const snapshot = MockFileSnapshotStore.lexicalBodyEvidence.get(blockId);
+				if (snapshot != null) {
+					out.set(blockId, snapshot);
+				}
+			}
+			return Promise.resolve(out);
+		}
+
+		publishLexicalHanDocEvidence(
+			rows: ReadonlyArray<{
+				docId: number;
+				identityWitnessStringIds: readonly number[];
+				identityWitnessSourceMaskByDocEntry: readonly number[];
+				routeWitnessStringIds: readonly number[];
+				routeWitnessSourceMaskByDocEntry: readonly number[];
+				headingWitnessStringIds: readonly number[];
+			}>,
+		): Promise<void> {
+			for (const row of rows) {
+				MockFileSnapshotStore.lexicalHanDocEvidence.set(row.docId, {
+					identityWitnessStringIds: [...row.identityWitnessStringIds],
+					identityWitnessSourceMasks: [...row.identityWitnessSourceMaskByDocEntry],
+					routeWitnessStringIds: [...row.routeWitnessStringIds],
+					routeWitnessSourceMasks: [...row.routeWitnessSourceMaskByDocEntry],
+					headingWitnessStringIds: [...row.headingWitnessStringIds],
+				});
+			}
+			return Promise.resolve();
+		}
+
+		readLexicalHanDocEvidenceForDocs(
+			docIds: ReadonlyArray<number>,
+		): Promise<
+			ReadonlyMap<
+				number,
+				{
+					identityWitnessStringIds: readonly number[];
+					identityWitnessSourceMasks: readonly number[];
+					routeWitnessStringIds: readonly number[];
+					routeWitnessSourceMasks: readonly number[];
+					headingWitnessStringIds: readonly number[];
+				}
+			>
+		> {
+			const out = new Map<number, {
+				identityWitnessStringIds: readonly number[];
+				identityWitnessSourceMasks: readonly number[];
+				routeWitnessStringIds: readonly number[];
+				routeWitnessSourceMasks: readonly number[];
+				headingWitnessStringIds: readonly number[];
+			}>();
+			for (const docId of new Set(docIds)) {
+				const snapshot = MockFileSnapshotStore.lexicalHanDocEvidence.get(docId);
+				if (snapshot != null) {
+					out.set(docId, snapshot);
+				}
+			}
+			return Promise.resolve(out);
+		}
+
+		publishLexicalHanBodyEvidence(
+			rows: ReadonlyArray<{
+				blockId: number;
+				bodyWitnessStringIds: readonly number[];
+				bodyWitnessStartOffsets: readonly number[];
+			}>,
+		): Promise<void> {
+			for (const row of rows) {
+				MockFileSnapshotStore.lexicalHanBodyEvidence.set(row.blockId, {
+					bodyWitnessStringIds: [...row.bodyWitnessStringIds],
+					bodyWitnessStartOffsets: [...row.bodyWitnessStartOffsets],
+				});
+			}
+			return Promise.resolve();
+		}
+
+		readLexicalHanBodyEvidenceForBlocks(
+			blockIds: ReadonlyArray<number>,
+		): Promise<
+			ReadonlyMap<
+				number,
+				{
+					bodyWitnessStringIds: readonly number[];
+					bodyWitnessStartOffsets: readonly number[];
+				}
+			>
+		> {
+			const out = new Map<number, {
+				bodyWitnessStringIds: readonly number[];
+				bodyWitnessStartOffsets: readonly number[];
+			}>();
+			for (const blockId of new Set(blockIds)) {
+				const snapshot = MockFileSnapshotStore.lexicalHanBodyEvidence.get(blockId);
+				if (snapshot != null) {
+					out.set(blockId, snapshot);
+				}
+			}
+			return Promise.resolve(out);
 		}
 	},
 }));
@@ -161,6 +368,12 @@ describe("coverage lexical v3 automation benchmark", () => {
 		} else {
 			container.clearInstances();
 		}
+		const { FileSnapshotStore } = require(
+			"src/services/search/shared/file-snapshot-store",
+		) as {
+			FileSnapshotStore: { reset?: () => void };
+		};
+		FileSnapshotStore.reset?.();
 		(global as any).window = {
 			localStorage: {
 				getItem: jest.fn(() => "zh"),
@@ -177,6 +390,12 @@ describe("coverage lexical v3 automation benchmark", () => {
 		} else {
 			container.clearInstances();
 		}
+		const { FileSnapshotStore } = require(
+			"src/services/search/shared/file-snapshot-store",
+		) as {
+			FileSnapshotStore: { reset?: () => void };
+		};
+		FileSnapshotStore.reset?.();
 	});
 
 	test("compare coverage lexical v3 against minisearch on legacy automation corpus", async () => {

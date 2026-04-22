@@ -783,9 +783,12 @@ export function hydrateCandidateEvidence(
 	candidateRecall: V3CandidateDocRecall,
 	source?: CandidateEvidenceHydrationSource | null,
 ): CandidateEvidencePackage {
+	const hasPrehydratedDocEvidence =
+		source?.docHanEvidenceByLiveDocSlot != null ||
+		source?.hanWitnessSidecar != null;
 	return {
 		docEvidence:
-			source?.hanWitnessSidecar == null
+			!hasPrehydratedDocEvidence
 				? getCachedDocEvidence(base, candidateRecall.liveDocSlot)
 				: buildDocEvidenceFromSource(base, candidateRecall.liveDocSlot, source),
 		bodyBlockEvidenceByBlockId: new Map(

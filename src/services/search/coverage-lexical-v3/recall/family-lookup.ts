@@ -185,7 +185,11 @@ function collectBoundedPrefixMatches(
 		if (
 			familyText === queryUnitText ||
 			getFamilySourceMask(familyFlagsByFamilyId[familyId] ?? 0) === 0 ||
-			!isFamilyPrefixExpandable(familyFlagsByFamilyId[familyId] ?? 0) ||
+			!canExpandFamilyPrefixForQuery(
+				queryUnitText,
+				familyText,
+				familyFlagsByFamilyId[familyId] ?? 0,
+			) ||
 			familyText.length <= queryUnitText.length
 		) {
 			continue;
@@ -370,6 +374,25 @@ function resolvePrefixLengthBand(queryUnitLength: number): 0 | 3 | 4 | 5 | 6 | 7
 		return queryUnitLength as 3 | 4 | 5 | 6 | 7 | 8;
 	}
 	return 9;
+}
+
+function canExpandFamilyPrefixForQuery(
+	queryUnitText: string,
+	familyText: string,
+	familyFlags: number,
+): boolean {
+	return (
+		isFamilyPrefixExpandable(familyFlags) ||
+		(isHanPrefixQuery(queryUnitText) && isPureHanFamilyText(familyText))
+	);
+}
+
+function isHanPrefixQuery(queryUnitText: string): boolean {
+	return isPureHanFamilyText(queryUnitText) && Array.from(queryUnitText).length >= 3;
+}
+
+function isPureHanFamilyText(text: string): boolean {
+	return /^[\u4e00-\u9fff]+$/u.test(text);
 }
 
 function createPrefixLookupBudgetState(): PrefixLookupBudgetState {

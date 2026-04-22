@@ -2,9 +2,18 @@ import type { IndexedDocument } from "src/globals/search-types";
 import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
 import { readResidentBodyFamilySupportSidecar } from "src/services/search/coverage-lexical-v3/layout/body-blocks";
 import { buildResidentExactTapeSidecar } from "src/services/search/coverage-lexical-v3/layout/exact-tapes";
-import { buildResidentHanWitnessSidecar } from "src/services/search/coverage-lexical-v3/layout/han-route";
+import {
+	buildResidentHanWitnessSidecar,
+	createEmptyResidentHanWitnessSidecar,
+	setResidentHanWitnessSidecar,
+} from "src/services/search/coverage-lexical-v3/layout/han-route";
 import { analyzeQuery } from "src/services/search/coverage-lexical-v3/query";
 import {
+	getLiveDocHeadingHanWitnessStringIds,
+	getLiveDocIdentityHanWitnessSourceMasks,
+	getLiveDocIdentityHanWitnessStringIds,
+	getLiveDocRouteHanWitnessSourceMasks,
+	getLiveDocRouteHanWitnessStringIds,
 	lookupQueryUnitFamilies,
 	recallCandidateDocs,
 } from "src/services/search/coverage-lexical-v3/recall";
@@ -101,6 +110,75 @@ describe("coverage lexical v3 evidence hydration", () => {
 						base.bodyBlocks,
 					),
 					hanWitnessSidecar: buildResidentHanWitnessSidecar(base.hanRoute),
+				}),
+			},
+		);
+
+		expect(hydratedProfile).toEqual(baselineProfile);
+	});
+
+	it("uses prehydrated doc Han evidence even when resident Han witnesses are cleared", () => {
+		const document = createDocument({
+			path: "notes/doc-han-evidence.md",
+			basename: "doc han evidence",
+			folder: "notes",
+			content: "缂撳瓨鎭㈠姝ラ\n\nalpha beta",
+		});
+		const base = buildResidentBase([document]);
+		const queryAnalysis = analyzeQuery("缂撳瓨鎭㈠");
+		const unitFamilyMatches = lookupQueryUnitFamilies(base, queryAnalysis);
+		const candidateRecall = recallCandidateDocs(
+			base,
+			queryAnalysis,
+			unitFamilyMatches,
+		)[0];
+		expect(candidateRecall).toBeDefined();
+
+		const baselineProfile = buildPackingProfile(
+			base,
+			queryAnalysis,
+			candidateRecall!,
+			unitFamilyMatches,
+		);
+		const liveDocSlot = candidateRecall!.liveDocSlot;
+		const docHanEvidenceByLiveDocSlot = new Map([
+			[
+				liveDocSlot,
+				{
+					identityWitnessStringIds: getLiveDocIdentityHanWitnessStringIds(
+						base,
+						liveDocSlot,
+					),
+					identityWitnessSourceMasks: getLiveDocIdentityHanWitnessSourceMasks(
+						base,
+						liveDocSlot,
+					),
+					routeWitnessStringIds: getLiveDocRouteHanWitnessStringIds(
+						base,
+						liveDocSlot,
+					),
+					routeWitnessSourceMasks: getLiveDocRouteHanWitnessSourceMasks(
+						base,
+						liveDocSlot,
+					),
+					headingWitnessStringIds: getLiveDocHeadingHanWitnessStringIds(
+						base,
+						liveDocSlot,
+					),
+				},
+			] as const,
+		]);
+
+		setResidentHanWitnessSidecar(base.hanRoute, createEmptyResidentHanWitnessSidecar());
+
+		const hydratedProfile = buildPackingProfile(
+			base,
+			queryAnalysis,
+			candidateRecall!,
+			unitFamilyMatches,
+			{
+				hydratedEvidence: hydrateCandidateEvidence(base, candidateRecall!, {
+					docHanEvidenceByLiveDocSlot,
 				}),
 			},
 		);
