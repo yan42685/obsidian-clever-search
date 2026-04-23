@@ -44,10 +44,10 @@ export type LexicalIndexedMetadataRow = {
 export type LexicalFuzzyRescueRow = {
   id: string;
   indexedMetadataFamilyCount: number;
-  deletionKeyCount: number;
+  fuzzyLookupKeyCount: number;
   bytes: number;
   entries: ReadonlyArray<{
-    deletionKey: string;
+    fuzzyLookupKey: string;
     familyIds: Uint32Array;
   }>;
 };

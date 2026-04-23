@@ -45,7 +45,11 @@ import {
 	getLiveDocSlot,
 	type V3CandidateDocRecall,
 } from "./recall";
-import { FUZZY_RESCUE_MIN_QUERY_LENGTH } from "./layout/fuzzy-rescue";
+import {
+	buildFuzzyLookupKeys,
+	EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+	FUZZY_RESCUE_MIN_QUERY_LENGTH,
+} from "./layout/fuzzy-rescue";
 import {
 	comparePackingProfiles,
 	comparePackingProfilesBeforeHanSurfaceCompletion,
@@ -55,6 +59,8 @@ import {
 	type HanSurfaceCompletionGroupResult,
 	type HanSurfaceCompletionTier,
 } from "./ranking";
+import { analyzeQuery } from "./query";
+import type { ResidentFuzzyRescueSidecar } from "./layout/types";
 
 export type CoverageLexicalV3RuntimeMemoryBreakdown = Readonly<{
 	__backend: "coverage-lexical-v3";
@@ -135,7 +141,6 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	private readonly pendingDocumentMetadataByPath = new Map<string, PendingDocumentMetadata>();
 	private batchReindexing = false;
 	private pendingResidentRebuild: Promise<void> | null = null;
-	private fuzzyRescueLeaseCount = 0;
 
 	async reIndexAll(
 		data: IndexedDocument[] | SerializedFileSearchIndex,
@@ -159,7 +164,6 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		this.pendingDocumentContentsByPath.clear();
 		this.pendingDocumentMetadataByPath.clear();
 		this.pendingResidentRebuild = null;
-		this.fuzzyRescueLeaseCount = 0;
 		this.engine = new CoverageLexicalV3Engine();
 	}
 
@@ -209,22 +213,22 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		if (queryText.length === 0) {
 			return [];
 		}
-		const releaseFuzzyRescue = await this.acquireFuzzyRescueLeaseIfNeeded(
-			queryText,
-			request.isFuzzy !== false,
-		);
-		try {
 		const shouldLogDebug = shouldLogCoverageLexicalV3Debug(queryText);
 		const startedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const tokenizeStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const searchTerms = this.getQueryTerms(queryText);
 		const tokenizeMs = shouldLogDebug ? nowDebugMs() - tokenizeStartedAtMs : 0;
+		const fuzzyRescueSidecar = await this.hydrateFuzzyRescueForQuery(
+			queryText,
+			searchTerms,
+			request.isFuzzy !== false,
+		);
 		const prepareStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const preparedSearch = this.engine.prepareSearch(queryText, searchTerms, {
 			allowPrefixMatch: request.isPrefixMatch,
 			allowFuzzyMatch: request.isFuzzy,
 			maxItemResults: request.maxItemResults,
-		});
+		}, fuzzyRescueSidecar);
 		const prepareMs = shouldLogDebug ? nowDebugMs() - prepareStartedAtMs : 0;
 		const hydrateStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const { hydratedEvidenceByDocId } =
@@ -340,9 +344,6 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			});
 		}
 		return matchedFiles;
-		} finally {
-			releaseFuzzyRescue?.();
-		}
 	}
 
 	getIndexedDocumentCount(): number {
@@ -366,20 +367,20 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		if (trimmedQuery.length === 0) {
 			return null;
 		}
-		const releaseFuzzyRescue = await this.acquireFuzzyRescueLeaseIfNeeded(
-			trimmedQuery,
-			true,
-		);
-		try {
 		const shouldLogDebug = shouldLogCoverageLexicalV3Debug(trimmedQuery);
 		const startedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const tokenizeStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const searchTerms = this.getQueryTerms(trimmedQuery);
 		const tokenizeMs = shouldLogDebug ? nowDebugMs() - tokenizeStartedAtMs : 0;
+		const fuzzyRescueSidecar = await this.hydrateFuzzyRescueForQuery(
+			trimmedQuery,
+			searchTerms,
+			true,
+		);
 		const prepareStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const preparedSearch = this.engine.prepareSearch(trimmedQuery, searchTerms, {
 			maxItemResults: this.outerSetting.ui.maxItemResults,
-		});
+		}, fuzzyRescueSidecar);
 		const prepareMs = shouldLogDebug ? nowDebugMs() - prepareStartedAtMs : 0;
 		const hydrateStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const { hydratedEvidenceByDocId } =
@@ -527,9 +528,6 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			});
 		}
 		return subItems;
-		} finally {
-			releaseFuzzyRescue?.();
-		}
 	}
 
 	serialize(): SerializedFileSearchIndex | null {
@@ -719,26 +717,39 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		await this.pendingResidentRebuild;
 	}
 
-	private async acquireFuzzyRescueLeaseIfNeeded(
+	private async hydrateFuzzyRescueForQuery(
 		queryText: string,
+		queryTerms: readonly string[],
 		allowFuzzyMatch: boolean,
-	): Promise<(() => void) | null> {
+	): Promise<ResidentFuzzyRescueSidecar> {
 		if (!allowFuzzyMatch || !shouldPotentiallyNeedFuzzyRescue(queryText)) {
-			return null;
+			return EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR;
 		}
-		if (this.fuzzyRescueLeaseCount === 0) {
-			const sidecar = await this.getFileSnapshotStore().readLexicalFuzzyRescue?.();
-			if (sidecar != null) {
-				this.engine.setFuzzyRescueSidecar?.(sidecar);
-			}
+		const queryAnalysis = analyzeQuery(queryText, queryTerms);
+		const fuzzyLookupKeys = Array.from(
+			new Set(
+				queryAnalysis.primaryUnits.flatMap((queryUnit) =>
+					queryUnit.text.length >= FUZZY_RESCUE_MIN_QUERY_LENGTH
+						? buildFuzzyLookupKeys(queryUnit.text)
+						: [],
+				),
+			),
+		);
+		if (fuzzyLookupKeys.length === 0) {
+			return EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR;
 		}
-		this.fuzzyRescueLeaseCount += 1;
-		return () => {
-			this.fuzzyRescueLeaseCount = Math.max(0, this.fuzzyRescueLeaseCount - 1);
-			if (this.fuzzyRescueLeaseCount === 0) {
-				this.engine.clearFuzzyRescueSidecar?.();
-			}
-		};
+		const snapshotStore = this.getFileSnapshotStore();
+		if (typeof snapshotStore.readLexicalFuzzyRescueForLookupKeys === "function") {
+			return (
+				(await snapshotStore.readLexicalFuzzyRescueForLookupKeys(
+					fuzzyLookupKeys,
+				)) ?? EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR
+			);
+		}
+		return (
+			(await snapshotStore.readLexicalFuzzyRescue?.()) ??
+			EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR
+		);
 	}
 
 	private async materializeIndexedDocuments(): Promise<IndexedDocument[]> {

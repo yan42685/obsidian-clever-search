@@ -529,9 +529,9 @@ describe("coverage lexical v3 resident base", () => {
 				bodyWitnessPositionDeltaU32Tape: witnessPositionLane.positionDeltaU32Tape,
 			},
 			fuzzyRescue: {
-				candidateMetadataFamilyIdsByDeletionKey: new Map(),
+				candidateMetadataFamilyIdsByFuzzyLookupKey: new Map(),
 				indexedMetadataFamilyCount: 0,
-				deletionKeyCount: 0,
+				fuzzyLookupKeyCount: 0,
 				bytes: 0,
 			},
 			metrics: {
@@ -755,15 +755,15 @@ describe("coverage lexical v3 resident base", () => {
 		const fuzzyRescueSidecar = artifacts.fuzzyRescueSidecar;
 
 		const obsidanPosting =
-			fuzzyRescueSidecar.candidateMetadataFamilyIdsByDeletionKey.get(
+			fuzzyRescueSidecar.candidateMetadataFamilyIdsByFuzzyLookupKey.get(
 				"obsidan",
 			);
 		const incdentPosting =
-			fuzzyRescueSidecar.candidateMetadataFamilyIdsByDeletionKey.get(
+			fuzzyRescueSidecar.candidateMetadataFamilyIdsByFuzzyLookupKey.get(
 				"incdent",
 			);
 		const runboksPosting =
-			fuzzyRescueSidecar.candidateMetadataFamilyIdsByDeletionKey.get(
+			fuzzyRescueSidecar.candidateMetadataFamilyIdsByFuzzyLookupKey.get(
 				"runboks",
 			);
 		const postedFamilyTexts = Array.from(obsidanPosting ?? []).map((familyId) =>
@@ -775,7 +775,7 @@ describe("coverage lexical v3 resident base", () => {
 		expect(postedFamilyTexts).not.toContain("cache");
 		expect(incdentPosting).toBeUndefined();
 		expect(runboksPosting).toBeUndefined();
-		expect(residentBase.fuzzyRescue.deletionKeyCount).toBe(0);
+		expect(residentBase.fuzzyRescue.fuzzyLookupKeyCount).toBe(0);
 		expect(residentBase.metrics.auxiliaryBytes).toBe(0);
 	});
 });

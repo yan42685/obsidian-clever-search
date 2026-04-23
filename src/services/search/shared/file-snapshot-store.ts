@@ -285,26 +285,44 @@ export class FileSnapshotStore {
 		await this.database.db.lexicalIndexedMetadata.bulkPut(rows);
 	}
 
-	async readLexicalFuzzyRescue(): Promise<ResidentFuzzyRescueSidecar> {
+	async readLexicalFuzzyRescueForLookupKeys(
+		fuzzyLookupKeys: ReadonlyArray<string>,
+	): Promise<ResidentFuzzyRescueSidecar> {
 		const row = await this.database.db.lexicalFuzzyRescue.get(
 			ACTIVE_LEXICAL_FUZZY_RESCUE_ID,
 		);
 		if (row == null) {
 			return {
-				candidateMetadataFamilyIdsByDeletionKey: new Map(),
+				candidateMetadataFamilyIdsByFuzzyLookupKey: new Map(),
 				indexedMetadataFamilyCount: 0,
-				deletionKeyCount: 0,
+				fuzzyLookupKeyCount: 0,
 				bytes: 0,
 			};
 		}
+		const filteredEntries =
+			fuzzyLookupKeys.length === 0
+				? row.entries
+				: row.entries.filter((entry) =>
+						fuzzyLookupKeys.includes(entry.fuzzyLookupKey),
+					);
+		let filteredBytes = 0;
+		for (const entry of filteredEntries) {
+			filteredBytes +=
+				new TextEncoder().encode(entry.fuzzyLookupKey).byteLength +
+				entry.familyIds.byteLength;
+		}
 		return {
-			candidateMetadataFamilyIdsByDeletionKey: new Map(
-				row.entries.map((entry) => [entry.deletionKey, entry.familyIds]),
+			candidateMetadataFamilyIdsByFuzzyLookupKey: new Map(
+				filteredEntries.map((entry) => [entry.fuzzyLookupKey, entry.familyIds]),
 			),
 			indexedMetadataFamilyCount: row.indexedMetadataFamilyCount,
-			deletionKeyCount: row.deletionKeyCount,
-			bytes: row.bytes,
+			fuzzyLookupKeyCount: filteredEntries.length,
+			bytes: fuzzyLookupKeys.length === 0 ? row.bytes : filteredBytes,
 		};
+	}
+
+	async readLexicalFuzzyRescue(): Promise<ResidentFuzzyRescueSidecar> {
+		return this.readLexicalFuzzyRescueForLookupKeys([]);
 	}
 
 	async publishLexicalFuzzyRescue(
@@ -313,11 +331,11 @@ export class FileSnapshotStore {
 		const row: LexicalFuzzyRescueRow = {
 			id: ACTIVE_LEXICAL_FUZZY_RESCUE_ID,
 			indexedMetadataFamilyCount: sidecar.indexedMetadataFamilyCount,
-			deletionKeyCount: sidecar.deletionKeyCount,
+			fuzzyLookupKeyCount: sidecar.fuzzyLookupKeyCount,
 			bytes: sidecar.bytes,
-			entries: [...sidecar.candidateMetadataFamilyIdsByDeletionKey.entries()].map(
-				([deletionKey, familyIds]) => ({
-					deletionKey,
+			entries: [...sidecar.candidateMetadataFamilyIdsByFuzzyLookupKey.entries()].map(
+				([fuzzyLookupKey, familyIds]) => ({
+					fuzzyLookupKey,
 					familyIds,
 				}),
 			),

@@ -219,9 +219,9 @@ function collectBoundedFuzzyMatches(
 	if (fuzzyBudgetState.exhausted) {
 		return [];
 	}
-	const candidateMetadataFamilyIdsByDeletionKey =
-		fuzzyRescueSidecar.candidateMetadataFamilyIdsByDeletionKey;
-	if (candidateMetadataFamilyIdsByDeletionKey.size === 0) {
+	const candidateMetadataFamilyIdsByFuzzyLookupKey =
+		fuzzyRescueSidecar.candidateMetadataFamilyIdsByFuzzyLookupKey;
+	if (candidateMetadataFamilyIdsByFuzzyLookupKey.size === 0) {
 		return [];
 	}
 	const matches: V3QueryFamilyMatch[] = [];
@@ -229,7 +229,7 @@ function collectBoundedFuzzyMatches(
 	let verifiedCandidateCount = 0;
 	for (const lookupKey of buildFuzzyLookupKeys(queryUnitText)) {
 		const candidateMetadataFamilyIds =
-			candidateMetadataFamilyIdsByDeletionKey.get(lookupKey);
+			candidateMetadataFamilyIdsByFuzzyLookupKey.get(lookupKey);
 		if (candidateMetadataFamilyIds == null) {
 			continue;
 		}

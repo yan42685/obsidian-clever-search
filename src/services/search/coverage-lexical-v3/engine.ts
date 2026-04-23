@@ -202,6 +202,7 @@ export class CoverageLexicalV3Engine {
 		queryText: string,
 		queryTerms: readonly string[] = [],
 		options: CoverageLexicalV3SearchOptions = {},
+		fuzzyRescueSidecar: ResidentFuzzyRescueSidecar = this.fuzzyRescueSidecar,
 	): CoverageLexicalV3PreparedSearch {
 		if (this.residentBase == null) {
 			throw new Error("CoverageLexicalV3Engine.search requires a resident base");
@@ -211,7 +212,7 @@ export class CoverageLexicalV3Engine {
 			this.residentBase,
 			queryAnalysis,
 			options,
-			this.fuzzyRescueSidecar,
+			fuzzyRescueSidecar,
 		);
 		const candidateDocs = recallCandidateDocs(
 			this.residentBase,

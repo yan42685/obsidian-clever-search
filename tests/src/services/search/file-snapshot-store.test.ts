@@ -74,10 +74,10 @@ type LexicalIndexedMetadataRow = {
 type LexicalFuzzyRescueRow = {
   id: string;
   indexedMetadataFamilyCount: number;
-  deletionKeyCount: number;
+  fuzzyLookupKeyCount: number;
   bytes: number;
   entries: ReadonlyArray<{
-    deletionKey: string;
+    fuzzyLookupKey: string;
     familyIds: Uint32Array;
   }>;
 };
@@ -731,12 +731,12 @@ describe("FileSnapshotStore", () => {
     const { store, database } = createStoreHarness();
 
     await store.publishLexicalFuzzyRescue({
-      candidateMetadataFamilyIdsByDeletionKey: new Map([
+      candidateMetadataFamilyIdsByFuzzyLookupKey: new Map([
         ["obsidan", Uint32Array.from([3, 7])],
         ["runtim", Uint32Array.from([9])],
       ]),
       indexedMetadataFamilyCount: 3,
-      deletionKeyCount: 2,
+      fuzzyLookupKeyCount: 2,
       bytes: 42,
     });
 
@@ -745,21 +745,18 @@ describe("FileSnapshotStore", () => {
       expect.objectContaining({
         id: "active",
         indexedMetadataFamilyCount: 3,
-        deletionKeyCount: 2,
+        fuzzyLookupKeyCount: 2,
         bytes: 42,
       }),
     );
 
-    const sidecar = await store.readLexicalFuzzyRescue();
+    const sidecar = await store.readLexicalFuzzyRescueForLookupKeys(["obsidan"]);
     expect(sidecar.indexedMetadataFamilyCount).toBe(3);
-    expect(sidecar.deletionKeyCount).toBe(2);
-    expect(sidecar.bytes).toBe(42);
-    expect(sidecar.candidateMetadataFamilyIdsByDeletionKey.get("obsidan")).toEqual(
+    expect(sidecar.fuzzyLookupKeyCount).toBe(1);
+    expect(sidecar.candidateMetadataFamilyIdsByFuzzyLookupKey.get("obsidan")).toEqual(
       Uint32Array.from([3, 7]),
     );
-    expect(sidecar.candidateMetadataFamilyIdsByDeletionKey.get("runtim")).toEqual(
-      Uint32Array.from([9]),
-    );
+    expect(sidecar.candidateMetadataFamilyIdsByFuzzyLookupKey.has("runtim")).toBe(false);
   });
 
   test("publishes and reloads lexical body family support sidecars", async () => {

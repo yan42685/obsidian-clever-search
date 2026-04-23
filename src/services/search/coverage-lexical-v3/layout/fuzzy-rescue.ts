@@ -10,9 +10,9 @@ const textEncoder = new TextEncoder();
 export const FUZZY_RESCUE_MIN_QUERY_LENGTH = 6;
 
 export const EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR: ResidentFuzzyRescueSidecar = {
-	candidateMetadataFamilyIdsByDeletionKey: new Map(),
+	candidateMetadataFamilyIdsByFuzzyLookupKey: new Map(),
 	indexedMetadataFamilyCount: 0,
-	deletionKeyCount: 0,
+	fuzzyLookupKeyCount: 0,
 	bytes: 0,
 };
 
@@ -20,7 +20,7 @@ export function buildResidentFuzzyRescueSidecar(params: Readonly<{
 	familyTexts: readonly string[];
 	familyFlagsByFamilyId: Uint8Array;
 }>): ResidentFuzzyRescueSidecar {
-	const candidateMetadataFamilyIdsByDeletionKey = new Map<string, number[]>();
+	const candidateMetadataFamilyIdsByFuzzyLookupKey = new Map<string, number[]>();
 	let indexedMetadataFamilyCount = 0;
 	for (let familyId = 0; familyId < params.familyTexts.length; familyId += 1) {
 		const familyText = params.familyTexts[familyId] ?? "";
@@ -29,26 +29,30 @@ export function buildResidentFuzzyRescueSidecar(params: Readonly<{
 			continue;
 		}
 		indexedMetadataFamilyCount += 1;
-		for (const deletionKey of buildFuzzyLookupKeys(familyText)) {
-			let familyIds = candidateMetadataFamilyIdsByDeletionKey.get(deletionKey);
+		for (const fuzzyLookupKey of buildFuzzyLookupKeys(familyText)) {
+			let familyIds =
+				candidateMetadataFamilyIdsByFuzzyLookupKey.get(fuzzyLookupKey);
 			if (familyIds == null) {
 				familyIds = [];
-				candidateMetadataFamilyIdsByDeletionKey.set(deletionKey, familyIds);
+				candidateMetadataFamilyIdsByFuzzyLookupKey.set(
+					fuzzyLookupKey,
+					familyIds,
+				);
 			}
 			familyIds.push(familyId);
 		}
 	}
 	const normalizedPostings = new Map<string, Uint32Array>();
 	let bytes = 0;
-	for (const [deletionKey, familyIds] of candidateMetadataFamilyIdsByDeletionKey.entries()) {
+	for (const [fuzzyLookupKey, familyIds] of candidateMetadataFamilyIdsByFuzzyLookupKey.entries()) {
 		const posting = Uint32Array.from(familyIds);
-		normalizedPostings.set(deletionKey, posting);
-		bytes += estimateUtf8Bytes(deletionKey) + posting.byteLength;
+		normalizedPostings.set(fuzzyLookupKey, posting);
+		bytes += estimateUtf8Bytes(fuzzyLookupKey) + posting.byteLength;
 	}
 	return {
-		candidateMetadataFamilyIdsByDeletionKey: normalizedPostings,
+		candidateMetadataFamilyIdsByFuzzyLookupKey: normalizedPostings,
 		indexedMetadataFamilyCount,
-		deletionKeyCount: normalizedPostings.size,
+		fuzzyLookupKeyCount: normalizedPostings.size,
 		bytes,
 	};
 }

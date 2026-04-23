@@ -2565,6 +2565,34 @@ function registerBenchmarkFileSnapshotStore(
 			lexicalFuzzyRescue = sidecar;
 			recomputePersistedLexicalBytes();
 		},
+		readLexicalFuzzyRescueForLookupKeys: async (
+			fuzzyLookupKeys: readonly string[],
+		) => {
+			const sidecar = lexicalFuzzyRescue as
+				| {
+						candidateMetadataFamilyIdsByFuzzyLookupKey?: ReadonlyMap<string, unknown>;
+						fuzzyLookupKeyCount?: number;
+				  }
+				| null;
+			if (sidecar == null) {
+				return null;
+			}
+			const candidates =
+				sidecar.candidateMetadataFamilyIdsByFuzzyLookupKey ??
+				new Map<string, unknown>();
+			return {
+				...sidecar,
+				candidateMetadataFamilyIdsByFuzzyLookupKey: new Map(
+					fuzzyLookupKeys.flatMap((fuzzyLookupKey) => {
+						const familyIds = candidates.get(fuzzyLookupKey);
+						return familyIds == null ? [] : [[fuzzyLookupKey, familyIds] as const];
+					}),
+				),
+				fuzzyLookupKeyCount: fuzzyLookupKeys.filter((fuzzyLookupKey) =>
+					candidates.has(fuzzyLookupKey),
+				).length,
+			};
+		},
 		readLexicalFuzzyRescue: async () => lexicalFuzzyRescue,
 		publishLexicalBodyEvidence: async (
 			rows: ReadonlyArray<{

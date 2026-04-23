@@ -1074,9 +1074,12 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(matchedFiles[0]?.path).toBe("infra/projected-token.md");
 	});
 
-	test("offloads fuzzy rescue sidecar and reloads it transiently for fuzzy search", async () => {
+	test("offloads fuzzy rescue sidecar and reloads matching fuzzy lookup keys for fuzzy search", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
-		let persistedFuzzyRescue: { deletionKeyCount: number } | null = null;
+		let persistedFuzzyRescue: {
+			candidateMetadataFamilyIdsByFuzzyLookupKey: ReadonlyMap<string, Uint32Array>;
+			fuzzyLookupKeyCount: number;
+		} | null = null;
 		const snapshotStore = {
 			readIndexedTexts: jest.fn(async () => new Map<string, string>()),
 			readIndexedMetadata: jest.fn(async () => new Map()),
@@ -1084,11 +1087,27 @@ describe("coverage lexical v3 file search engine", () => {
 			publishLexicalFuzzyRescue: jest.fn(async (sidecar) => {
 				persistedFuzzyRescue = sidecar;
 			}),
-			readLexicalFuzzyRescue: jest.fn(async () => {
+			readLexicalFuzzyRescueForLookupKeys: jest.fn(async (fuzzyLookupKeys: readonly string[]) => {
 				if (persistedFuzzyRescue == null) {
 					throw new Error("missing fuzzy rescue sidecar");
 				}
-				return persistedFuzzyRescue;
+				return {
+					...persistedFuzzyRescue,
+					candidateMetadataFamilyIdsByFuzzyLookupKey: new Map(
+						fuzzyLookupKeys.flatMap((fuzzyLookupKey) => {
+							const familyIds =
+								persistedFuzzyRescue.candidateMetadataFamilyIdsByFuzzyLookupKey.get(
+									fuzzyLookupKey,
+								);
+							return familyIds == null ? [] : [[fuzzyLookupKey, familyIds] as const];
+						}),
+					),
+					fuzzyLookupKeyCount: fuzzyLookupKeys.filter((fuzzyLookupKey) =>
+						persistedFuzzyRescue.candidateMetadataFamilyIdsByFuzzyLookupKey.has(
+							fuzzyLookupKey,
+						),
+					).length,
+				};
 			}),
 		};
 		(
@@ -1110,9 +1129,9 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(
 			(
 				engine as unknown as {
-					engine: { getFuzzyRescueSidecar: () => { deletionKeyCount: number } };
+					engine: { getFuzzyRescueSidecar: () => { fuzzyLookupKeyCount: number } };
 				}
-			).engine.getFuzzyRescueSidecar().deletionKeyCount,
+			).engine.getFuzzyRescueSidecar().fuzzyLookupKeyCount,
 		).toBe(0);
 
 		const matchedFiles = await engine.searchFiles({
@@ -1122,14 +1141,14 @@ describe("coverage lexical v3 file search engine", () => {
 			maxItemResults: 5,
 		});
 
-		expect(snapshotStore.readLexicalFuzzyRescue).toHaveBeenCalledTimes(1);
+		expect(snapshotStore.readLexicalFuzzyRescueForLookupKeys).toHaveBeenCalledTimes(1);
 		expect(matchedFiles[0]?.path).toBe("latin/obsidian.md");
 		expect(
 			(
 				engine as unknown as {
-					engine: { getFuzzyRescueSidecar: () => { deletionKeyCount: number } };
+					engine: { getFuzzyRescueSidecar: () => { fuzzyLookupKeyCount: number } };
 				}
-			).engine.getFuzzyRescueSidecar().deletionKeyCount,
+			).engine.getFuzzyRescueSidecar().fuzzyLookupKeyCount,
 		).toBe(0);
 	});
 

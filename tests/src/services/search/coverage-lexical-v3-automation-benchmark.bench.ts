@@ -76,8 +76,32 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => ({
 			return Promise.resolve();
 		}
 
-		readLexicalFuzzyRescue(): Promise<unknown> {
-			return Promise.resolve(MockFileSnapshotStore.lexicalFuzzyRescue);
+		readLexicalFuzzyRescueForLookupKeys(
+			fuzzyLookupKeys: ReadonlyArray<string>,
+		): Promise<unknown> {
+			const sidecar = MockFileSnapshotStore.lexicalFuzzyRescue as
+				| {
+						candidateMetadataFamilyIdsByFuzzyLookupKey?: ReadonlyMap<string, unknown>;
+						fuzzyLookupKeyCount?: number;
+				  }
+				| null;
+			if (sidecar == null) {
+				return Promise.resolve(null);
+			}
+			const candidates =
+				sidecar.candidateMetadataFamilyIdsByFuzzyLookupKey ?? new Map<string, unknown>();
+			return Promise.resolve({
+				...sidecar,
+				candidateMetadataFamilyIdsByFuzzyLookupKey: new Map(
+					fuzzyLookupKeys.flatMap((fuzzyLookupKey) => {
+						const familyIds = candidates.get(fuzzyLookupKey);
+						return familyIds == null ? [] : [[fuzzyLookupKey, familyIds] as const];
+					}),
+				),
+				fuzzyLookupKeyCount: fuzzyLookupKeys.filter((fuzzyLookupKey) =>
+					candidates.has(fuzzyLookupKey),
+				).length,
+			});
 		}
 
 		publishLexicalBodyEvidence(

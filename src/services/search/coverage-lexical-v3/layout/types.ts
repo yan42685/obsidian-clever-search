@@ -119,9 +119,9 @@ export type ResidentAdaptivePostingField = Readonly<{
 }>;
 
 export type ResidentFuzzyRescueSidecar = Readonly<{
-	candidateMetadataFamilyIdsByDeletionKey: ReadonlyMap<string, Uint32Array>;
+	candidateMetadataFamilyIdsByFuzzyLookupKey: ReadonlyMap<string, Uint32Array>;
 	indexedMetadataFamilyCount: number;
-	deletionKeyCount: number;
+	fuzzyLookupKeyCount: number;
 	bytes: number;
 }>;
 
