@@ -45,6 +45,7 @@ import {
 	comparePackingProfiles,
 	comparePackingProfilesBeforeHanSurfaceCompletion,
 	hydrateCandidateEvidenceBatch,
+	preparePackingProfileQueryContext,
 	type CandidateEvidencePackage,
 	type EvidencePackingProfile,
 } from "./ranking";
@@ -68,6 +69,17 @@ export type CoverageLexicalV3SearchOptions = Readonly<{
 	maxItemResults?: number;
 }>;
 
+export type CoverageLexicalV3BenchmarkPhaseEntry = Readonly<{
+	phase: string;
+	durationMs: number;
+	unitCount: number;
+}>;
+
+export type CoverageLexicalV3BenchmarkPhaseBreakdown = Readonly<{
+	prepareSubphases: readonly CoverageLexicalV3BenchmarkPhaseEntry[];
+	rankSubphases: readonly CoverageLexicalV3BenchmarkPhaseEntry[];
+}>;
+
 export class CoverageLexicalV3Engine {
 	private residentBase: ResidentBase | null = null;
 	private fuzzyRescueSidecar: ResidentFuzzyRescueSidecar =
@@ -78,6 +90,11 @@ export class CoverageLexicalV3Engine {
 		EMPTY_RESIDENT_EXACT_TAPE_SIDECAR;
 	private hanWitnessSidecar: ResidentHanWitnessSidecar =
 		EMPTY_RESIDENT_HAN_WITNESS_SIDECAR;
+	private benchmarkPhaseTrackingEnabled = false;
+	private lastBenchmarkPrepareSubphases: readonly CoverageLexicalV3BenchmarkPhaseEntry[] =
+		[];
+	private lastBenchmarkRankSubphases: readonly CoverageLexicalV3BenchmarkPhaseEntry[] =
+		[];
 
 	buildResidentBase(
 		documents: readonly IndexedDocument[],
@@ -198,6 +215,31 @@ export class CoverageLexicalV3Engine {
 		return describeResidentBase(this.residentBase);
 	}
 
+	setBenchmarkPhaseTrackingEnabled(enabled: boolean): void {
+		this.benchmarkPhaseTrackingEnabled = enabled;
+		if (!enabled) {
+			this.clearLastBenchmarkPhaseBreakdown();
+		}
+	}
+
+	clearLastBenchmarkPhaseBreakdown(): void {
+		this.lastBenchmarkPrepareSubphases = [];
+		this.lastBenchmarkRankSubphases = [];
+	}
+
+	getLastBenchmarkPhaseBreakdown(): CoverageLexicalV3BenchmarkPhaseBreakdown | null {
+		if (
+			this.lastBenchmarkPrepareSubphases.length === 0 &&
+			this.lastBenchmarkRankSubphases.length === 0
+		) {
+			return null;
+		}
+		return {
+			prepareSubphases: this.lastBenchmarkPrepareSubphases,
+			rankSubphases: this.lastBenchmarkRankSubphases,
+		};
+	}
+
 	prepareSearch(
 		queryText: string,
 		queryTerms: readonly string[] = [],
@@ -207,22 +249,58 @@ export class CoverageLexicalV3Engine {
 		if (this.residentBase == null) {
 			throw new Error("CoverageLexicalV3Engine.search requires a resident base");
 		}
+		const benchmarkPhaseEntries: CoverageLexicalV3BenchmarkPhaseEntry[] = [];
+		const analyzeStartedAtMs = this.benchmarkPhaseTrackingEnabled ? nowDebugMs() : 0;
 		const queryAnalysis = analyzeQuery(queryText, queryTerms);
+		if (this.benchmarkPhaseTrackingEnabled) {
+			benchmarkPhaseEntries.push({
+				phase: "analyze",
+				durationMs: nowDebugMs() - analyzeStartedAtMs,
+				unitCount: Math.max(queryTerms.length, 1),
+			});
+		}
+		const familyLookupStartedAtMs = this.benchmarkPhaseTrackingEnabled
+			? nowDebugMs()
+			: 0;
 		const unitFamilyMatches = lookupQueryUnitFamilies(
 			this.residentBase,
 			queryAnalysis,
 			options,
 			fuzzyRescueSidecar,
 		);
+		if (this.benchmarkPhaseTrackingEnabled) {
+			benchmarkPhaseEntries.push({
+				phase: "familyLookup",
+				durationMs: nowDebugMs() - familyLookupStartedAtMs,
+				unitCount: Math.max(queryAnalysis.primaryUnits.length, 1),
+			});
+		}
+		const recallStartedAtMs = this.benchmarkPhaseTrackingEnabled ? nowDebugMs() : 0;
 		const candidateDocs = recallCandidateDocs(
 			this.residentBase,
 			queryAnalysis,
 			unitFamilyMatches,
 		);
+		if (this.benchmarkPhaseTrackingEnabled) {
+			benchmarkPhaseEntries.push({
+				phase: "recall",
+				durationMs: nowDebugMs() - recallStartedAtMs,
+				unitCount: Math.max(candidateDocs.length, 1),
+			});
+		}
+		const guardStartedAtMs = this.benchmarkPhaseTrackingEnabled ? nowDebugMs() : 0;
 		const guardResult = applyPrefixFanoutGuard(
 			candidateDocs,
 			options.maxItemResults,
 		);
+		if (this.benchmarkPhaseTrackingEnabled) {
+			benchmarkPhaseEntries.push({
+				phase: "guard",
+				durationMs: nowDebugMs() - guardStartedAtMs,
+				unitCount: Math.max(candidateDocs.length, 1),
+			});
+			this.lastBenchmarkPrepareSubphases = benchmarkPhaseEntries;
+		}
 		return {
 			queryText,
 			queryTerms,
@@ -241,9 +319,22 @@ export class CoverageLexicalV3Engine {
 		}
 		const { queryAnalysis, unitFamilyMatches, guardedCandidateDocs } =
 			preparedSearch;
+		const benchmarkPhaseEntries: CoverageLexicalV3BenchmarkPhaseEntry[] = [];
+		const hydrateStartedAtMs = this.benchmarkPhaseTrackingEnabled ? nowDebugMs() : 0;
 		const effectiveHydratedEvidenceByLiveDocSlot =
 			hydratedEvidenceByLiveDocSlot ??
 			hydrateCandidateEvidenceBatch(this.residentBase, guardedCandidateDocs);
+		const packingQueryContext = preparePackingProfileQueryContext(unitFamilyMatches);
+		if (this.benchmarkPhaseTrackingEnabled && hydratedEvidenceByLiveDocSlot == null) {
+			benchmarkPhaseEntries.push({
+				phase: "residentHydrate",
+				durationMs: nowDebugMs() - hydrateStartedAtMs,
+				unitCount: Math.max(guardedCandidateDocs.length, 1),
+			});
+		}
+		const provisionalPackingStartedAtMs = this.benchmarkPhaseTrackingEnabled
+			? nowDebugMs()
+			: 0;
 		const provisionalCandidateProfiles = guardedCandidateDocs.map((candidateRecall) =>
 			buildPackingProfile(
 				this.residentBase!,
@@ -256,9 +347,20 @@ export class CoverageLexicalV3Engine {
 						effectiveHydratedEvidenceByLiveDocSlot.get(
 							candidateRecall.liveDocSlot,
 						) ?? null,
+					queryContext: packingQueryContext,
 				},
 			),
 		);
+		if (this.benchmarkPhaseTrackingEnabled) {
+			benchmarkPhaseEntries.push({
+				phase: "provisionalPacking",
+				durationMs: nowDebugMs() - provisionalPackingStartedAtMs,
+				unitCount: Math.max(guardedCandidateDocs.length, 1),
+			});
+		}
+		const provisionalFilterStartedAtMs = this.benchmarkPhaseTrackingEnabled
+			? nowDebugMs()
+			: 0;
 		const provisionalCandidates = provisionalCandidateProfiles
 			.filter(
 				(candidate, index) =>
@@ -267,52 +369,39 @@ export class CoverageLexicalV3Engine {
 					candidate.hasAnyHanRescueAssessment ||
 					hasBodyOpaqueRescueSeeds(guardedCandidateDocs[index]),
 			);
-		const allowedBodyOpaqueRescueByLiveDocSlot = buildAllowedBodyOpaqueRescueSurfaceGroups(
-			this.residentBase!,
-			queryAnalysis,
-			guardedCandidateDocs,
-			unitFamilyMatches,
-			effectiveHydratedEvidenceByLiveDocSlot,
-		);
-		const candidateRecallByLiveDocSlot = new Map(
-			guardedCandidateDocs.map((candidateRecall) => [
-				candidateRecall.liveDocSlot,
-				candidateRecall,
-			]),
-		);
-		const secondPassCandidateProfiles = provisionalCandidates.map(
-			(provisionalCandidate) => {
-				const candidateRecall = candidateRecallByLiveDocSlot.get(
-					provisionalCandidate.liveDocSlot,
-				);
-				if (candidateRecall == null) {
-					return provisionalCandidate;
-				}
-				return buildPackingProfile(
-					this.residentBase!,
-					queryAnalysis,
-					candidateRecall,
-					unitFamilyMatches,
-					{
-						allowBodyOpaqueRescueSurfaceGroupIndices:
-							allowedBodyOpaqueRescueByLiveDocSlot.get(
-								candidateRecall.liveDocSlot,
-							) ?? null,
-						hydratedEvidence:
-							effectiveHydratedEvidenceByLiveDocSlot.get(
-								candidateRecall.liveDocSlot,
-							) ?? null,
-					},
-				);
-			},
-		);
-		const rankedCandidatesBeforeSort = secondPassCandidateProfiles.filter(
+		if (this.benchmarkPhaseTrackingEnabled) {
+			benchmarkPhaseEntries.push({
+				phase: "provisionalFilter",
+				durationMs: nowDebugMs() - provisionalFilterStartedAtMs,
+				unitCount: Math.max(provisionalCandidateProfiles.length, 1),
+			});
+		}
+		const finalFilterStartedAtMs = this.benchmarkPhaseTrackingEnabled
+			? nowDebugMs()
+			: 0;
+		const rankedCandidatesBeforeSort = provisionalCandidates.filter(
 			(candidate) =>
 				candidate.realizedCoverageCount > 0 ||
 				candidate.singletonHanCompletion.matched ||
 				candidate.hasOnlyWeakHanRescue,
 		);
+		if (this.benchmarkPhaseTrackingEnabled) {
+			benchmarkPhaseEntries.push({
+				phase: "finalFilter",
+				durationMs: nowDebugMs() - finalFilterStartedAtMs,
+				unitCount: Math.max(provisionalCandidates.length, 1),
+			});
+		}
+		const sortStartedAtMs = this.benchmarkPhaseTrackingEnabled ? nowDebugMs() : 0;
 		const rankedCandidates = rankedCandidatesBeforeSort.sort(comparePackingProfiles);
+		if (this.benchmarkPhaseTrackingEnabled) {
+			benchmarkPhaseEntries.push({
+				phase: "sort",
+				durationMs: nowDebugMs() - sortStartedAtMs,
+				unitCount: Math.max(rankedCandidatesBeforeSort.length, 1),
+			});
+			this.lastBenchmarkRankSubphases = benchmarkPhaseEntries;
+		}
 		return {
 			recallState: {
 				queryAnalysis,
@@ -359,6 +448,7 @@ export class CoverageLexicalV3Engine {
 			this.residentBase,
 			guardedCandidateDocs,
 		);
+		const packingQueryContext = preparePackingProfileQueryContext(unitFamilyMatches);
 		const packingStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const provisionalCandidateProfiles = guardedCandidateDocs.map((candidateRecall) =>
 			buildPackingProfile(
@@ -370,6 +460,7 @@ export class CoverageLexicalV3Engine {
 					allowBodyOpaqueRescueSurfaceGroupIndices: null,
 					hydratedEvidence:
 						hydratedEvidenceByLiveDocSlot.get(candidateRecall.liveDocSlot) ?? null,
+					queryContext: packingQueryContext,
 				},
 			),
 		);
@@ -381,44 +472,7 @@ export class CoverageLexicalV3Engine {
 					candidate.hasAnyHanRescueAssessment ||
 					hasBodyOpaqueRescueSeeds(guardedCandidateDocs[index]),
 			);
-		const allowedBodyOpaqueRescueByLiveDocSlot = buildAllowedBodyOpaqueRescueSurfaceGroups(
-			this.residentBase!,
-			queryAnalysis,
-			guardedCandidateDocs,
-			unitFamilyMatches,
-			hydratedEvidenceByLiveDocSlot,
-		);
-		const candidateRecallByLiveDocSlot = new Map(
-			guardedCandidateDocs.map((candidateRecall) => [
-				candidateRecall.liveDocSlot,
-				candidateRecall,
-			]),
-		);
-		const secondPassCandidateProfiles = provisionalCandidates.map((provisionalCandidate) => {
-				const candidateRecall = candidateRecallByLiveDocSlot.get(
-					provisionalCandidate.liveDocSlot,
-				);
-				if (candidateRecall == null) {
-					return provisionalCandidate;
-				}
-				return buildPackingProfile(
-					this.residentBase!,
-					queryAnalysis,
-					candidateRecall,
-					unitFamilyMatches,
-					{
-						allowBodyOpaqueRescueSurfaceGroupIndices:
-							allowedBodyOpaqueRescueByLiveDocSlot.get(
-								candidateRecall.liveDocSlot,
-							) ?? null,
-						hydratedEvidence:
-							hydratedEvidenceByLiveDocSlot.get(
-								candidateRecall.liveDocSlot,
-							) ?? null,
-					},
-				);
-			});
-		const rankedCandidatesBeforeSort = secondPassCandidateProfiles
+		const rankedCandidatesBeforeSort = provisionalCandidates
 			.filter(
 				(candidate) =>
 					candidate.realizedCoverageCount > 0 ||
@@ -465,11 +519,6 @@ export class CoverageLexicalV3Engine {
 				unitFamilyMatchDetails: summarizeUnitFamilyMatchDetails(unitFamilyMatches),
 				candidateDocDetails: summarizeCandidateDocs(guardedCandidateDocs),
 				provisionalCandidateDetails: summarizePackingProfiles(provisionalCandidateProfiles),
-				bodyOpaqueRescueAllowanceDetails:
-					summarizeAllowedBodyOpaqueRescueByLiveDocSlot(
-						allowedBodyOpaqueRescueByLiveDocSlot,
-					),
-				secondPassCandidateDetails: summarizePackingProfiles(secondPassCandidateProfiles),
 				topRankedCandidateDetails: summarizeTopRankedCandidates(rankedCandidates),
 				phaseMs: {
 					analyze: roundDebugMs(analyzeMs),
@@ -781,6 +830,16 @@ function hasBodyOpaqueRescueSeeds(candidateRecall: V3RecallState["candidateDocs"
 	);
 }
 
+function countBodyOpaqueRescueSurfaceGroups(
+	candidateDocs: readonly V3RecallState["candidateDocs"][number][],
+): number {
+	let count = 0;
+	for (const candidateRecall of candidateDocs) {
+		count += candidateRecall.hanSurfaceGroupRecalls.length;
+	}
+	return Math.max(count, 1);
+}
+
 function buildAllowedBodyOpaqueRescueSurfaceGroups(
 	base: ResidentBase,
 	queryAnalysis: V3RecallState["queryAnalysis"],
@@ -896,3 +955,6 @@ function pushAllowedBodyOpaqueRescueSurfaceGroup(
 function roundDebugMs(value: number): number {
 	return Math.round(value * 1000) / 1000;
 }
+
+
+

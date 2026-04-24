@@ -179,6 +179,19 @@ export type CandidateHydratedHanDocEvidence = Readonly<{
 	headingWitnessStringIds: readonly number[];
 }>;
 
+type BodyOccurrenceMatchContext = Readonly<{
+	unitIndex: number;
+	match: V3QueryFamilyMatch;
+}>;
+
+export type PackingProfileQueryContext = Readonly<{
+	relevantUnitFamilyMatches: readonly V3QueryUnitFamilyMatches[];
+	bodyOccurrenceMatchContextsByShardLocalFamilySlot: ReadonlyMap<
+		number,
+		readonly BodyOccurrenceMatchContext[]
+	>;
+}>;
+
 export type CandidateHydratedHanBodyEvidenceBlock = Readonly<{
 	bodyWitnessStringIds: readonly number[];
 	bodyWitnessStartOffsets: readonly number[];
@@ -386,6 +399,7 @@ export function buildPackingProfile(
 		allowBodyOpaqueRescueSurfaceGroupIndices?: ReadonlySet<number> | null;
 		excludeSurfaceGroupIndices?: ReadonlySet<number> | null;
 		hydratedEvidence?: CandidateEvidencePackage | null;
+		queryContext?: PackingProfileQueryContext | null;
 	}>,
 ): EvidencePackingProfile {
 	const docEvidence =
@@ -405,13 +419,15 @@ export function buildPackingProfile(
 	const routeSourceMaskByShardLocalFamilySlot =
 		docEvidence.routeSourceMaskByShardLocalFamilySlot;
 	const excludedSurfaceGroupIndices = options?.excludeSurfaceGroupIndices ?? null;
-	const relevantUnitFamilyMatches = unitFamilyMatches.filter((unitMatches) => {
-		if (excludedSurfaceGroupIndices == null || excludedSurfaceGroupIndices.size === 0) {
-			return true;
-		}
-		const surfaceGroupIndex = unitMatches.querySurfaceGroupIndex;
-		return surfaceGroupIndex == null || !excludedSurfaceGroupIndices.has(surfaceGroupIndex);
-	});
+	const queryContext =
+		options?.queryContext ??
+		preparePackingProfileQueryContext(
+			unitFamilyMatches,
+			excludedSurfaceGroupIndices,
+		);
+	const relevantUnitFamilyMatches = queryContext.relevantUnitFamilyMatches;
+	const bodyOccurrenceMatchContextsByShardLocalFamilySlot =
+		queryContext.bodyOccurrenceMatchContextsByShardLocalFamilySlot;
 	const bodyOccurrencesByBlockId = new Map<number, BodyOccurrence[]>();
 	const bodyApproxSpanByBlockId = new Map<number, number>();
 	const bodyOrdinalSpanByBlockId = new Map<number, number>();
@@ -426,58 +442,58 @@ export function buildPackingProfile(
 			getCachedBodyBlockEvidence(base, blockId);
 		const exactOccurrences = blockEvidence.exactOccurrences;
 		const witnessOccurrences = blockEvidence.witnessOccurrences;
-		const allOccurrences = [...exactOccurrences, ...witnessOccurrences];
 		bodyWitnessTextsByBlockId.set(blockId, blockEvidence.witnessTexts);
 		bodyApproxSpanByBlockId.set(blockId, blockEvidence.approxSpan);
 		bodyOrdinalSpanByBlockId.set(blockId, blockEvidence.ordinalSpan);
 		const blockOccurrences: BodyOccurrence[] = [];
+		collectBlockOccurrences(
+			blockOccurrences,
+			blockId,
+			exactOccurrences,
+			bodyOccurrenceMatchContextsByShardLocalFamilySlot,
+		);
+		collectBlockOccurrences(
+			blockOccurrences,
+			blockId,
+			witnessOccurrences,
+			bodyOccurrenceMatchContextsByShardLocalFamilySlot,
+		);
 		const blockSupportMaskByShardLocalFamilySlot =
 			blockEvidence.familySupportMaskByShardLocalFamilySlot;
-		for (const unitMatches of relevantUnitFamilyMatches) {
-			const occurrences = collectBlockOccurrences(
-				base,
-				blockId,
-				unitMatches.queryUnitIndex,
-				unitMatches.matches,
-				allOccurrences,
-			);
-			if (occurrences.length === 0) {
-				continue;
+		for (const occurrence of blockOccurrences) {
+			const shardLocalFamilySlot = occurrence.shardLocalFamilySlot;
+			let familyMap = bodyBlockIdsByUnitFamilySlot.get(occurrence.unitIndex);
+			if (familyMap == null) {
+				familyMap = new Map<number, Set<number>>();
+				bodyBlockIdsByUnitFamilySlot.set(occurrence.unitIndex, familyMap);
 			}
-			blockOccurrences.push(...occurrences);
-			for (const occurrence of occurrences) {
-				const shardLocalFamilySlot = occurrence.shardLocalFamilySlot;
-				let familyMap = bodyBlockIdsByUnitFamilySlot.get(occurrence.unitIndex);
-				if (familyMap == null) {
-					familyMap = new Map<number, Set<number>>();
-					bodyBlockIdsByUnitFamilySlot.set(occurrence.unitIndex, familyMap);
-				}
-				let blockIds = familyMap.get(shardLocalFamilySlot);
-				if (blockIds == null) {
-					blockIds = new Set<number>();
-					familyMap.set(shardLocalFamilySlot, blockIds);
-				}
-				blockIds.add(blockId);
-				let familySupportMaskMap =
-					bodySupportMaskByUnitFamilySlot.get(occurrence.unitIndex);
-				if (familySupportMaskMap == null) {
-					familySupportMaskMap = new Map<number, number>();
-					bodySupportMaskByUnitFamilySlot.set(
-						occurrence.unitIndex,
-						familySupportMaskMap,
-					);
-				}
-				familySupportMaskMap.set(
-					shardLocalFamilySlot,
-					(familySupportMaskMap.get(shardLocalFamilySlot) ?? 0) |
-						(blockSupportMaskByShardLocalFamilySlot.get(shardLocalFamilySlot) ?? 0),
+			let blockIds = familyMap.get(shardLocalFamilySlot);
+			if (blockIds == null) {
+				blockIds = new Set<number>();
+				familyMap.set(shardLocalFamilySlot, blockIds);
+			}
+			blockIds.add(blockId);
+			let familySupportMaskMap =
+				bodySupportMaskByUnitFamilySlot.get(occurrence.unitIndex);
+			if (familySupportMaskMap == null) {
+				familySupportMaskMap = new Map<number, number>();
+				bodySupportMaskByUnitFamilySlot.set(
+					occurrence.unitIndex,
+					familySupportMaskMap,
 				);
 			}
+			familySupportMaskMap.set(
+				shardLocalFamilySlot,
+				(familySupportMaskMap.get(shardLocalFamilySlot) ?? 0) |
+					(blockSupportMaskByShardLocalFamilySlot.get(shardLocalFamilySlot) ?? 0),
+			);
 		}
 		if (blockOccurrences.length > 0) {
 			bodyOccurrencesByBlockId.set(
 				blockId,
-				blockOccurrences.sort(compareBodyOccurrenceOrder),
+				blockOccurrences.length === 1
+					? blockOccurrences
+					: blockOccurrences.sort(compareBodyOccurrenceOrder),
 			);
 		}
 	}
@@ -818,6 +834,23 @@ export function hydrateCandidateEvidenceBatch(
 		);
 	}
 	return hydratedByLiveDocSlot;
+}
+
+export function preparePackingProfileQueryContext(
+	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
+	excludeSurfaceGroupIndices?: ReadonlySet<number> | null,
+): PackingProfileQueryContext {
+	const relevantUnitFamilyMatches = filterRelevantUnitFamilyMatches(
+		unitFamilyMatches,
+		excludeSurfaceGroupIndices ?? null,
+	);
+	return {
+		relevantUnitFamilyMatches,
+		bodyOccurrenceMatchContextsByShardLocalFamilySlot:
+			buildBodyOccurrenceMatchContextsByShardLocalFamilySlot(
+				relevantUnitFamilyMatches,
+			),
+	};
 }
 
 function getCachedDocEvidence(
@@ -1437,40 +1470,79 @@ function routeContainerProvidesNovelCoverage(
 	);
 }
 
-function collectBlockOccurrences(
-	base: ResidentBase,
-	blockId: number,
-	unitIndex: number,
-	matches: readonly V3QueryFamilyMatch[],
-	positionedOccurrences: readonly PositionedFamilyOccurrence[],
-): BodyOccurrence[] {
-	const matchByShardLocalFamilySlot = new Map<number, V3QueryFamilyMatch>();
-	for (const match of matches) {
-		matchByShardLocalFamilySlot.set(match.shardLocalFamilySlot, match);
+function filterRelevantUnitFamilyMatches(
+	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
+	excludeSurfaceGroupIndices: ReadonlySet<number> | null,
+): readonly V3QueryUnitFamilyMatches[] {
+	if (excludeSurfaceGroupIndices == null || excludeSurfaceGroupIndices.size === 0) {
+		return unitFamilyMatches;
 	}
-	const occurrences: BodyOccurrence[] = [];
-	for (const positionedOccurrence of positionedOccurrences) {
-		const match = matchByShardLocalFamilySlot.get(
-			positionedOccurrence.shardLocalFamilySlot,
+	return unitFamilyMatches.filter((unitMatches) => {
+		const surfaceGroupIndex = unitMatches.querySurfaceGroupIndex;
+		return (
+			surfaceGroupIndex == null ||
+			!excludeSurfaceGroupIndices.has(surfaceGroupIndex)
 		);
-		if (match == null) {
+	});
+}
+
+function buildBodyOccurrenceMatchContextsByShardLocalFamilySlot(
+	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
+): ReadonlyMap<number, readonly BodyOccurrenceMatchContext[]> {
+	const contextsByShardLocalFamilySlot = new Map<number, BodyOccurrenceMatchContext[]>();
+	for (const unitMatches of unitFamilyMatches) {
+		for (const match of unitMatches.matches) {
+			const existing = contextsByShardLocalFamilySlot.get(match.shardLocalFamilySlot);
+			if (existing != null) {
+				existing.push({
+					unitIndex: unitMatches.queryUnitIndex,
+					match,
+				});
+				continue;
+			}
+			contextsByShardLocalFamilySlot.set(match.shardLocalFamilySlot, [
+				{
+					unitIndex: unitMatches.queryUnitIndex,
+					match,
+				},
+			]);
+		}
+	}
+	return contextsByShardLocalFamilySlot;
+}
+
+function collectBlockOccurrences(
+	target: BodyOccurrence[],
+	blockId: number,
+	positionedOccurrences: readonly PositionedFamilyOccurrence[],
+	matchContextsByShardLocalFamilySlot: ReadonlyMap<
+		number,
+		readonly BodyOccurrenceMatchContext[]
+	>,
+): void {
+	for (const positionedOccurrence of positionedOccurrences) {
+		const shardLocalFamilySlot = positionedOccurrence.shardLocalFamilySlot;
+		const matchContexts = matchContextsByShardLocalFamilySlot.get(
+			shardLocalFamilySlot,
+		);
+		if (matchContexts == null) {
 			continue;
 		}
-		const shardLocalFamilySlot = positionedOccurrence.shardLocalFamilySlot;
-		occurrences.push({
-			blockId,
-			unitIndex,
-			match,
-			shardLocalFamilySlot,
-			ordinalPosition: positionedOccurrence.ordinalPosition,
-			localPosition: positionedOccurrence.localPosition,
-			localEndPosition: positionedOccurrence.localEndPosition,
-			ordinalVirtualPosition: positionedOccurrence.ordinalPosition,
-			virtualPosition: positionedOccurrence.localPosition,
-			virtualEndPosition: positionedOccurrence.localEndPosition,
-		});
+		for (const matchContext of matchContexts) {
+			target.push({
+				blockId,
+				unitIndex: matchContext.unitIndex,
+				match: matchContext.match,
+				shardLocalFamilySlot,
+				ordinalPosition: positionedOccurrence.ordinalPosition,
+				localPosition: positionedOccurrence.localPosition,
+				localEndPosition: positionedOccurrence.localEndPosition,
+				ordinalVirtualPosition: positionedOccurrence.ordinalPosition,
+				virtualPosition: positionedOccurrence.localPosition,
+				virtualEndPosition: positionedOccurrence.localEndPosition,
+			});
+		}
 	}
-	return occurrences;
 }
 
 function buildExactPositionedOccurrences(
@@ -3898,3 +3970,4 @@ function getHanSurfaceCompletionTierScore(tier: HanSurfaceCompletionTier): numbe
 			return 0;
 	}
 }
+

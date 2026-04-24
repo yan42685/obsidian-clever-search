@@ -71,6 +71,48 @@ function mockBuildBenchmarkLexicalBlockEvidenceRowId(locator: {
 	return `${locator.docRef}:${locator.generation}:${locator.blockOrdinal}`;
 }
 
+type PhaseTimingSummary = {
+	queryCount: number;
+	queryTotalMs: number;
+	totalMeasuredMs: number;
+	phases: Array<{
+		phase: string;
+		totalMs: number;
+		maxMs: number;
+		count: number;
+		unitCount: number;
+		avgMsPerCall: number;
+		avgMsPerUnit: number;
+		shareOfMeasuredMs: number;
+		shareOfQueryTime: number;
+		shareOfParentMs?: number;
+	}>;
+	prepareSubphases: Array<{
+		phase: string;
+		totalMs: number;
+		maxMs: number;
+		count: number;
+		unitCount: number;
+		avgMsPerCall: number;
+		avgMsPerUnit: number;
+		shareOfMeasuredMs: number;
+		shareOfQueryTime: number;
+		shareOfParentMs?: number;
+	}>;
+	rankSubphases: Array<{
+		phase: string;
+		totalMs: number;
+		maxMs: number;
+		count: number;
+		unitCount: number;
+		avgMsPerCall: number;
+		avgMsPerUnit: number;
+		shareOfMeasuredMs: number;
+		shareOfQueryTime: number;
+		shareOfParentMs?: number;
+	}>;
+};
+
 jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
 }));
@@ -571,7 +613,7 @@ const legacyFixtureModule = require("./coverage-lexical-legacy-automation-benchm
 		engine: any,
 		documents: Array<Record<string, unknown>>,
 		queryCases: Array<Record<string, unknown>>,
-	): Promise<{ summary: any }>;
+	): Promise<{ summary: any; phaseTiming: PhaseTimingSummary | null }>;
 	computeLanguageMix(documents: Array<Record<string, unknown>>): {
 		docsWithHan: number;
 		docsWithLatinAndHan: number;
@@ -603,15 +645,128 @@ const {
 	computeRelativeRatio,
 } = legacyFixtureModule;
 
+const LOCAL_STORAGE_DEBUG_QUERY_KEY = "coverage-lexical-v3-debug-query";
+const LOCAL_STORAGE_DEBUG_MODE_KEY = "coverage-lexical-v3-debug-mode";
+const BENCHMARK_DEBUG_QUERY_ENV_KEY = "COVERAGE_LEXICAL_V3_DEBUG_QUERY";
+const BENCHMARK_DEBUG_MODE_ENV_KEY = "COVERAGE_LEXICAL_V3_DEBUG_MODE";
+const BENCHMARK_SLOW_QUERY_LIMIT_ENV_KEY =
+	"COVERAGE_LEXICAL_V3_SLOW_QUERY_LIMIT";
+
+type BenchmarkQueryCase = Readonly<{
+	query: string;
+	type?: string;
+	suite?: string;
+	relevantPath?: string;
+}>;
+
+type SlowQuerySample = Readonly<{
+	query: string;
+	type: string;
+	suite: string;
+	relevantPath: string;
+	elapsedMs: number;
+	resultCount: number;
+	topResultPath: string | null;
+	hitTop1: boolean;
+	missed: boolean;
+}>;
+
 function createCoverageLexicalV3BenchmarkLocalStorage(): {
 	getItem: jest.Mock;
 	setItem: jest.Mock;
 	removeItem: jest.Mock;
 } {
+	const configuredDebugQuery =
+		process.env[BENCHMARK_DEBUG_QUERY_ENV_KEY]?.trim() ?? "";
+	const configuredDebugMode =
+		process.env[BENCHMARK_DEBUG_MODE_ENV_KEY]?.trim() ?? "";
 	return {
-		getItem: jest.fn(() => "zh"),
+		getItem: jest.fn((key: string) => {
+			if (key === LOCAL_STORAGE_DEBUG_QUERY_KEY) {
+				return configuredDebugQuery;
+			}
+			if (key === LOCAL_STORAGE_DEBUG_MODE_KEY) {
+				return configuredDebugMode;
+			}
+			return "zh";
+		}),
 		setItem: jest.fn(),
 		removeItem: jest.fn(),
+	};
+}
+
+function attachCoverageLexicalV3SlowQueryDiagnostics(
+	engine: {
+		searchFiles(request: {
+			queryText?: string;
+		}): Promise<Array<{ path: string }>>;
+	},
+	queryCases: readonly BenchmarkQueryCase[],
+): () => readonly SlowQuerySample[] {
+	const samples: SlowQuerySample[] = [];
+	const originalSearchFiles = engine.searchFiles.bind(engine);
+	let queryCaseCursor = 0;
+	engine.searchFiles = async (
+		request: {
+			queryText?: string;
+		},
+	) => {
+		const benchmarkQueryCase = queryCases[queryCaseCursor] ?? null;
+		queryCaseCursor += 1;
+		const startedAt = performance.now();
+		const results = await originalSearchFiles(request);
+		const elapsedMs = performance.now() - startedAt;
+		const topResultPath = results[0]?.path ?? null;
+		samples.push({
+			query: String(request.queryText ?? benchmarkQueryCase?.query ?? ""),
+			type: benchmarkQueryCase?.type ?? "unknown",
+			suite: benchmarkQueryCase?.suite ?? "unknown",
+			relevantPath: benchmarkQueryCase?.relevantPath ?? "",
+			elapsedMs,
+			resultCount: results.length,
+			topResultPath,
+			hitTop1:
+				benchmarkQueryCase?.relevantPath != null &&
+				topResultPath === benchmarkQueryCase.relevantPath,
+			missed:
+				benchmarkQueryCase?.relevantPath != null &&
+				!results.some((result) => result.path === benchmarkQueryCase.relevantPath),
+		});
+		return results;
+	};
+	return () =>
+		[...samples].sort((left, right) => right.elapsedMs - left.elapsedMs);
+}
+
+function summarizePhaseTiming(phaseTiming: PhaseTimingSummary | null) {
+	if (!phaseTiming) {
+		return null;
+	}
+	const summarizeEntries = (
+		entries: PhaseTimingSummary["phases"],
+		includeParentShare: boolean,
+	) =>
+		entries.slice(0, 8).map((entry) => ({
+			phase: entry.phase,
+			totalMs: round(entry.totalMs),
+			avgMsPerCall: round(entry.avgMsPerCall),
+			avgMsPerUnit: round(entry.avgMsPerUnit),
+			maxMs: round(entry.maxMs),
+			count: entry.count,
+			unitCount: entry.unitCount,
+			shareOfMeasuredMs: round(entry.shareOfMeasuredMs),
+			shareOfQueryTime: round(entry.shareOfQueryTime),
+			...(includeParentShare
+				? { shareOfParentMs: round(entry.shareOfParentMs ?? 0) }
+				: {}),
+		}));
+	return {
+		queryCount: phaseTiming.queryCount,
+		queryTotalMs: round(phaseTiming.queryTotalMs),
+		totalMeasuredMs: round(phaseTiming.totalMeasuredMs),
+		topHotPhases: summarizeEntries(phaseTiming.phases, false),
+		topPrepareSubphases: summarizeEntries(phaseTiming.prepareSubphases, true),
+		topRankSubphases: summarizeEntries(phaseTiming.rankSubphases, true),
 	};
 }
 
@@ -766,6 +921,10 @@ describe("coverage lexical v3 automation benchmark", () => {
 			tokenizer,
 			"coverage-lexical",
 		);
+		const getSlowQuerySamples = attachCoverageLexicalV3SlowQueryDiagnostics(
+			coverageV3,
+			queryCases as BenchmarkQueryCase[],
+		);
 		attachCoverageLexicalV3BenchmarkPersistence(coverageV3);
 		const coverageV3Result = await runBenchmark(
 			"CoverageLexical(V3)",
@@ -895,6 +1054,44 @@ describe("coverage lexical v3 automation benchmark", () => {
 			),
 		);
 
+		console.log(
+			"[coverage-lexical-v3-automation-benchmark] phase-timing",
+			JSON.stringify(
+				{
+					v3: summarizePhaseTiming(coverageV3Result.phaseTiming),
+				},
+				null,
+				2,
+			),
+		);
+
+		const slowQueryLimit = Number.parseInt(
+			process.env[BENCHMARK_SLOW_QUERY_LIMIT_ENV_KEY] ?? "0",
+			10,
+		);
+		if (Number.isFinite(slowQueryLimit) && slowQueryLimit > 0) {
+			console.log(
+				"[coverage-lexical-v3-automation-benchmark] slow-queries",
+				JSON.stringify(
+					getSlowQuerySamples()
+						.slice(0, slowQueryLimit)
+						.map((sample) => ({
+							query: sample.query,
+							type: sample.type,
+							suite: sample.suite,
+							elapsedMs: round(sample.elapsedMs),
+							resultCount: sample.resultCount,
+							hitTop1: sample.hitTop1,
+							missed: sample.missed,
+							relevantPath: sample.relevantPath,
+							topResultPath: sample.topResultPath,
+						})),
+					null,
+					2,
+				),
+			);
+		}
+
 		expect(documents.length).toBeGreaterThanOrEqual(70);
 		expect(queryCases.length).toBeGreaterThanOrEqual(145);
 		expect(languageMix.hanRatio).toBeGreaterThanOrEqual(0.4);
@@ -906,3 +1103,5 @@ describe("coverage lexical v3 automation benchmark", () => {
 		expect(benchmarkElapsedMs).toBeLessThan(20000);
 	});
 });
+
+

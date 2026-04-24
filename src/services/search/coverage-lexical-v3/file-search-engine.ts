@@ -28,6 +28,7 @@ import type {
 import { buildV3MetadataFieldHighlightRanges } from "./metadata-highlights";
 import {
 	CoverageLexicalV3Engine,
+	type CoverageLexicalV3BenchmarkPhaseBreakdown,
 	type CoverageLexicalV3PreparedSearch,
 	type CoverageLexicalV3SearchResult,
 } from "./engine";
@@ -115,6 +116,49 @@ type HydratedRankingEvidence = Readonly<{
 	hydratedEvidenceByLiveDocSlot: ReadonlyMap<number, CandidateEvidencePackage>;
 }>;
 
+type CoverageLexicalV3BenchmarkPhaseTimingEntry = Readonly<{
+	phase: string;
+	totalMs: number;
+	maxMs: number;
+	count: number;
+	unitCount: number;
+	avgMsPerCall: number;
+	avgMsPerUnit: number;
+	shareOfMeasuredMs: number;
+	shareOfQueryTime: number;
+	shareOfParentMs?: number;
+}>;
+
+type CoverageLexicalV3BenchmarkPhaseTimingSummary = Readonly<{
+	queryCount: number;
+	queryTotalMs: number;
+	totalMeasuredMs: number;
+	phases: readonly CoverageLexicalV3BenchmarkPhaseTimingEntry[];
+	prepareSubphases: readonly CoverageLexicalV3BenchmarkPhaseTimingEntry[];
+	rankSubphases: readonly CoverageLexicalV3BenchmarkPhaseTimingEntry[];
+}>;
+
+type CoverageLexicalV3BenchmarkPhaseAggregate = {
+	totalMs: number;
+	maxMs: number;
+	count: number;
+	unitCount: number;
+};
+
+type CoverageLexicalV3BenchmarkPhaseTimingState = {
+	queryCount: number;
+	queryTotalMs: number;
+	phases: Map<string, CoverageLexicalV3BenchmarkPhaseAggregate>;
+	prepareSubphases: Map<string, CoverageLexicalV3BenchmarkPhaseAggregate>;
+	rankSubphases: Map<string, CoverageLexicalV3BenchmarkPhaseAggregate>;
+};
+
+type CoverageLexicalV3BenchmarkPhaseSample = Readonly<{
+	phase: string;
+	durationMs: number;
+	unitCount: number;
+}>;
+
 type PersistedLexicalBodyEvidenceRow = Readonly<{
 	id: string;
 	docRef: number;
@@ -146,6 +190,37 @@ type PersistedLexicalHanBodyEvidenceRow = Readonly<{
 	bodyWitnessStartOffsets: readonly number[];
 }>;
 
+type CachedLexicalDocEvidenceLocatorEntry = Readonly<{
+	locator: LexicalDocEvidenceLocator;
+	rowId: string;
+}>;
+
+type CachedLexicalBlockEvidenceLocatorEntry = Readonly<{
+	locator: LexicalBlockEvidenceLocator;
+	rowId: string;
+}>;
+
+type CollectedLexicalDocEvidenceRequest = Readonly<{
+	liveDocSlot: number;
+	locator: LexicalDocEvidenceLocator;
+	rowId: string;
+}>;
+
+type CollectedLexicalBlockEvidenceRequest = Readonly<{
+	blockId: number;
+	locator: LexicalBlockEvidenceLocator;
+	rowId: string;
+}>;
+
+const DOC_EVIDENCE_LOCATOR_CACHE = new WeakMap<
+	ResidentBase,
+	Map<number, CachedLexicalDocEvidenceLocatorEntry | null>
+>();
+const BLOCK_EVIDENCE_LOCATOR_CACHE = new WeakMap<
+	ResidentBase,
+	Map<number, CachedLexicalBlockEvidenceLocatorEntry | null>
+>();
+
 @singleton()
 export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	readonly backend = "coverage-lexical" as const;
@@ -158,6 +233,8 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	private readonly pendingDocumentMetadataByPath = new Map<string, PendingDocumentMetadata>();
 	private batchReindexing = false;
 	private pendingResidentRebuild: Promise<void> | null = null;
+	private benchmarkPhaseTimingState: CoverageLexicalV3BenchmarkPhaseTimingState | null =
+		null;
 
 	async reIndexAll(
 		data: IndexedDocument[] | SerializedFileSearchIndex,
@@ -182,6 +259,22 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		this.pendingDocumentMetadataByPath.clear();
 		this.pendingResidentRebuild = null;
 		this.engine = new CoverageLexicalV3Engine();
+		if (this.benchmarkPhaseTimingState != null) {
+			this.engine.setBenchmarkPhaseTrackingEnabled(true);
+		}
+	}
+
+	resetBenchmarkPhaseTiming(): void {
+		this.benchmarkPhaseTimingState = createBenchmarkPhaseTimingState();
+		this.engine.setBenchmarkPhaseTrackingEnabled(true);
+		this.engine.clearLastBenchmarkPhaseBreakdown();
+	}
+
+	getBenchmarkPhaseTimingSummary(): CoverageLexicalV3BenchmarkPhaseTimingSummary | null {
+		if (this.benchmarkPhaseTimingState == null) {
+			return null;
+		}
+		return summarizeBenchmarkPhaseTimingState(this.benchmarkPhaseTimingState);
 	}
 
 	async addDocuments(documents: IndexedDocument[]): Promise<void> {
@@ -231,38 +324,44 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			return [];
 		}
 		const shouldLogDebug = shouldLogCoverageLexicalV3Debug(queryText);
-		const startedAtMs = shouldLogDebug ? nowDebugMs() : 0;
-		const tokenizeStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const shouldMeasureTiming =
+			shouldLogDebug || this.benchmarkPhaseTimingState != null;
+		const startedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
+		const tokenizeStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
 		const searchTerms = this.getQueryTerms(queryText);
-		const tokenizeMs = shouldLogDebug ? nowDebugMs() - tokenizeStartedAtMs : 0;
+		const tokenizeMs = shouldMeasureTiming ? nowDebugMs() - tokenizeStartedAtMs : 0;
+		const fuzzyRescueStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
 		const fuzzyRescueSidecar = await this.hydrateFuzzyRescueForQuery(
 			queryText,
 			searchTerms,
 			request.isFuzzy !== false,
 		);
-		const prepareStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const fuzzyRescueMs = shouldMeasureTiming
+			? nowDebugMs() - fuzzyRescueStartedAtMs
+			: 0;
+		const prepareStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
 		const preparedSearch = this.engine.prepareSearch(queryText, searchTerms, {
 			allowPrefixMatch: request.isPrefixMatch,
 			allowFuzzyMatch: request.isFuzzy,
 			maxItemResults: request.maxItemResults,
 		}, fuzzyRescueSidecar);
-		const prepareMs = shouldLogDebug ? nowDebugMs() - prepareStartedAtMs : 0;
-		const hydrateStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const prepareMs = shouldMeasureTiming ? nowDebugMs() - prepareStartedAtMs : 0;
+		const hydrateStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
 		const { hydratedEvidenceByLiveDocSlot } =
 			await this.hydrateRankingEvidenceForCandidates(preparedSearch);
-		const hydrateMs = shouldLogDebug ? nowDebugMs() - hydrateStartedAtMs : 0;
-		const rankStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const hydrateMs = shouldMeasureTiming ? nowDebugMs() - hydrateStartedAtMs : 0;
+		const rankStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
 		const result = this.engine.rankPreparedSearch(
 			preparedSearch,
 			hydratedEvidenceByLiveDocSlot,
 		);
-		const rankMs = shouldLogDebug ? nowDebugMs() - rankStartedAtMs : 0;
+		const rankMs = shouldMeasureTiming ? nowDebugMs() - rankStartedAtMs : 0;
 		const shouldRefineHan = shouldRunHanSurfaceRefine(result);
-		const refineStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const refineStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
 		const refinedCandidates = shouldRefineHan
 			? await this.refineHanSurfaceCompletion(result, hydratedEvidenceByLiveDocSlot)
 			: result.rankedCandidates;
-		const refineMs = shouldLogDebug ? nowDebugMs() - refineStartedAtMs : 0;
+		const refineMs = shouldMeasureTiming ? nowDebugMs() - refineStartedAtMs : 0;
 		const visibilityFilteredCandidates =
 			request.hideWeaklyRelatedResults === true
 				? refinedCandidates.filter(
@@ -271,19 +370,19 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 							candidate.singletonHanCompletion.matched,
 					)
 				: refinedCandidates;
-		const pruneStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const pruneStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
 		const weaklyPrunedCandidates = request.hideWeaklyRelatedResults
 			? filterToTopCoverageGateBand(visibilityFilteredCandidates)
 			: visibilityFilteredCandidates;
-		const pruneMs = shouldLogDebug ? nowDebugMs() - pruneStartedAtMs : 0;
-		const visibleStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const pruneMs = shouldMeasureTiming ? nowDebugMs() - pruneStartedAtMs : 0;
+		const visibleStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
 		const visibleCandidates = applyHanSurfaceCompletionDominance(
 			result,
 			weaklyPrunedCandidates,
 			request.hideWeaklyRelatedResults === true,
 		);
-		const visibleMs = shouldLogDebug ? nowDebugMs() - visibleStartedAtMs : 0;
-		const materializeStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
+		const visibleMs = shouldMeasureTiming ? nowDebugMs() - visibleStartedAtMs : 0;
+		const materializeStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
 		const queryTerms = result.recallState.queryAnalysis.primaryUnits.map((unit) => unit.text);
 		const matchedFiles = visibleCandidates.slice(0, request.maxItemResults).map((candidate) => {
 			const documentView = this.documentViewsByPath.get(candidate.path);
@@ -309,7 +408,21 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				folderWeakHighlightRanges: metadataHighlights.folderWeakHighlightRanges,
 			};
 		});
-		const materializeMs = shouldLogDebug ? nowDebugMs() - materializeStartedAtMs : 0;
+		const materializeMs = shouldMeasureTiming ? nowDebugMs() - materializeStartedAtMs : 0;
+		const totalMs = shouldMeasureTiming ? nowDebugMs() - startedAtMs : 0;
+		if (this.benchmarkPhaseTimingState != null) {
+			recordBenchmarkPhaseTiming(this.benchmarkPhaseTimingState, totalMs, [
+				{ phase: "tokenize", durationMs: tokenizeMs, unitCount: Math.max(searchTerms.length, 1) },
+				{ phase: "fuzzyRescueHydrate", durationMs: fuzzyRescueMs, unitCount: Math.max(searchTerms.length, 1) },
+				{ phase: "prepare", durationMs: prepareMs, unitCount: Math.max(preparedSearch.guardedCandidateDocs.length, 1) },
+				{ phase: "evidenceHydrate", durationMs: hydrateMs, unitCount: Math.max(preparedSearch.guardedCandidateDocs.length, 1) },
+				{ phase: "rank", durationMs: rankMs, unitCount: Math.max(preparedSearch.guardedCandidateDocs.length, 1) },
+				{ phase: "hanRefine", durationMs: refineMs, unitCount: Math.max(result.rankedCandidates.length, 1) },
+				{ phase: "prune", durationMs: pruneMs, unitCount: Math.max(visibilityFilteredCandidates.length, 1) },
+				{ phase: "visible", durationMs: visibleMs, unitCount: Math.max(weaklyPrunedCandidates.length, 1) },
+				{ phase: "materialize", durationMs: materializeMs, unitCount: Math.max(matchedFiles.length, 1) },
+			], this.engine.getLastBenchmarkPhaseBreakdown());
+		}
 		if (shouldLogDebug) {
 			logCoverageLexicalV3Debug("file-search-engine.searchFiles", {
 				queryText,
@@ -683,71 +796,78 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		const shortlistedBodyBlockIds = needsBodyRankingEvidence
 			? collectShortlistedBodyBlockIds(preparedSearch.guardedCandidateDocs)
 			: [];
-		const shortlistedBodyEvidenceLocators =
-			needsBodyRankingEvidence ||
-			(needsHanRankingEvidence && shortlistedBodyBlockIds.length > 0)
-				? collectShortlistedBodyEvidenceLocators(
-						residentBase,
-						shortlistedBodyBlockIds,
-					)
-				: [];
-		const candidateDocEvidenceLocators = needsHanRankingEvidence
-			? collectCandidateDocEvidenceLocators(
+		const shortlistedBodyEvidenceLocators = needsBodyRankingEvidence
+			? collectShortlistedBodyEvidenceLocators(
 					residentBase,
-					preparedSearch.guardedCandidateDocs,
+					shortlistedBodyBlockIds,
 				)
 			: [];
-		const persistedBodyEvidenceByRowId =
-			needsBodyRankingEvidence
-				? ((await snapshotStore.readLexicalBodyEvidenceForBlocks?.(
-						shortlistedBodyEvidenceLocators.map(([, locator]) => locator),
-					)) ?? null)
-				: null;
+		const hanDocCandidateRecalls = needsHanRankingEvidence
+			? preparedSearch.guardedCandidateDocs.filter(needsHanDocEvidenceForCandidate)
+			: [];
+		const hanBodyCandidateRecalls = needsHanRankingEvidence
+			? preparedSearch.guardedCandidateDocs.filter(needsHanBodyEvidenceForCandidate)
+			: [];
+		const hanShortlistedBodyBlockIds =
+			needsHanRankingEvidence && hanBodyCandidateRecalls.length > 0
+				? collectShortlistedBodyBlockIds(hanBodyCandidateRecalls)
+				: [];
+		const hanShortlistedBodyEvidenceLocators =
+			needsHanRankingEvidence && hanShortlistedBodyBlockIds.length > 0
+				? collectShortlistedBodyEvidenceLocators(
+						residentBase,
+						hanShortlistedBodyBlockIds,
+					)
+				: [];
+		const candidateDocEvidenceLocators =
+			needsHanRankingEvidence && hanDocCandidateRecalls.length > 0
+				? collectCandidateDocEvidenceLocators(
+						residentBase,
+						hanDocCandidateRecalls,
+					)
+				: [];
+		const bodyEvidenceReadPromise =
+			needsBodyRankingEvidence && shortlistedBodyEvidenceLocators.length > 0
+				? snapshotStore.readLexicalBodyEvidenceForBlocks?.(
+						shortlistedBodyEvidenceLocators.map((request) => request.locator),
+					) ?? Promise.resolve(null)
+				: Promise.resolve(null);
+		const docHanEvidenceReadPromise =
+			candidateDocEvidenceLocators.length > 0
+				? snapshotStore.readLexicalHanDocEvidenceForDocs?.(
+						candidateDocEvidenceLocators.map((request) => request.locator),
+					) ?? Promise.resolve(null)
+				: Promise.resolve(null);
+		const bodyHanEvidenceReadPromise =
+			hanShortlistedBodyEvidenceLocators.length > 0
+				? snapshotStore.readLexicalHanBodyEvidenceForBlocks?.(
+						hanShortlistedBodyEvidenceLocators.map((request) => request.locator),
+					) ?? Promise.resolve(null)
+				: Promise.resolve(null);
+		const [
+			persistedBodyEvidenceByRowId,
+			persistedDocHanEvidenceByRowId,
+			persistedBodyHanEvidenceByRowId,
+		] = await Promise.all([
+			bodyEvidenceReadPromise,
+			docHanEvidenceReadPromise,
+			bodyHanEvidenceReadPromise,
+		]);
 		const bodyEvidenceByBlockId =
-			persistedBodyEvidenceByRowId == null
-				? null
-				: new Map(
-						shortlistedBodyEvidenceLocators.flatMap(([blockId, locator]) => {
-							const evidence = persistedBodyEvidenceByRowId.get(
-								buildLexicalBlockEvidenceRowId(locator),
-							);
-							return evidence == null ? [] : [[blockId, evidence] as const];
-						}),
-					);
-		const persistedDocHanEvidenceByRowId =
-			needsHanRankingEvidence
-				? ((await snapshotStore.readLexicalHanDocEvidenceForDocs?.(
-						candidateDocEvidenceLocators.map(([, locator]) => locator),
-					)) ?? null)
-				: null;
+			materializePersistedBlockEvidenceByBlockId(
+				shortlistedBodyEvidenceLocators,
+				persistedBodyEvidenceByRowId,
+			);
 		const docHanEvidenceByLiveDocSlot =
-			persistedDocHanEvidenceByRowId == null
-				? null
-				: new Map(
-						candidateDocEvidenceLocators.flatMap(([liveDocSlot, locator]) => {
-							const evidence = persistedDocHanEvidenceByRowId.get(
-								buildLexicalDocEvidenceRowId(locator),
-							);
-							return evidence == null ? [] : [[liveDocSlot, evidence] as const];
-						}),
-					);
-		const persistedBodyHanEvidenceByRowId =
-			needsHanRankingEvidence && shortlistedBodyEvidenceLocators.length > 0
-				? ((await snapshotStore.readLexicalHanBodyEvidenceForBlocks?.(
-						shortlistedBodyEvidenceLocators.map(([, locator]) => locator),
-					)) ?? null)
-				: null;
+			materializePersistedDocEvidenceByLiveDocSlot(
+				candidateDocEvidenceLocators,
+				persistedDocHanEvidenceByRowId,
+			);
 		const bodyHanEvidenceByBlockId =
-			persistedBodyHanEvidenceByRowId == null
-				? null
-				: new Map(
-						shortlistedBodyEvidenceLocators.flatMap(([blockId, locator]) => {
-							const evidence = persistedBodyHanEvidenceByRowId.get(
-								buildLexicalBlockEvidenceRowId(locator),
-							);
-							return evidence == null ? [] : [[blockId, evidence] as const];
-						}),
-					);
+			materializePersistedBlockEvidenceByBlockId(
+				hanShortlistedBodyEvidenceLocators,
+				persistedBodyHanEvidenceByRowId,
+			);
 		return {
 			hydratedEvidenceByLiveDocSlot: hydrateCandidateEvidenceBatch(
 				residentBase,
@@ -1461,42 +1581,129 @@ function shouldHydrateHanRankingEvidence(
 	);
 }
 
+function needsHanDocEvidenceForCandidate(
+	candidateRecall: V3CandidateDocRecall,
+): boolean {
+	return (
+		candidateRecall.matchedIdentityUnitIndices.length > 0 ||
+		candidateRecall.matchedRouteUnitIndices.length > 0 ||
+		candidateRecall.matchedHeadingUnitIndices.length > 0 ||
+		candidateRecall.hasQuerySingletonHanMetadataSupport ||
+		candidateRecall.hasScopedSingletonHanMetadataSupport ||
+		candidateRecall.hanMetadataGateStats != null ||
+		candidateRecall.hanSurfaceGroupRecalls.some(
+			(groupRecall) => groupRecall.metadataGateStats != null,
+		)
+	);
+}
+
+function needsHanBodyEvidenceForCandidate(
+	candidateRecall: V3CandidateDocRecall,
+): boolean {
+	return (
+		candidateRecall.hanSurfaceGroupRecalls.length > 0 ||
+		candidateRecall.shortlistedBodyBlocks.some(
+			(bodyBlock) =>
+				bodyBlock.hasStrongHanSupport ||
+				bodyBlock.hasSingletonHanSupport ||
+				bodyBlock.hasScopedSingletonHanSupport,
+		)
+	);
+}
+
 function collectShortlistedBodyBlockIds(
 	candidateRecalls: readonly V3CandidateDocRecall[],
 ): number[] {
-	return Array.from(
-		new Set(
-			candidateRecalls.flatMap(
-				(candidateRecall) => candidateRecall.shortlistedBodyBlockIds,
-			),
-		),
-	).sort((left, right) => left - right);
+	const seen = new Set<number>();
+	const blockIds: number[] = [];
+	for (const candidateRecall of candidateRecalls) {
+		for (const blockId of candidateRecall.shortlistedBodyBlockIds) {
+			if (seen.has(blockId)) {
+				continue;
+			}
+			seen.add(blockId);
+			blockIds.push(blockId);
+		}
+	}
+	return blockIds;
 }
 
 function collectShortlistedBodyEvidenceLocators(
 	residentBase: ResidentBase,
 	blockIds: readonly number[],
-): Array<readonly [number, LexicalBlockEvidenceLocator]> {
-	return blockIds.flatMap((blockId) => {
-		const locator = buildLexicalBlockEvidenceLocatorForBlockId(
+): CollectedLexicalBlockEvidenceRequest[] {
+	const requests: CollectedLexicalBlockEvidenceRequest[] = [];
+	for (const blockId of blockIds) {
+		const cached = getCachedLexicalBlockEvidenceLocatorEntry(
 			residentBase,
 			blockId,
 		);
-		return locator == null ? [] : [[blockId, locator] as const];
-	});
+		if (cached == null) {
+			continue;
+		}
+		requests.push({
+			blockId,
+			locator: cached.locator,
+			rowId: cached.rowId,
+		});
+	}
+	return requests;
 }
 
 function collectCandidateDocEvidenceLocators(
 	residentBase: ResidentBase,
 	candidateRecalls: readonly V3CandidateDocRecall[],
-): Array<readonly [number, LexicalDocEvidenceLocator]> {
-	return candidateRecalls.flatMap((candidateRecall) => {
-		const locator = buildLexicalDocEvidenceLocatorForLiveDocSlot(
+): CollectedLexicalDocEvidenceRequest[] {
+	const requests: CollectedLexicalDocEvidenceRequest[] = [];
+	for (const candidateRecall of candidateRecalls) {
+		const cached = getCachedLexicalDocEvidenceLocatorEntry(
 			residentBase,
 			candidateRecall.liveDocSlot,
 		);
-		return locator == null ? [] : [[candidateRecall.liveDocSlot, locator] as const];
-	});
+		if (cached == null) {
+			continue;
+		}
+		requests.push({
+			liveDocSlot: candidateRecall.liveDocSlot,
+			locator: cached.locator,
+			rowId: cached.rowId,
+		});
+	}
+	return requests;
+}
+
+function materializePersistedBlockEvidenceByBlockId<T>(
+	requests: readonly CollectedLexicalBlockEvidenceRequest[],
+	persistedByRowId: ReadonlyMap<string, T> | null,
+): ReadonlyMap<number, T> | null {
+	if (persistedByRowId == null) {
+		return null;
+	}
+	const evidenceByBlockId = new Map<number, T>();
+	for (const request of requests) {
+		const evidence = persistedByRowId.get(request.rowId);
+		if (evidence != null) {
+			evidenceByBlockId.set(request.blockId, evidence);
+		}
+	}
+	return evidenceByBlockId;
+}
+
+function materializePersistedDocEvidenceByLiveDocSlot<T>(
+	requests: readonly CollectedLexicalDocEvidenceRequest[],
+	persistedByRowId: ReadonlyMap<string, T> | null,
+): ReadonlyMap<number, T> | null {
+	if (persistedByRowId == null) {
+		return null;
+	}
+	const evidenceByLiveDocSlot = new Map<number, T>();
+	for (const request of requests) {
+		const evidence = persistedByRowId.get(request.rowId);
+		if (evidence != null) {
+			evidenceByLiveDocSlot.set(request.liveDocSlot, evidence);
+		}
+	}
+	return evidenceByLiveDocSlot;
 }
 
 function buildLexicalBodyEvidenceRows(
@@ -1626,6 +1833,34 @@ function buildLexicalDocEvidenceLocatorForLiveDocSlot(
 	};
 }
 
+function getCachedLexicalDocEvidenceLocatorEntry(
+	residentBase: ResidentBase,
+	liveDocSlot: number,
+): CachedLexicalDocEvidenceLocatorEntry | null {
+	let cache = DOC_EVIDENCE_LOCATOR_CACHE.get(residentBase);
+	if (cache == null) {
+		cache = new Map<number, CachedLexicalDocEvidenceLocatorEntry | null>();
+		DOC_EVIDENCE_LOCATOR_CACHE.set(residentBase, cache);
+	}
+	const existing = cache.get(liveDocSlot);
+	if (existing !== undefined) {
+		return existing;
+	}
+	const locator = buildLexicalDocEvidenceLocatorForLiveDocSlot(
+		residentBase,
+		liveDocSlot,
+	);
+	const created =
+		locator == null
+			? null
+			: {
+					locator,
+					rowId: buildLexicalDocEvidenceRowId(locator),
+				};
+	cache.set(liveDocSlot, created);
+	return created;
+}
+
 function buildLexicalBlockEvidenceLocatorForBlockId(
 	residentBase: ResidentBase,
 	blockId: number,
@@ -1647,8 +1882,160 @@ function buildLexicalBlockEvidenceLocatorForBlockId(
 	};
 }
 
+function getCachedLexicalBlockEvidenceLocatorEntry(
+	residentBase: ResidentBase,
+	blockId: number,
+): CachedLexicalBlockEvidenceLocatorEntry | null {
+	let cache = BLOCK_EVIDENCE_LOCATOR_CACHE.get(residentBase);
+	if (cache == null) {
+		cache = new Map<number, CachedLexicalBlockEvidenceLocatorEntry | null>();
+		BLOCK_EVIDENCE_LOCATOR_CACHE.set(residentBase, cache);
+	}
+	const existing = cache.get(blockId);
+	if (existing !== undefined) {
+		return existing;
+	}
+	const locator = buildLexicalBlockEvidenceLocatorForBlockId(residentBase, blockId);
+	const created =
+		locator == null
+			? null
+			: {
+					locator,
+					rowId: buildLexicalBlockEvidenceRowId(locator),
+				};
+	cache.set(blockId, created);
+	return created;
+}
+
 function shouldRunHanSurfaceRefine(
 	result: CoverageLexicalV3SearchResult,
 ): boolean {
 	return result.rankedCandidates.some(hasBodyTierHanCompletion);
 }
+
+function createBenchmarkPhaseTimingState(): CoverageLexicalV3BenchmarkPhaseTimingState {
+	return {
+		queryCount: 0,
+		queryTotalMs: 0,
+		phases: new Map(),
+		prepareSubphases: new Map(),
+		rankSubphases: new Map(),
+	};
+}
+
+function recordBenchmarkPhaseTiming(
+	state: CoverageLexicalV3BenchmarkPhaseTimingState,
+	queryTotalMs: number,
+	phases: readonly CoverageLexicalV3BenchmarkPhaseSample[],
+	breakdown: CoverageLexicalV3BenchmarkPhaseBreakdown | null,
+): void {
+	state.queryCount += 1;
+	state.queryTotalMs += Math.max(queryTotalMs, 0);
+	accumulateBenchmarkPhaseSamples(state.phases, phases);
+	accumulateBenchmarkPhaseSamples(
+		state.prepareSubphases,
+		breakdown?.prepareSubphases ?? [],
+	);
+	accumulateBenchmarkPhaseSamples(
+		state.rankSubphases,
+		breakdown?.rankSubphases ?? [],
+	);
+}
+
+function accumulateBenchmarkPhaseSamples(
+	target: Map<string, CoverageLexicalV3BenchmarkPhaseAggregate>,
+	samples: readonly CoverageLexicalV3BenchmarkPhaseSample[],
+): void {
+	for (const sample of samples) {
+		const durationMs = Math.max(sample.durationMs, 0);
+		const existing = target.get(sample.phase);
+		if (existing != null) {
+			existing.totalMs += durationMs;
+			existing.maxMs = Math.max(existing.maxMs, durationMs);
+			existing.count += 1;
+			existing.unitCount += Math.max(sample.unitCount, 0);
+			continue;
+		}
+		target.set(sample.phase, {
+			totalMs: durationMs,
+			maxMs: durationMs,
+			count: 1,
+			unitCount: Math.max(sample.unitCount, 0),
+		});
+	}
+}
+
+function summarizeBenchmarkPhaseTimingState(
+	state: CoverageLexicalV3BenchmarkPhaseTimingState,
+): CoverageLexicalV3BenchmarkPhaseTimingSummary | null {
+	if (state.queryCount <= 0) {
+		return null;
+	}
+	const totalMeasuredMs = sumBenchmarkPhaseAggregateTotalMs(state.phases);
+	const prepareMeasuredMs = sumBenchmarkPhaseAggregateTotalMs(state.prepareSubphases);
+	const rankMeasuredMs = sumBenchmarkPhaseAggregateTotalMs(state.rankSubphases);
+	return {
+		queryCount: state.queryCount,
+		queryTotalMs: state.queryTotalMs,
+		totalMeasuredMs,
+		phases: summarizeBenchmarkPhaseAggregateMap(
+			state.phases,
+			totalMeasuredMs,
+			state.queryTotalMs,
+			null,
+		),
+		prepareSubphases: summarizeBenchmarkPhaseAggregateMap(
+			state.prepareSubphases,
+			totalMeasuredMs,
+			state.queryTotalMs,
+			prepareMeasuredMs,
+		),
+		rankSubphases: summarizeBenchmarkPhaseAggregateMap(
+			state.rankSubphases,
+			totalMeasuredMs,
+			state.queryTotalMs,
+			rankMeasuredMs,
+		),
+	};
+}
+
+function summarizeBenchmarkPhaseAggregateMap(
+	target: Map<string, CoverageLexicalV3BenchmarkPhaseAggregate>,
+	totalMeasuredMs: number,
+	queryTotalMs: number,
+	parentMeasuredMs: number | null,
+): readonly CoverageLexicalV3BenchmarkPhaseTimingEntry[] {
+	return [...target.entries()]
+		.map(([phase, aggregate]) => ({
+			phase,
+			totalMs: aggregate.totalMs,
+			maxMs: aggregate.maxMs,
+			count: aggregate.count,
+			unitCount: aggregate.unitCount,
+			avgMsPerCall:
+				aggregate.count <= 0 ? 0 : aggregate.totalMs / aggregate.count,
+			avgMsPerUnit:
+				aggregate.unitCount <= 0 ? 0 : aggregate.totalMs / aggregate.unitCount,
+			shareOfMeasuredMs:
+				totalMeasuredMs <= 0 ? 0 : aggregate.totalMs / totalMeasuredMs,
+			shareOfQueryTime:
+				queryTotalMs <= 0 ? 0 : aggregate.totalMs / queryTotalMs,
+			shareOfParentMs:
+				parentMeasuredMs == null || parentMeasuredMs <= 0
+					? undefined
+					: aggregate.totalMs / parentMeasuredMs,
+		}))
+		.sort((left, right) => right.totalMs - left.totalMs);
+}
+
+function sumBenchmarkPhaseAggregateTotalMs(
+	target: Map<string, CoverageLexicalV3BenchmarkPhaseAggregate>,
+): number {
+	let total = 0;
+	for (const aggregate of target.values()) {
+		total += aggregate.totalMs;
+	}
+	return total;
+}
+
+
