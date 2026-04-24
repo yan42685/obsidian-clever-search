@@ -185,3 +185,61 @@ Updated on 2026-04-24:
   - resident-but-query-cold evidence retained off the hot path
 - this keeps the startup console aligned with the V3 size-anchor vocabulary
   instead of showing only the hot-memory half of the picture
+
+## Cold Evidence Slice-First Update
+
+Updated on 2026-04-24:
+
+- V3 rebuild now separates the resident-hot base from canonical Dexie cold
+  evidence slices during `buildResidentHotBaseArtifacts(...)`.
+- the old full-resident `buildResidentBaseArtifacts(...)` compatibility builder
+  has been removed; tests now exercise hot-base and cold-slice paths directly.
+- exact tape payload, body family support payload, Han doc witness payload, Han
+  body witness payload, and witness-only texts now publish through
+  `lexicalBodyEvidence`, `lexicalHanDocEvidence`, and `lexicalHanBodyEvidence`
+  rather than being retained as whole resident sidecars.
+- startup/runtime memory interpretation should treat those three evidence tables
+  as persisted cold storage plus cold-at-query hydration, not as resident-hot or
+  resident-total memory.
+- the startup snapshot anchor remains pre-binary: the hot resident layout is
+  still the proxy for future binary snapshot shape, while the slice tables are
+  the canonical persisted evidence boundary.
+- persisted fuzzy-rescue rows currently retain string lookup keys matching the
+  resident fuzzy lookup map; compact hashed-key persistence is not part of this
+  cold evidence slice.
+
+Validation completed for this slice:
+
+- `npm run typecheck:build -- --pretty false` passes on 2026-04-24.
+- targeted store/build/hydration/runtime tests pass on 2026-04-24:
+  `file-snapshot-store.test.ts`, `coverage-lexical-v3/evidence-hydration.test.ts`,
+  `coverage-lexical-v3/resident-base.test.ts`, and
+  `coverage-lexical-v3/file-search-engine.test.ts`.
+- `npm run typecheck:test -- --pretty false` remains blocked by existing
+  unrelated test type debt outside the V3 cold-evidence slice.
+
+## Chunked Cold Evidence Streaming Update
+
+Status: Updated on 2026-04-25
+
+The cold evidence builder is now runtime-streaming instead of only slice-first:
+
+- `buildResidentHotBaseArtifactsStreaming(...)` is the plugin rebuild path and
+  accepts a cold evidence sink for body evidence, Han doc evidence, and Han body
+  evidence.
+- runtime rebuild now flushes cold evidence rows through that sink in bounded
+  chunks, defaulting to `128` rows per flush, instead of returning complete
+  `bodyEvidenceRows`, `hanDocEvidenceRows`, and `hanBodyEvidenceRows` arrays to
+  `FileSearchEngine.rebuildResidentBaseInternal()`.
+- the synchronous `buildResidentHotBaseArtifacts(...)` remains for direct unit
+  construction and explicit cold-row assertions, while the runtime path is the
+  streaming path.
+- targeted tests now assert both the builder-level streaming contract and the
+  `reIndexAll(...)` runtime chunking behavior, including that whole sidecar
+  publishers remain unused.
+
+Validation completed for this update:
+
+- `npm run typecheck:build -- --pretty false` passes on 2026-04-25.
+- targeted resident-base and file-search-engine tests pass with chunked cold
+  evidence writes on 2026-04-25.

@@ -1,4 +1,4 @@
-jest.mock("src/services/search/tokenizer", () => ({
+﻿jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
 }));
 
@@ -12,6 +12,7 @@ import { EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR } from "src/services/search/coverag
 import { EMPTY_RESIDENT_HAN_WITNESS_SIDECAR } from "src/services/search/coverage-lexical-v3/layout/han-route";
 import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
 import { buildBlockPositionLane } from "src/services/search/coverage-lexical-v3/layout/position-lanes";
+import { buildStableWitnessMatchKey } from "src/services/search/coverage-lexical-v3/build";
 import { hydrateCandidateEvidenceBatch } from "src/services/search/coverage-lexical-v3/ranking";
 import type {
 	BodyWindowContainer,
@@ -240,9 +241,11 @@ function createPersistedBodyEvidenceMap(
 			docRef: number;
 			generation: number;
 			blockOrdinal: number;
-			exactFamilyIds: readonly number[];
+			exactFamilyIds?: readonly number[];
+			exactShardLocalFamilySlots?: readonly number[];
 			exactTokenPositions: readonly number[];
-			familySupportFamilyIds: readonly number[];
+			familySupportFamilyIds?: readonly number[];
+			supportShardLocalFamilySlots?: readonly number[];
 			familySupportMaskByEntry: readonly number[];
 		}
 	>,
@@ -259,13 +262,20 @@ function createPersistedBodyEvidenceMap(
 				row.id,
 				{
 					exactFamilyIds: row.exactFamilyIds,
+					exactShardLocalFamilySlots: row.exactShardLocalFamilySlots,
 					exactTokenPositions: row.exactTokenPositions,
-					familySupportEntries: row.familySupportFamilyIds.map(
+					familySupportEntries: (row.familySupportFamilyIds ?? []).map(
 						(familyId, index) => ({
 							familyId,
 							supportMask: row.familySupportMaskByEntry[index] ?? 0,
 						}),
 					),
+					supportEntriesByShardLocalFamilySlot: (
+						row.supportShardLocalFamilySlots ?? []
+					).map((shardLocalFamilySlot, index) => ({
+						shardLocalFamilySlot,
+						supportMask: row.familySupportMaskByEntry[index] ?? 0,
+					})),
 				},
 			] as const;
 		}),
@@ -280,11 +290,17 @@ function createPersistedHanDocEvidenceMap(
 			id: string;
 			docRef: number;
 			generation: number;
-			identityWitnessStringIds: readonly number[];
+			identityWitnessStringIds?: readonly number[];
+			identityWitnessMatchKeys?: readonly number[];
+			identityWitnessTexts?: readonly string[];
 			identityWitnessSourceMaskByDocEntry: readonly number[];
-			routeWitnessStringIds: readonly number[];
+			routeWitnessStringIds?: readonly number[];
+			routeWitnessMatchKeys?: readonly number[];
+			routeWitnessTexts?: readonly string[];
 			routeWitnessSourceMaskByDocEntry: readonly number[];
-			headingWitnessStringIds: readonly number[];
+			headingWitnessStringIds?: readonly number[];
+			headingWitnessMatchKeys?: readonly number[];
+			headingWitnessTexts?: readonly string[];
 		}
 	>,
 ) {
@@ -300,11 +316,17 @@ function createPersistedHanDocEvidenceMap(
 				row.id,
 				{
 					identityWitnessStringIds: row.identityWitnessStringIds,
+					identityWitnessMatchKeys: row.identityWitnessMatchKeys,
+					identityWitnessTexts: row.identityWitnessTexts,
 					identityWitnessSourceMasks:
 						row.identityWitnessSourceMaskByDocEntry,
 					routeWitnessStringIds: row.routeWitnessStringIds,
+					routeWitnessMatchKeys: row.routeWitnessMatchKeys,
+					routeWitnessTexts: row.routeWitnessTexts,
 					routeWitnessSourceMasks: row.routeWitnessSourceMaskByDocEntry,
 					headingWitnessStringIds: row.headingWitnessStringIds,
+					headingWitnessMatchKeys: row.headingWitnessMatchKeys,
+					headingWitnessTexts: row.headingWitnessTexts,
 				},
 			] as const;
 		}),
@@ -320,7 +342,9 @@ function createPersistedHanBodyEvidenceMap(
 			docRef: number;
 			generation: number;
 			blockOrdinal: number;
-			bodyWitnessStringIds: readonly number[];
+			bodyWitnessStringIds?: readonly number[];
+			bodyWitnessMatchKeys?: readonly number[];
+			bodyWitnessTexts?: readonly string[];
 			bodyWitnessStartOffsets: readonly number[];
 		}
 	>,
@@ -337,6 +361,8 @@ function createPersistedHanBodyEvidenceMap(
 				row.id,
 				{
 					bodyWitnessStringIds: row.bodyWitnessStringIds,
+					bodyWitnessMatchKeys: row.bodyWitnessMatchKeys,
+					bodyWitnessTexts: row.bodyWitnessTexts,
 					bodyWitnessStartOffsets: row.bodyWitnessStartOffsets,
 				},
 			] as const;
@@ -802,8 +828,6 @@ async function runHanRefine(
 				prepareSearch: (...args: unknown[]) => unknown;
 				rankPreparedSearch: (...args: unknown[]) => CoverageLexicalV3SearchResult;
 				getResidentBase: () => ResidentBase;
-				getExactTapeSidecar: () => typeof EMPTY_RESIDENT_EXACT_TAPE_SIDECAR;
-				getBodyFamilySupportSidecar: () => typeof EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR;
 			};
 			getFileSnapshotStore: () => {
 				readIndexedTexts: typeof readIndexedTexts;
@@ -829,8 +853,90 @@ async function runHanRefine(
 		) => Promise<readonly EvidencePackingProfile[]>;
 	}).refineHanSurfaceCompletion(
 		result,
-		hydrateCandidateEvidenceBatch(residentBase, result.recallState.candidateDocs, {}),
+		hydrateCandidateEvidenceBatch(residentBase, result.recallState.candidateDocs, {
+			bodyHanEvidenceByBlockId: createResidentBodyHanEvidenceByBlockId(
+				residentBase,
+				result.recallState.candidateDocs,
+			),
+		}),
 	);
+}
+
+function createResidentBodyHanEvidenceByBlockId(
+	residentBase: ResidentBase,
+	candidateDocs: readonly V3CandidateDocRecall[],
+): ReadonlyMap<
+	number,
+	{
+		bodyWitnessMatchKeys: readonly number[];
+		bodyWitnessTexts: readonly string[];
+		bodyWitnessStartOffsets: readonly number[];
+	}
+> {
+	const out = new Map<
+		number,
+		{
+			bodyWitnessMatchKeys: readonly number[];
+			bodyWitnessTexts: readonly string[];
+			bodyWitnessStartOffsets: readonly number[];
+		}
+	>();
+	for (const candidateDoc of candidateDocs) {
+		for (const bodyBlock of candidateDoc.shortlistedBodyBlocks) {
+			const blockId = bodyBlock.blockId;
+			const start =
+				residentBase.hanRoute.bodyWitnessOccurrenceStartByBlockId[blockId] ?? 0;
+			const end =
+				residentBase.hanRoute.bodyWitnessOccurrenceStartByBlockId[blockId + 1] ?? start;
+			const stringIds = Array.from(
+				residentBase.hanRoute.bodyWitnessOccurrenceStringIds.slice(start, end),
+			);
+			const texts = stringIds.map((stringId) =>
+				readTestResidentString(residentBase, stringId),
+			);
+			const starts = decodeTestBodyWitnessStarts(residentBase, blockId, end - start);
+			out.set(blockId, {
+				bodyWitnessMatchKeys: texts.map(buildStableWitnessMatchKey),
+				bodyWitnessTexts: texts,
+				bodyWitnessStartOffsets: starts,
+			});
+		}
+	}
+	return out;
+}
+
+function readTestResidentString(residentBase: ResidentBase, stringId: number): string {
+	const offset = residentBase.stringArena.offsets[stringId] ?? 0;
+	const length = residentBase.stringArena.lengths[stringId] ?? 0;
+	return residentBase.stringArena.text.slice(offset, offset + length);
+}
+
+function decodeTestBodyWitnessStarts(
+	residentBase: ResidentBase,
+	blockId: number,
+	count: number,
+): number[] {
+	const encoding = residentBase.hanRoute.bodyWitnessPositionEncodingByBlockId[blockId] ?? 0;
+	const start = residentBase.hanRoute.bodyWitnessPositionStartByBlockId[blockId] ?? 0;
+	if (count <= 0) {
+		return [];
+	}
+	switch (encoding) {
+		case 1:
+			return Array.from(
+				residentBase.hanRoute.bodyWitnessPositionDeltaU8Tape.slice(start, start + count),
+			);
+		case 2:
+			return Array.from(
+				residentBase.hanRoute.bodyWitnessPositionDeltaU16Tape.slice(start, start + count),
+			);
+		case 3:
+			return Array.from(
+				residentBase.hanRoute.bodyWitnessPositionDeltaU32Tape.slice(start, start + count),
+			);
+		default:
+			return Array.from({ length: count }, () => 0);
+	}
 }
 
 function createMockSearchRuntime(
@@ -869,10 +975,6 @@ function createMockSearchRuntime(
 			preparedSearch.__result ??
 			searchMock(preparedSearch.queryText, preparedSearch.queryTerms),
 		getResidentBase: () => residentBase,
-		getExactTapeSidecar: () => EMPTY_RESIDENT_EXACT_TAPE_SIDECAR,
-		getBodyFamilySupportSidecar: () =>
-			EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
-		getHanWitnessSidecar: () => EMPTY_RESIDENT_HAN_WITNESS_SIDECAR,
 	};
 }
 
@@ -1282,13 +1384,6 @@ describe("coverage lexical v3 file search engine", () => {
 		]);
 
 		expect(snapshotStore.publishLexicalBodyFamilySupport).not.toHaveBeenCalled();
-		expect(
-			(
-				engine as unknown as {
-					engine: { getBodyFamilySupportSidecar: () => { entryCount: number } };
-				}
-			).engine.getBodyFamilySupportSidecar().entryCount,
-		).toBe(0);
 		expect(persistedBodyFamilySupport).toBeNull();
 
 		const matchedFiles = await engine.searchFiles({
@@ -1300,13 +1395,6 @@ describe("coverage lexical v3 file search engine", () => {
 
 		expect(snapshotStore.readLexicalBodyFamilySupport).not.toHaveBeenCalled();
 		expect(matchedFiles[0]?.path).toBe("infra/projected-token.md");
-		expect(
-			(
-				engine as unknown as {
-					engine: { getBodyFamilySupportSidecar: () => { entryCount: number } };
-				}
-			).engine.getBodyFamilySupportSidecar().entryCount,
-		).toBe(0);
 	});
 
 	test("does not publish or read whole exact tape sidecar during search rebuilds", async () => {
@@ -1350,13 +1438,6 @@ describe("coverage lexical v3 file search engine", () => {
 		]);
 
 		expect(snapshotStore.publishLexicalExactTapes).not.toHaveBeenCalled();
-		expect(
-			(
-				engine as unknown as {
-					engine: { getExactTapeSidecar: () => { entryCount: number } };
-				}
-			).engine.getExactTapeSidecar().entryCount,
-		).toBe(0);
 		expect(persistedExactTapes).toBeNull();
 
 		const matchedFiles = await engine.searchFiles({
@@ -1368,13 +1449,6 @@ describe("coverage lexical v3 file search engine", () => {
 
 		expect(snapshotStore.readLexicalExactTapes).not.toHaveBeenCalled();
 		expect(matchedFiles[0]?.path).toBe("infra/projected-token.md");
-		expect(
-			(
-				engine as unknown as {
-					engine: { getExactTapeSidecar: () => { entryCount: number } };
-				}
-			).engine.getExactTapeSidecar().entryCount,
-		).toBe(0);
 	});
 
 	test("skips body sidecar reads when ranking does not shortlist body blocks", async () => {
@@ -1795,15 +1869,6 @@ describe("coverage lexical v3 file search engine", () => {
 		]);
 
 		expect(snapshotStore.publishLexicalHanWitnesses).not.toHaveBeenCalled();
-		expect(
-			(
-				engine as unknown as {
-					engine: {
-						getHanWitnessSidecar: () => { bodyWitnessEntryCount: number };
-					};
-				}
-			).engine.getHanWitnessSidecar().bodyWitnessEntryCount,
-		).toBe(0);
 		expect(persistedHanWitness).toBeNull();
 
 		const matchedFiles = await engine.searchFiles({
@@ -1815,15 +1880,6 @@ describe("coverage lexical v3 file search engine", () => {
 
 		expect(snapshotStore.readLexicalHanWitnesses).not.toHaveBeenCalled();
 		expect(matchedFiles[0]?.path).toBe("zh/cache-recovery.md");
-		expect(
-			(
-				engine as unknown as {
-					engine: {
-						getHanWitnessSidecar: () => { bodyWitnessEntryCount: number };
-					};
-				}
-			).engine.getHanWitnessSidecar().bodyWitnessEntryCount,
-		).toBe(0);
 	});
 
 	test("getDirectSubItems uses V3 query analysis with indexed snapshots", async () => {
@@ -2671,17 +2727,3 @@ describe("coverage lexical v3 file search engine", () => {
 		).toBe(true);
 	});
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-

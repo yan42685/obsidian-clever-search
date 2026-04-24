@@ -22,8 +22,9 @@ import { singleton } from "tsyringe";
 import type { Database } from "src/services/database/database";
 import { EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR } from "../coverage-lexical-v3/layout/body-blocks";
 import { EMPTY_RESIDENT_EXACT_TAPE_SIDECAR } from "../coverage-lexical-v3/layout/exact-tapes";
-import { hashFuzzyLookupKey } from "../coverage-lexical-v3/layout/fuzzy-rescue";
 import { EMPTY_RESIDENT_HAN_WITNESS_SIDECAR } from "../coverage-lexical-v3/layout/han-route";
+
+const textEncoder = new TextEncoder();
 
 type PersistedFileSnapshotRow = {
 	docRef?: number;
@@ -31,6 +32,10 @@ type PersistedFileSnapshotRow = {
 	plainText: string;
 	generation?: number;
 };
+
+function estimateUtf8Bytes(text: string): number {
+	return textEncoder.encode(text).byteLength;
+}
 
 type PersistedFileShadowRow = {
 	docRef?: number;
@@ -94,26 +99,41 @@ export type IndexedMetadataSnapshot = Readonly<{
 }>;
 
 export type LexicalBodyEvidenceSnapshot = Readonly<{
-	exactFamilyIds: readonly number[];
+	exactFamilyIds?: readonly number[];
+	exactShardLocalFamilySlots?: readonly number[];
 	exactTokenPositions: readonly number[];
-	familySupportEntries: ReadonlyArray<
+	familySupportEntries?: ReadonlyArray<
 		Readonly<{
 			familyId: number;
+			supportMask: number;
+		}>
+	>;
+	supportEntriesByShardLocalFamilySlot?: ReadonlyArray<
+		Readonly<{
+			shardLocalFamilySlot: number;
 			supportMask: number;
 		}>
 	>;
 }>;
 
 export type LexicalHanDocEvidenceSnapshot = Readonly<{
-	identityWitnessStringIds: readonly number[];
+	identityWitnessStringIds?: readonly number[];
+	identityWitnessMatchKeys?: readonly number[];
+	identityWitnessTexts?: readonly string[];
 	identityWitnessSourceMasks: readonly number[];
-	routeWitnessStringIds: readonly number[];
+	routeWitnessStringIds?: readonly number[];
+	routeWitnessMatchKeys?: readonly number[];
+	routeWitnessTexts?: readonly string[];
 	routeWitnessSourceMasks: readonly number[];
-	headingWitnessStringIds: readonly number[];
+	headingWitnessStringIds?: readonly number[];
+	headingWitnessMatchKeys?: readonly number[];
+	headingWitnessTexts?: readonly string[];
 }>;
 
 export type LexicalHanBodyEvidenceSnapshot = Readonly<{
-	bodyWitnessStringIds: readonly number[];
+	bodyWitnessStringIds?: readonly number[];
+	bodyWitnessMatchKeys?: readonly number[];
+	bodyWitnessTexts?: readonly string[];
 	bodyWitnessStartOffsets: readonly number[];
 }>;
 
@@ -329,9 +349,7 @@ export class FileSnapshotStore {
 	async readLexicalFuzzyRescueForLookupKeys(
 		fuzzyLookupKeys: ReadonlyArray<string>,
 	): Promise<ResidentFuzzyRescueSidecar> {
-		const fuzzyLookupKeyHashes = new Set(
-			fuzzyLookupKeys.map((key) => hashFuzzyLookupKey(key)),
-		);
+		const fuzzyLookupKeySet = new Set(fuzzyLookupKeys);
 		const row = await this.database.db.lexicalFuzzyRescue.get(
 			ACTIVE_LEXICAL_FUZZY_RESCUE_ID,
 		);
@@ -341,24 +359,17 @@ export class FileSnapshotStore {
 				indexedMetadataFamilyCount: 0,
 				fuzzyLookupKeyCount: 0,
 				bytes: 0,
-				postingBytes: 0,
-				keyBytes: 0,
 			};
 		}
 		const filteredEntries =
 			fuzzyLookupKeys.length === 0
 				? row.entries
 				: row.entries.filter((entry) =>
-						fuzzyLookupKeyHashes.has(entry.fuzzyLookupKey),
+						fuzzyLookupKeySet.has(entry.fuzzyLookupKey),
 					);
 		let filteredBytes = 0;
-		let filteredKeyBytes = 0;
-		let filteredPostingBytes = 0;
 		for (const entry of filteredEntries) {
-			const keyBytes = Uint32Array.BYTES_PER_ELEMENT;
-			filteredKeyBytes += keyBytes;
-			filteredPostingBytes += entry.shardLocalFamilySlots.byteLength;
-			filteredBytes += keyBytes + entry.shardLocalFamilySlots.byteLength;
+			filteredBytes += estimateUtf8Bytes(entry.fuzzyLookupKey) + entry.shardLocalFamilySlots.byteLength;
 		}
 		return {
 			candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: new Map(
@@ -370,8 +381,6 @@ export class FileSnapshotStore {
 			indexedMetadataFamilyCount: row.indexedMetadataFamilyCount,
 			fuzzyLookupKeyCount: filteredEntries.length,
 			bytes: filteredBytes,
-			postingBytes: filteredPostingBytes,
-			keyBytes: filteredKeyBytes,
 		};
 	}
 
@@ -387,8 +396,6 @@ export class FileSnapshotStore {
 			indexedMetadataFamilyCount: sidecar.indexedMetadataFamilyCount,
 			fuzzyLookupKeyCount: sidecar.fuzzyLookupKeyCount,
 			bytes: sidecar.bytes,
-			postingBytes: sidecar.postingBytes,
-			keyBytes: sidecar.keyBytes,
 			entries: [
 				...sidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.entries(),
 			].map(([fuzzyLookupKey, shardLocalFamilySlots]) => ({
@@ -448,13 +455,21 @@ export class FileSnapshotStore {
 			}
 			evidenceById.set(uniqueIds[index], {
 				exactFamilyIds: row.exactFamilyIds,
+				exactShardLocalFamilySlots: row.exactShardLocalFamilySlots,
 				exactTokenPositions: row.exactTokenPositions,
-				familySupportEntries: row.familySupportFamilyIds.map(
+				familySupportEntries: row.familySupportFamilyIds?.map(
 					(familyId, supportIndex) => ({
 						familyId,
 						supportMask: row.familySupportMaskByEntry[supportIndex] ?? 0,
 					}),
 				),
+				supportEntriesByShardLocalFamilySlot:
+					row.supportShardLocalFamilySlots?.map(
+						(shardLocalFamilySlot, supportIndex) => ({
+							shardLocalFamilySlot,
+							supportMask: row.familySupportMaskByEntry[supportIndex] ?? 0,
+						}),
+					),
 			});
 		}
 		return evidenceById;
@@ -472,9 +487,21 @@ export class FileSnapshotStore {
 				docRef: row.docRef,
 				generation: row.generation,
 				blockOrdinal: row.blockOrdinal,
-				exactFamilyIds: [...row.exactFamilyIds],
+				exactFamilyIds:
+					row.exactFamilyIds == null ? undefined : [...row.exactFamilyIds],
+				exactShardLocalFamilySlots:
+					row.exactShardLocalFamilySlots == null
+						? undefined
+						: [...row.exactShardLocalFamilySlots],
 				exactTokenPositions: [...row.exactTokenPositions],
-				familySupportFamilyIds: [...row.familySupportFamilyIds],
+				familySupportFamilyIds:
+					row.familySupportFamilyIds == null
+						? undefined
+						: [...row.familySupportFamilyIds],
+				supportShardLocalFamilySlots:
+					row.supportShardLocalFamilySlots == null
+						? undefined
+						: [...row.supportShardLocalFamilySlots],
 				familySupportMaskByEntry: [...row.familySupportMaskByEntry],
 			})),
 		);
@@ -498,10 +525,16 @@ export class FileSnapshotStore {
 			}
 			evidenceById.set(uniqueIds[index], {
 				identityWitnessStringIds: row.identityWitnessStringIds,
+				identityWitnessMatchKeys: row.identityWitnessMatchKeys,
+				identityWitnessTexts: row.identityWitnessTexts,
 				identityWitnessSourceMasks: row.identityWitnessSourceMaskByDocEntry,
 				routeWitnessStringIds: row.routeWitnessStringIds,
+				routeWitnessMatchKeys: row.routeWitnessMatchKeys,
+				routeWitnessTexts: row.routeWitnessTexts,
 				routeWitnessSourceMasks: row.routeWitnessSourceMaskByDocEntry,
 				headingWitnessStringIds: row.headingWitnessStringIds,
+				headingWitnessMatchKeys: row.headingWitnessMatchKeys,
+				headingWitnessTexts: row.headingWitnessTexts,
 			});
 		}
 		return evidenceById;
@@ -518,15 +551,46 @@ export class FileSnapshotStore {
 				id: row.id,
 				docRef: row.docRef,
 				generation: row.generation,
-				identityWitnessStringIds: [...row.identityWitnessStringIds],
+				identityWitnessStringIds:
+					row.identityWitnessStringIds == null
+						? undefined
+						: [...row.identityWitnessStringIds],
+				identityWitnessMatchKeys:
+					row.identityWitnessMatchKeys == null
+						? undefined
+						: [...row.identityWitnessMatchKeys],
+				identityWitnessTexts:
+					row.identityWitnessTexts == null
+						? undefined
+						: [...row.identityWitnessTexts],
 				identityWitnessSourceMaskByDocEntry: [
 					...row.identityWitnessSourceMaskByDocEntry,
 				],
-				routeWitnessStringIds: [...row.routeWitnessStringIds],
+				routeWitnessStringIds:
+					row.routeWitnessStringIds == null
+						? undefined
+						: [...row.routeWitnessStringIds],
+				routeWitnessMatchKeys:
+					row.routeWitnessMatchKeys == null
+						? undefined
+						: [...row.routeWitnessMatchKeys],
+				routeWitnessTexts:
+					row.routeWitnessTexts == null ? undefined : [...row.routeWitnessTexts],
 				routeWitnessSourceMaskByDocEntry: [
 					...row.routeWitnessSourceMaskByDocEntry,
 				],
-				headingWitnessStringIds: [...row.headingWitnessStringIds],
+				headingWitnessStringIds:
+					row.headingWitnessStringIds == null
+						? undefined
+						: [...row.headingWitnessStringIds],
+				headingWitnessMatchKeys:
+					row.headingWitnessMatchKeys == null
+						? undefined
+						: [...row.headingWitnessMatchKeys],
+				headingWitnessTexts:
+					row.headingWitnessTexts == null
+						? undefined
+						: [...row.headingWitnessTexts],
 			})),
 		);
 	}
@@ -549,6 +613,8 @@ export class FileSnapshotStore {
 			}
 			evidenceById.set(uniqueIds[index], {
 				bodyWitnessStringIds: row.bodyWitnessStringIds,
+				bodyWitnessMatchKeys: row.bodyWitnessMatchKeys,
+				bodyWitnessTexts: row.bodyWitnessTexts,
 				bodyWitnessStartOffsets: row.bodyWitnessStartOffsets,
 			});
 		}
@@ -567,7 +633,16 @@ export class FileSnapshotStore {
 				docRef: row.docRef,
 				generation: row.generation,
 				blockOrdinal: row.blockOrdinal,
-				bodyWitnessStringIds: [...row.bodyWitnessStringIds],
+				bodyWitnessStringIds:
+					row.bodyWitnessStringIds == null
+						? undefined
+						: [...row.bodyWitnessStringIds],
+				bodyWitnessMatchKeys:
+					row.bodyWitnessMatchKeys == null
+						? undefined
+						: [...row.bodyWitnessMatchKeys],
+				bodyWitnessTexts:
+					row.bodyWitnessTexts == null ? undefined : [...row.bodyWitnessTexts],
 				bodyWitnessStartOffsets: [...row.bodyWitnessStartOffsets],
 			})),
 		);

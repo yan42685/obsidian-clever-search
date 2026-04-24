@@ -1,5 +1,5 @@
 import type { IndexedDocument } from "src/globals/search-types";
-import { buildResidentBaseArtifacts } from "src/services/search/coverage-lexical-v3/build";
+import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
 import {
 	ANCHORED_SOFT_BLOCK_BUDGET,
 	computeAnchoredSoftBlockBudget,
@@ -50,13 +50,13 @@ function recallDocs(
 	queryTerms: readonly string[] = [queryText],
 	tokenizeDocumentText?: V3DocumentTokenizer,
 ) {
-	const artifacts = buildResidentBaseArtifacts(documents, tokenizeDocumentText);
+	const residentBase = buildResidentBase(documents, tokenizeDocumentText);
 	const queryAnalysis = analyzeQuery(queryText, queryTerms);
-	const unitFamilyMatches = lookupQueryUnitFamilies(artifacts.base, queryAnalysis, {
+	const unitFamilyMatches = lookupQueryUnitFamilies(residentBase, queryAnalysis, {
 		allowPrefixMatch: true,
 		allowFuzzyMatch: false,
 	});
-	return recallCandidateDocs(artifacts.base, queryAnalysis, unitFamilyMatches);
+	return recallCandidateDocs(residentBase, queryAnalysis, unitFamilyMatches);
 }
 
 function createBodyBlockRecall(

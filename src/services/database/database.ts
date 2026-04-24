@@ -49,8 +49,8 @@ export type LexicalFuzzyRescueRow = {
   postingBytes?: number;
   keyBytes?: number;
   entries: ReadonlyArray<{
-    fuzzyLookupKey: number;
-    shardLocalFamilySlots: Uint16Array | Uint32Array;
+    fuzzyLookupKey: string;
+    shardLocalFamilySlots: Uint32Array;
   }>;
 };
 
@@ -68,9 +68,11 @@ export type LexicalBodyEvidenceRow = {
   docRef: DocRef;
   generation: number;
   blockOrdinal: number;
-  exactFamilyIds: readonly number[];
+  exactFamilyIds?: readonly number[];
+  exactShardLocalFamilySlots?: readonly number[];
   exactTokenPositions: readonly number[];
-  familySupportFamilyIds: readonly number[];
+  familySupportFamilyIds?: readonly number[];
+  supportShardLocalFamilySlots?: readonly number[];
   familySupportMaskByEntry: readonly number[];
 };
 
@@ -78,11 +80,17 @@ export type LexicalHanDocEvidenceRow = {
   id: string;
   docRef: DocRef;
   generation: number;
-  identityWitnessStringIds: readonly number[];
+  identityWitnessStringIds?: readonly number[];
+  identityWitnessMatchKeys?: readonly number[];
+  identityWitnessTexts?: readonly string[];
   identityWitnessSourceMaskByDocEntry: readonly number[];
-  routeWitnessStringIds: readonly number[];
+  routeWitnessStringIds?: readonly number[];
+  routeWitnessMatchKeys?: readonly number[];
+  routeWitnessTexts?: readonly string[];
   routeWitnessSourceMaskByDocEntry: readonly number[];
-  headingWitnessStringIds: readonly number[];
+  headingWitnessStringIds?: readonly number[];
+  headingWitnessMatchKeys?: readonly number[];
+  headingWitnessTexts?: readonly string[];
 };
 
 export type LexicalHanBodyEvidenceRow = {
@@ -90,7 +98,9 @@ export type LexicalHanBodyEvidenceRow = {
   docRef: DocRef;
   generation: number;
   blockOrdinal: number;
-  bodyWitnessStringIds: readonly number[];
+  bodyWitnessStringIds?: readonly number[];
+  bodyWitnessMatchKeys?: readonly number[];
+  bodyWitnessTexts?: readonly string[];
   bodyWitnessStartOffsets: readonly number[];
 };
 
@@ -168,7 +178,7 @@ const TARGETED_INDEX_RESET_TABLES = [
   "hybridIndexedFileRefs",
 ] as const;
 
-export const LEXICAL_QUERY_EVIDENCE_READY_VERSION = 2;
+export const LEXICAL_QUERY_EVIDENCE_READY_VERSION = 3;
 
 export type DatabaseOpenRecoveryReport = {
   mode: "targeted-reset" | "full-reset";
@@ -958,7 +968,7 @@ export class Database {
 export class DexieWrapper extends Dexie {
   // Dexie keeps one decimal place for version() and multiplies by 10 when opening IndexedDB.
   // Use 0.1 increments here so app-level schema bumps stay readable while mapping to IDB integers.
-  private static readonly _dbVersion = 28.4;
+  private static readonly _dbVersion = 28.5;
   private static readonly dbNamePrefix = "clever-search/";
   static readonly docRegistryNextRefKey = DOC_REGISTRY_NEXT_REF_KEY;
   static readonly lexicalQueryEvidenceReadyKey = LEXICAL_QUERY_EVIDENCE_READY_KEY;
@@ -1104,6 +1114,41 @@ export class DexieWrapper extends Dexie {
             .delete(DexieWrapper.lexicalQueryEvidenceReadyKey),
         ]);
       });
+    this.version(28.4)
+      .stores({
+        pluginSetting: "++id",
+        lexicalSearchSnapshots: "++id",
+        lexicalIndexedFileRefs: "path",
+        lexicalIndexedMetadata: "filePath",
+        lexicalFuzzyRescue: "id",
+        lexicalBodyFamilySupport: "id",
+        lexicalBodyEvidence: "id, docRef, generation, blockOrdinal, [docRef+generation+blockOrdinal]",
+        lexicalHanDocEvidence: "id, docRef, generation, [docRef+generation]",
+        lexicalHanBodyEvidence: "id, docRef, generation, blockOrdinal, [docRef+generation+blockOrdinal]",
+        lexicalExactTapes: "id",
+        lexicalHanWitness: "id",
+        docRegistry: "docRef, path, deleted, liveGeneration, updatedAt",
+        docRegistryMeta: "key",
+        hybridChunks: "++id, filePath",
+        fileSnapshots: "filePath",
+        hybridDirtyShadows: "filePath",
+        hybridChunkVectors: "filePath",
+        hybridHnswSmall: "id",
+        hybridIndexedFileRefs: "path",
+        indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
+        indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
+        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
+        hybridTokenBudgetResets: "++id, periodKey",
+      })
+      .upgrade(async (tx) => {
+        this.schemaUpgradeDetected = true;
+        await Promise.all([
+          tx.table("lexicalBodyEvidence").clear(),
+          tx.table("lexicalHanDocEvidence").clear(),
+          tx.table("lexicalHanBodyEvidence").clear(),
+        ]);
+      });
     this.version(DexieWrapper._dbVersion)
       .stores({
         pluginSetting: "++id",
@@ -1137,6 +1182,12 @@ export class DexieWrapper extends Dexie {
           tx.table("lexicalBodyEvidence").clear(),
           tx.table("lexicalHanDocEvidence").clear(),
           tx.table("lexicalHanBodyEvidence").clear(),
+          tx.table("lexicalBodyFamilySupport").clear(),
+          tx.table("lexicalExactTapes").clear(),
+          tx.table("lexicalHanWitness").clear(),
+          tx
+            .table("docRegistryMeta")
+            .delete(DexieWrapper.lexicalQueryEvidenceReadyKey),
         ]);
       });
   }

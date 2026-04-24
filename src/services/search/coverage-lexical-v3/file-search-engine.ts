@@ -18,6 +18,7 @@ import {
 	type LexicalBlockEvidenceLocator,
 	type LexicalDocEvidenceLocator,
 } from "src/services/search/shared/file-snapshot-store";
+import { buildResidentHotBaseArtifactsStreaming } from "./build";
 import { getInstance } from "src/utils/my-lib";
 import { container, singleton } from "tsyringe";
 import type {
@@ -38,17 +39,6 @@ import type {
 	ResidentBaseSummary,
 } from "./layout/types";
 import {
-	getBodyBlockExactFamilyIds,
-	getBodyBlockExactTokenPositions,
-	getBodyBlockFamilySupportEntries,
-	getBodyBlockHanWitnessStartOffsets,
-	getBodyBlockHanWitnessStringIds,
-	getDocIdForLiveDocSlot,
-	getDocHeadingHanWitnessStringIds,
-	getDocIdentityHanWitnessSourceMasks,
-	getDocIdentityHanWitnessStringIds,
-	getDocRouteHanWitnessSourceMasks,
-	getDocRouteHanWitnessStringIds,
 	getLiveDocGeneration,
 	getLiveDocRef,
 	getLiveDocSlot,
@@ -164,9 +154,9 @@ type PersistedLexicalBodyEvidenceRow = Readonly<{
 	docRef: number;
 	generation: number;
 	blockOrdinal: number;
-	exactFamilyIds: readonly number[];
+	exactShardLocalFamilySlots: readonly number[];
 	exactTokenPositions: readonly number[];
-	familySupportFamilyIds: readonly number[];
+	supportShardLocalFamilySlots: readonly number[];
 	familySupportMaskByEntry: readonly number[];
 }>;
 
@@ -174,11 +164,14 @@ type PersistedLexicalHanDocEvidenceRow = Readonly<{
 	id: string;
 	docRef: number;
 	generation: number;
-	identityWitnessStringIds: readonly number[];
+	identityWitnessMatchKeys: readonly number[];
+	identityWitnessTexts: readonly string[];
 	identityWitnessSourceMaskByDocEntry: readonly number[];
-	routeWitnessStringIds: readonly number[];
+	routeWitnessMatchKeys: readonly number[];
+	routeWitnessTexts: readonly string[];
 	routeWitnessSourceMaskByDocEntry: readonly number[];
-	headingWitnessStringIds: readonly number[];
+	headingWitnessMatchKeys: readonly number[];
+	headingWitnessTexts: readonly string[];
 }>;
 
 type PersistedLexicalHanBodyEvidenceRow = Readonly<{
@@ -186,7 +179,8 @@ type PersistedLexicalHanBodyEvidenceRow = Readonly<{
 	docRef: number;
 	generation: number;
 	blockOrdinal: number;
-	bodyWitnessStringIds: readonly number[];
+	bodyWitnessMatchKeys: readonly number[];
+	bodyWitnessTexts: readonly string[];
 	bodyWitnessStartOffsets: readonly number[];
 }>;
 
@@ -747,33 +741,28 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	private async rebuildResidentBaseInternal(): Promise<void> {
 		const documents = await this.materializeIndexedDocuments();
 		this.engine = new CoverageLexicalV3Engine();
-		this.engine.buildResidentBase(
+		const snapshotStore = this.getFileSnapshotStore();
+		const artifacts = await buildResidentHotBaseArtifactsStreaming(
 			documents,
 			(text) => this.getDocumentTerms(text),
+			{
+				publishBodyEvidence: async (rows) => {
+					await snapshotStore.publishLexicalBodyEvidence?.(rows);
+				},
+				publishHanDocEvidence: async (rows) => {
+					await snapshotStore.publishLexicalHanDocEvidence?.(rows);
+				},
+				publishHanBodyEvidence: async (rows) => {
+					await snapshotStore.publishLexicalHanBodyEvidence?.(rows);
+				},
+			},
 		);
-		const residentBase = this.engine.getResidentBase();
-		const lexicalBodyEvidenceRows =
-			residentBase == null ? [] : buildLexicalBodyEvidenceRows(residentBase);
-		const lexicalHanDocEvidenceRows =
-			residentBase == null ? [] : buildLexicalHanDocEvidenceRows(residentBase);
-		const lexicalHanBodyEvidenceRows =
-			residentBase == null ? [] : buildLexicalHanBodyEvidenceRows(residentBase);
-		await this.getFileSnapshotStore().publishLexicalFuzzyRescue?.(
-			this.engine.getFuzzyRescueSidecar(),
-		);
-		await this.getFileSnapshotStore().publishLexicalBodyEvidence?.(
-			lexicalBodyEvidenceRows,
-		);
-		await this.getFileSnapshotStore().publishLexicalHanDocEvidence?.(
-			lexicalHanDocEvidenceRows,
-		);
-		await this.getFileSnapshotStore().publishLexicalHanBodyEvidence?.(
-			lexicalHanBodyEvidenceRows,
+		this.engine.loadResidentBase(artifacts.base);
+		this.engine.setFuzzyRescueSidecar(artifacts.fuzzyRescueSidecar);
+		await snapshotStore.publishLexicalFuzzyRescue?.(
+			artifacts.fuzzyRescueSidecar,
 		);
 		this.engine.clearFuzzyRescueSidecar();
-		this.engine.clearExactTapeSidecar();
-		this.engine.clearBodyFamilySupportSidecar();
-		this.engine.clearHanWitnessSidecar();
 	}
 
 	private async hydrateRankingEvidenceForCandidates(
@@ -1708,119 +1697,6 @@ function materializePersistedDocEvidenceByLiveDocSlot<T>(
 		}
 	}
 	return evidenceByLiveDocSlot;
-}
-
-function buildLexicalBodyEvidenceRows(
-	residentBase: ResidentBase,
-): PersistedLexicalBodyEvidenceRow[] {
-	const rows: PersistedLexicalBodyEvidenceRow[] = [];
-	for (let blockId = 0; blockId < residentBase.bodyBlocks.blockCount; blockId += 1) {
-		const locator = buildLexicalBlockEvidenceLocatorForBlockId(
-			residentBase,
-			blockId,
-		);
-		if (locator == null) {
-			continue;
-		}
-		const familySupportEntries = getBodyBlockFamilySupportEntries(
-			residentBase,
-			blockId,
-		);
-		rows.push({
-			id: buildLexicalBlockEvidenceRowId(locator),
-			docRef: locator.docRef,
-			generation: locator.generation,
-			blockOrdinal: locator.blockOrdinal,
-			exactFamilyIds: getBodyBlockExactFamilyIds(residentBase, blockId),
-			exactTokenPositions: getBodyBlockExactTokenPositions(
-				residentBase,
-				blockId,
-			),
-			familySupportFamilyIds: familySupportEntries.map(
-				(entry) => entry.familyId,
-			),
-			familySupportMaskByEntry: familySupportEntries.map(
-				(entry) => entry.supportMask,
-			),
-		});
-	}
-	return rows;
-}
-
-function buildLexicalHanDocEvidenceRows(
-	residentBase: ResidentBase,
-): PersistedLexicalHanDocEvidenceRow[] {
-	const rows: PersistedLexicalHanDocEvidenceRow[] = [];
-	for (
-		let liveDocSlot = 0;
-		liveDocSlot < residentBase.docTable.liveDocCount;
-		liveDocSlot += 1
-	) {
-		const locator = buildLexicalDocEvidenceLocatorForLiveDocSlot(
-			residentBase,
-			liveDocSlot,
-		);
-		if (locator == null) {
-			continue;
-		}
-		const docId = getDocIdForLiveDocSlot(residentBase, liveDocSlot);
-		rows.push({
-			id: buildLexicalDocEvidenceRowId(locator),
-			docRef: locator.docRef,
-			generation: locator.generation,
-			identityWitnessStringIds: getDocIdentityHanWitnessStringIds(
-				residentBase,
-				docId,
-			),
-			identityWitnessSourceMaskByDocEntry: getDocIdentityHanWitnessSourceMasks(
-				residentBase,
-				docId,
-			),
-			routeWitnessStringIds: getDocRouteHanWitnessStringIds(
-				residentBase,
-				docId,
-			),
-			routeWitnessSourceMaskByDocEntry: getDocRouteHanWitnessSourceMasks(
-				residentBase,
-				docId,
-			),
-			headingWitnessStringIds: getDocHeadingHanWitnessStringIds(
-				residentBase,
-				docId,
-			),
-		});
-	}
-	return rows;
-}
-
-function buildLexicalHanBodyEvidenceRows(
-	residentBase: ResidentBase,
-): PersistedLexicalHanBodyEvidenceRow[] {
-	const rows: PersistedLexicalHanBodyEvidenceRow[] = [];
-	for (let blockId = 0; blockId < residentBase.bodyBlocks.blockCount; blockId += 1) {
-		const locator = buildLexicalBlockEvidenceLocatorForBlockId(
-			residentBase,
-			blockId,
-		);
-		if (locator == null) {
-			continue;
-		}
-		rows.push({
-			id: buildLexicalBlockEvidenceRowId(locator),
-			docRef: locator.docRef,
-			generation: locator.generation,
-			blockOrdinal: locator.blockOrdinal,
-			bodyWitnessStringIds: getBodyBlockHanWitnessStringIds(
-				residentBase,
-				blockId,
-			),
-			bodyWitnessStartOffsets: getBodyBlockHanWitnessStartOffsets(
-				residentBase,
-				blockId,
-			),
-		});
-	}
-	return rows;
 }
 
 function buildLexicalDocEvidenceLocatorForLiveDocSlot(

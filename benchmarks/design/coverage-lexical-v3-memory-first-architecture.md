@@ -1075,3 +1075,73 @@ Validation completed for this slice:
   compact key-byte accounting contract
 - targeted hybrid freshness, rerank fallback, result-mapper, snapshot ownership,
   local-block-recall, and SearchService shadow-subitem tests pass on 2026-04-24
+
+### Cold Evidence Slice-First Runtime Note
+
+Status: Updated on 2026-04-24
+
+The V3 runtime path now implements the first canonical cold-evidence slice cut
+for the memory-compression workstream:
+
+- `CoverageLexicalV3FileSearchEngine` rebuild now calls
+  `buildResidentHotBaseArtifacts(...)` instead of publishing whole exact/body
+  support/Han witness sidecars out of a full resident base.
+- the runtime resident base keeps the recall-hot skeletons: doc table, family
+  lexicon, metadata containers, body recall postings, body block ownership, Han
+  route postings, and fuzzy rescue only while publishing its auxiliary slice.
+- `lexicalBodyEvidence` is now the canonical exact/body-support cold slice for
+  ranking hydration; rows carry `exactShardLocalFamilySlots`, token positions,
+  `supportShardLocalFamilySlots`, and support masks keyed by
+  `docRef + generation + blockOrdinal`.
+- `lexicalHanDocEvidence` and `lexicalHanBodyEvidence` are now the canonical Han
+  witness slices; rows carry stable witness match keys plus row-local witness
+  texts so witness-only strings no longer need to live in the resident string
+  arena.
+- shortlist hydration reads only requested doc/block locators from the slice
+  tables, and the steady-state search path no longer calls whole
+  `lexicalExactTapes`, `lexicalBodyFamilySupport`, or `lexicalHanWitness`
+  readers.
+- the old full-resident `buildResidentBaseArtifacts(...)` compatibility builder
+  has been removed; tests now build either the hot resident base or explicit
+  cold evidence rows, so whole-sidecar materialization is no longer preserved
+  just for fixtures.
+- the cold slice identity domain is shard-local for real family evidence and a
+  stable witness match key for witness-only evidence, preserving the shard-local
+  merge worldview without hydrate-time global remapping.
+
+Validation completed for this slice:
+
+- `npm run typecheck:build -- --pretty false` passes on 2026-04-24.
+- targeted store/build/hydration/runtime tests pass on 2026-04-24:
+  `file-snapshot-store.test.ts`, `coverage-lexical-v3/evidence-hydration.test.ts`,
+  `coverage-lexical-v3/resident-base.test.ts`, and
+  `coverage-lexical-v3/file-search-engine.test.ts`.
+- `npm run typecheck:test -- --pretty false` still reports pre-existing unrelated
+  test-suite type debt outside this slice, including V2 cold-store Dexie table
+  declarations and older hybrid/file-snapshot test typing issues.
+
+### Chunked Cold Evidence Streaming Update
+
+Status: Updated on 2026-04-25
+
+The cold evidence builder is now runtime-streaming instead of only slice-first:
+
+- `buildResidentHotBaseArtifactsStreaming(...)` is the plugin rebuild path and
+  accepts a cold evidence sink for body evidence, Han doc evidence, and Han body
+  evidence.
+- runtime rebuild now flushes cold evidence rows through that sink in bounded
+  chunks, defaulting to `128` rows per flush, instead of returning complete
+  `bodyEvidenceRows`, `hanDocEvidenceRows`, and `hanBodyEvidenceRows` arrays to
+  `FileSearchEngine.rebuildResidentBaseInternal()`.
+- the synchronous `buildResidentHotBaseArtifacts(...)` remains for direct unit
+  construction and explicit cold-row assertions, while the runtime path is the
+  streaming path.
+- targeted tests now assert both the builder-level streaming contract and the
+  `reIndexAll(...)` runtime chunking behavior, including that whole sidecar
+  publishers remain unused.
+
+Validation completed for this update:
+
+- `npm run typecheck:build -- --pretty false` passes on 2026-04-25.
+- targeted resident-base and file-search-engine tests pass with chunked cold
+  evidence writes on 2026-04-25.

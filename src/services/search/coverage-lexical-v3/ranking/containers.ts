@@ -68,6 +68,7 @@ import {
 	getDocRouteHanWitnessSourceMasks,
 	getDocRouteHanWitnessStringIds,
 	getDocRouteHanWitnessTexts,
+	getFamilyIdForShardLocalFamilySlot,
 	getLiveDocHeadingFamilyIds,
 	getLiveDocHeadingHanWitnessStringIds,
 	getLiveDocHeadingHanWitnessTexts,
@@ -138,9 +139,9 @@ export type CandidateDocEvidence = Readonly<{
 	routeSourceMaskByFamilyId: ReadonlyMap<number, number>;
 	identitySourceMaskByShardLocalFamilySlot: ReadonlyMap<number, number>;
 	routeSourceMaskByShardLocalFamilySlot: ReadonlyMap<number, number>;
-	identityWitnessStringIds: readonly number[];
-	routeWitnessStringIds: readonly number[];
-	headingWitnessStringIds: readonly number[];
+	identityWitnessMatchKeys: readonly number[];
+	routeWitnessMatchKeys: readonly number[];
+	headingWitnessMatchKeys: readonly number[];
 	identityWitnessTexts: readonly string[];
 	identityWitnessSourceMasks: readonly number[];
 	routeWitnessTexts: readonly string[];
@@ -161,22 +162,35 @@ export type CandidateBodyBlockEvidence = Readonly<{
 }>;
 
 export type CandidateHydratedBodyEvidenceBlock = Readonly<{
-	exactFamilyIds: readonly number[];
+	exactFamilyIds?: readonly number[];
+	exactShardLocalFamilySlots?: readonly number[];
 	exactTokenPositions: readonly number[];
-	familySupportEntries: ReadonlyArray<
+	familySupportEntries?: ReadonlyArray<
 		Readonly<{
 			familyId: number;
+			supportMask: number;
+		}>
+	>;
+	supportEntriesByShardLocalFamilySlot?: ReadonlyArray<
+		Readonly<{
+			shardLocalFamilySlot: number;
 			supportMask: number;
 		}>
 	>;
 }>;
 
 export type CandidateHydratedHanDocEvidence = Readonly<{
-	identityWitnessStringIds: readonly number[];
+	identityWitnessStringIds?: readonly number[];
+	identityWitnessMatchKeys?: readonly number[];
+	identityWitnessTexts?: readonly string[];
 	identityWitnessSourceMasks: readonly number[];
-	routeWitnessStringIds: readonly number[];
+	routeWitnessStringIds?: readonly number[];
+	routeWitnessMatchKeys?: readonly number[];
+	routeWitnessTexts?: readonly string[];
 	routeWitnessSourceMasks: readonly number[];
-	headingWitnessStringIds: readonly number[];
+	headingWitnessStringIds?: readonly number[];
+	headingWitnessMatchKeys?: readonly number[];
+	headingWitnessTexts?: readonly string[];
 }>;
 
 type BodyOccurrenceMatchContext = Readonly<{
@@ -193,7 +207,9 @@ export type PackingProfileQueryContext = Readonly<{
 }>;
 
 export type CandidateHydratedHanBodyEvidenceBlock = Readonly<{
-	bodyWitnessStringIds: readonly number[];
+	bodyWitnessStringIds?: readonly number[];
+	bodyWitnessMatchKeys?: readonly number[];
+	bodyWitnessTexts?: readonly string[];
 	bodyWitnessStartOffsets: readonly number[];
 }>;
 
@@ -869,18 +885,18 @@ function getCachedDocEvidence(
 	const identityFamilyIds = getLiveDocIdentityFamilyIds(base, liveDocSlot);
 	const routeFamilyIds = getLiveDocRouteFamilyIds(base, liveDocSlot);
 	const headingFamilyIds = getLiveDocHeadingFamilyIds(base, liveDocSlot);
-	const identityWitnessStringIds = getLiveDocIdentityHanWitnessStringIds(
+	const identityWitnessMatchKeys = getLiveDocIdentityHanWitnessStringIds(
 		base,
 		liveDocSlot,
-	);
-	const routeWitnessStringIds = getLiveDocRouteHanWitnessStringIds(
+	).map(encodeWitnessMatchFamilyId);
+	const routeWitnessMatchKeys = getLiveDocRouteHanWitnessStringIds(
 		base,
 		liveDocSlot,
-	);
-	const headingWitnessStringIds = getLiveDocHeadingHanWitnessStringIds(
+	).map(encodeWitnessMatchFamilyId);
+	const headingWitnessMatchKeys = getLiveDocHeadingHanWitnessStringIds(
 		base,
 		liveDocSlot,
-	);
+	).map(encodeWitnessMatchFamilyId);
 	const identitySourceMaskByFamilyId = buildMetadataSourceMaskByFamilyId(
 		identityFamilyIds,
 		getLiveDocIdentitySourceMasks(base, liveDocSlot),
@@ -895,16 +911,22 @@ function getCachedDocEvidence(
 		headingFamilyIds,
 		identityShardLocalFamilySlots: [
 			...identityFamilyIds,
-			...identityWitnessStringIds.map(encodeWitnessMatchFamilyId),
-		].map((familyId) => getShardLocalFamilySlot(base, familyId)),
+			...identityWitnessMatchKeys,
+		].map((familyId) =>
+			familyId < 0 ? familyId : getShardLocalFamilySlot(base, familyId),
+		),
 		routeShardLocalFamilySlots: [
 			...routeFamilyIds,
-			...routeWitnessStringIds.map(encodeWitnessMatchFamilyId),
-		].map((familyId) => getShardLocalFamilySlot(base, familyId)),
+			...routeWitnessMatchKeys,
+		].map((familyId) =>
+			familyId < 0 ? familyId : getShardLocalFamilySlot(base, familyId),
+		),
 		headingShardLocalFamilySlots: [
 			...headingFamilyIds,
-			...headingWitnessStringIds.map(encodeWitnessMatchFamilyId),
-		].map((familyId) => getShardLocalFamilySlot(base, familyId)),
+			...headingWitnessMatchKeys,
+		].map((familyId) =>
+			familyId < 0 ? familyId : getShardLocalFamilySlot(base, familyId),
+		),
 		identitySourceMaskByFamilyId,
 		routeSourceMaskByFamilyId,
 		identitySourceMaskByShardLocalFamilySlot:
@@ -917,9 +939,9 @@ function getCachedDocEvidence(
 				base,
 				routeSourceMaskByFamilyId,
 			),
-		identityWitnessStringIds,
-		routeWitnessStringIds,
-		headingWitnessStringIds,
+		identityWitnessMatchKeys,
+		routeWitnessMatchKeys,
+		headingWitnessMatchKeys,
 		identityWitnessTexts: getLiveDocIdentityHanWitnessTexts(base, liveDocSlot),
 		identityWitnessSourceMasks: getLiveDocIdentityHanWitnessSourceMasks(base, liveDocSlot),
 		routeWitnessTexts: getLiveDocRouteHanWitnessTexts(base, liveDocSlot),
@@ -940,15 +962,36 @@ function buildDocEvidenceFromSource(
 	const identityFamilyIds = getLiveDocIdentityFamilyIds(base, liveDocSlot);
 	const routeFamilyIds = getLiveDocRouteFamilyIds(base, liveDocSlot);
 	const headingFamilyIds = getLiveDocHeadingFamilyIds(base, liveDocSlot);
-	const identityWitnessStringIds =
-		prehydratedHanDocEvidence?.identityWitnessStringIds ??
-		getLiveDocIdentityHanWitnessStringIds(base, liveDocSlot);
-	const routeWitnessStringIds =
-		prehydratedHanDocEvidence?.routeWitnessStringIds ??
-		getLiveDocRouteHanWitnessStringIds(base, liveDocSlot);
-	const headingWitnessStringIds =
-		prehydratedHanDocEvidence?.headingWitnessStringIds ??
-		getLiveDocHeadingHanWitnessStringIds(base, liveDocSlot);
+	const identityWitnessMatchKeys =
+		prehydratedHanDocEvidence?.identityWitnessMatchKeys ??
+		(prehydratedHanDocEvidence?.identityWitnessStringIds ?? []).map(
+			encodeWitnessMatchFamilyId,
+		);
+	const routeWitnessMatchKeys =
+		prehydratedHanDocEvidence?.routeWitnessMatchKeys ??
+		(prehydratedHanDocEvidence?.routeWitnessStringIds ?? []).map(
+			encodeWitnessMatchFamilyId,
+		);
+	const headingWitnessMatchKeys =
+		prehydratedHanDocEvidence?.headingWitnessMatchKeys ??
+		(prehydratedHanDocEvidence?.headingWitnessStringIds ?? []).map(
+			encodeWitnessMatchFamilyId,
+		);
+	const identityWitnessTexts =
+		prehydratedHanDocEvidence?.identityWitnessTexts ??
+		(prehydratedHanDocEvidence?.identityWitnessStringIds ?? []).map((stringId) =>
+			readResidentString(base, stringId),
+		);
+	const routeWitnessTexts =
+		prehydratedHanDocEvidence?.routeWitnessTexts ??
+		(prehydratedHanDocEvidence?.routeWitnessStringIds ?? []).map((stringId) =>
+			readResidentString(base, stringId),
+		);
+	const headingWitnessTexts =
+		prehydratedHanDocEvidence?.headingWitnessTexts ??
+		(prehydratedHanDocEvidence?.headingWitnessStringIds ?? []).map((stringId) =>
+			readResidentString(base, stringId),
+		);
 	const identitySourceMaskByFamilyId = buildMetadataSourceMaskByFamilyId(
 		identityFamilyIds,
 		getLiveDocIdentitySourceMasks(base, liveDocSlot),
@@ -963,16 +1006,22 @@ function buildDocEvidenceFromSource(
 		headingFamilyIds,
 		identityShardLocalFamilySlots: [
 			...identityFamilyIds,
-			...identityWitnessStringIds.map(encodeWitnessMatchFamilyId),
-		].map((familyId) => getShardLocalFamilySlot(base, familyId)),
+			...identityWitnessMatchKeys,
+		].map((familyId) =>
+			familyId < 0 ? familyId : getShardLocalFamilySlot(base, familyId),
+		),
 		routeShardLocalFamilySlots: [
 			...routeFamilyIds,
-			...routeWitnessStringIds.map(encodeWitnessMatchFamilyId),
-		].map((familyId) => getShardLocalFamilySlot(base, familyId)),
+			...routeWitnessMatchKeys,
+		].map((familyId) =>
+			familyId < 0 ? familyId : getShardLocalFamilySlot(base, familyId),
+		),
 		headingShardLocalFamilySlots: [
 			...headingFamilyIds,
-			...headingWitnessStringIds.map(encodeWitnessMatchFamilyId),
-		].map((familyId) => getShardLocalFamilySlot(base, familyId)),
+			...headingWitnessMatchKeys,
+		].map((familyId) =>
+			familyId < 0 ? familyId : getShardLocalFamilySlot(base, familyId),
+		),
 		identitySourceMaskByFamilyId,
 		routeSourceMaskByFamilyId,
 		identitySourceMaskByShardLocalFamilySlot:
@@ -985,24 +1034,16 @@ function buildDocEvidenceFromSource(
 				base,
 				routeSourceMaskByFamilyId,
 			),
-		identityWitnessStringIds,
-		routeWitnessStringIds,
-		headingWitnessStringIds,
-		identityWitnessTexts: (
-			identityWitnessStringIds
-		).map((stringId) => readResidentString(base, stringId)),
+		identityWitnessMatchKeys,
+		routeWitnessMatchKeys,
+		headingWitnessMatchKeys,
+		identityWitnessTexts,
 		identityWitnessSourceMasks:
-			prehydratedHanDocEvidence?.identityWitnessSourceMasks ??
-			getLiveDocIdentityHanWitnessSourceMasks(base, liveDocSlot),
-		routeWitnessTexts: (
-			routeWitnessStringIds
-		).map((stringId) => readResidentString(base, stringId)),
+			prehydratedHanDocEvidence?.identityWitnessSourceMasks ?? [],
+		routeWitnessTexts,
 		routeWitnessSourceMasks:
-			prehydratedHanDocEvidence?.routeWitnessSourceMasks ??
-			getLiveDocRouteHanWitnessSourceMasks(base, liveDocSlot),
-		headingWitnessTexts: (
-			headingWitnessStringIds
-		).map((stringId) => readResidentString(base, stringId)),
+			prehydratedHanDocEvidence?.routeWitnessSourceMasks ?? [],
+		headingWitnessTexts,
 	};
 }
 
@@ -1042,12 +1083,20 @@ function getCachedBodyBlockEvidence(
 	}
 	const exactOccurrences = buildExactPositionedOccurrences(
 		base,
+		undefined,
 		getBodyBlockExactFamilyIds(base, blockId),
 		getBodyBlockExactTokenPositions(base, blockId),
 	);
-	const rawWitnessOccurrences = getBodyBlockHanWitnessOccurrences(base, blockId);
-	const witnessOccurrences = buildWitnessPositionedOccurrences(base, rawWitnessOccurrences);
-	const witnessTexts = getBodyBlockHanWitnessTexts(base, blockId);
+	const residentWitnessTexts = getBodyBlockHanWitnessTexts(base, blockId);
+	const rawWitnessOccurrences = getBodyBlockHanWitnessOccurrences(base, blockId).map(
+		(occurrence, index) => ({
+			matchKey: encodeWitnessMatchFamilyId(occurrence.stringId),
+			start: occurrence.start,
+			text: residentWitnessTexts[index] ?? "",
+		}),
+	);
+	const witnessOccurrences = buildWitnessPositionedOccurrences(rawWitnessOccurrences);
+	const witnessTexts = rawWitnessOccurrences.map((occurrence) => occurrence.text);
 	const approxSpan = Math.max(
 		1,
 		getPositionedOccurrenceSpan(exactOccurrences),
@@ -1095,50 +1144,48 @@ function buildBodyBlockEvidenceFromSource(
 	const prehydratedHanBodyEvidence = source.bodyHanEvidenceByBlockId?.get(blockId);
 	const exactOccurrences = buildExactPositionedOccurrences(
 		base,
+		prehydratedBodyEvidence?.exactShardLocalFamilySlots,
 		prehydratedBodyEvidence?.exactFamilyIds ??
 			readBodyBlockExactFamilyIds(base, blockId, source.exactTapeSidecar),
 		prehydratedBodyEvidence?.exactTokenPositions ??
 			readBodyBlockExactTokenPositions(base, blockId, source.exactTapeSidecar),
 	);
-	const rawWitnessOccurrences = readBodyBlockHanWitnessOccurrences(
-		base,
-		blockId,
+	const rawWitnessOccurrences = buildColdWitnessOccurrences(
+		prehydratedHanBodyEvidence?.bodyWitnessMatchKeys,
 		prehydratedHanBodyEvidence?.bodyWitnessStringIds,
 		prehydratedHanBodyEvidence?.bodyWitnessStartOffsets,
-		source.hanWitnessSidecar,
+		prehydratedHanBodyEvidence?.bodyWitnessTexts ??
+			(prehydratedHanBodyEvidence?.bodyWitnessStringIds ?? []).map((stringId) =>
+				readResidentString(base, stringId),
+			),
 	);
-	const witnessOccurrences = buildWitnessPositionedOccurrences(base, rawWitnessOccurrences);
-	const witnessTexts = readBodyBlockHanWitnessTexts(
-		base,
-		blockId,
-		prehydratedHanBodyEvidence?.bodyWitnessStringIds,
-		source.hanWitnessSidecar,
-	);
+	const witnessOccurrences = buildWitnessPositionedOccurrences(rawWitnessOccurrences);
+	const witnessTexts = rawWitnessOccurrences.map((occurrence) => occurrence.text);
 	const approxSpan = Math.max(
 		1,
 		getPositionedOccurrenceSpan(exactOccurrences),
 		getPositionedOccurrenceSpan(witnessOccurrences),
 	);
+	const familySupportEntries =
+		prehydratedBodyEvidence?.familySupportEntries ?? [];
 	const familySupportMaskByFamilyId = new Map(
+		familySupportEntries.map((entry) => [entry.familyId, entry.supportMask]),
+	);
+	const familySupportMaskByShardLocalFamilySlot = new Map(
 		(
-			prehydratedBodyEvidence?.familySupportEntries ??
-			readBodyBlockFamilySupportEntries(
-				base,
-				blockId,
-				source.bodyFamilySupportSidecar,
-			)
-		).map((entry) => [entry.familyId, entry.supportMask]),
+			prehydratedBodyEvidence?.supportEntriesByShardLocalFamilySlot ??
+			familySupportEntries.map((entry) => ({
+				shardLocalFamilySlot: getShardLocalFamilySlot(base, entry.familyId),
+				supportMask: entry.supportMask,
+			}))
+		).map((entry) => [entry.shardLocalFamilySlot, entry.supportMask]),
 	);
 	return {
 		exactOccurrences,
 		witnessOccurrences,
 		witnessTexts,
 		familySupportMaskByFamilyId,
-		familySupportMaskByShardLocalFamilySlot:
-			remapFamilySourceMaskMapToShardLocalSlots(
-				base,
-				familySupportMaskByFamilyId,
-			),
+		familySupportMaskByShardLocalFamilySlot,
 		approxSpan,
 		ordinalSpan: Math.max(1, exactOccurrences.length, witnessOccurrences.length),
 		weightedGapIndex: buildWeightedGapIndexFromSegments(
@@ -1547,16 +1594,30 @@ function collectBlockOccurrences(
 
 function buildExactPositionedOccurrences(
 	base: ResidentBase,
+	shardLocalFamilySlots: readonly number[] | undefined,
 	familyIds: readonly number[],
 	tokenPositions: readonly number[],
 ): PositionedFamilyOccurrence[] {
 	let fallbackCursor = 0;
-	return familyIds.map((familyId, index) => {
-		const approxLength = Math.max(1, readFamilyApproxLength(base, familyId));
+	const occurrenceCount = Math.max(
+		familyIds.length,
+		shardLocalFamilySlots?.length ?? 0,
+	);
+	return Array.from({ length: occurrenceCount }, (_, index) => {
+		const effectiveShardLocalFamilySlot =
+			shardLocalFamilySlots?.[index] ??
+			getShardLocalFamilySlot(base, familyIds[index] ?? 0);
+		const familyId =
+			familyIds[index] ??
+			getFamilyIdForShardLocalFamilySlot(base, effectiveShardLocalFamilySlot);
+		const approxLength = Math.max(
+			1,
+			readFamilyApproxLength(base, familyId, effectiveShardLocalFamilySlot),
+		);
 		const localPosition = tokenPositions[index] ?? fallbackCursor;
 		const occurrence = {
 			familyId,
-			shardLocalFamilySlot: getShardLocalFamilySlot(base, familyId),
+			shardLocalFamilySlot: effectiveShardLocalFamilySlot,
 			ordinalPosition: index,
 			localPosition,
 			localEndPosition: localPosition + approxLength,
@@ -1567,20 +1628,41 @@ function buildExactPositionedOccurrences(
 }
 
 function buildWitnessPositionedOccurrences(
-	base: ResidentBase,
-	occurrences: ReadonlyArray<Readonly<{ stringId: number; start: number }>>,
+	occurrences: ReadonlyArray<
+		Readonly<{ matchKey: number; start: number; text: string }>
+	>,
 ): PositionedFamilyOccurrence[] {
 	return occurrences.map((occurrence, index) => {
-		const familyId = encodeWitnessMatchFamilyId(occurrence.stringId);
-		const approxLength = Math.max(1, base.stringArena.lengths[occurrence.stringId] ?? 0);
+		const familyId = occurrence.matchKey;
+		const approxLength = Math.max(1, occurrence.text.length);
 		return {
 			familyId,
-			shardLocalFamilySlot: getShardLocalFamilySlot(base, familyId),
+			shardLocalFamilySlot: familyId,
 			ordinalPosition: index,
 			localPosition: occurrence.start,
 			localEndPosition: occurrence.start + approxLength,
 		};
 	});
+}
+
+function buildColdWitnessOccurrences(
+	matchKeys: readonly number[] | undefined,
+	legacyStringIds: readonly number[] | undefined,
+	startOffsets: readonly number[] | undefined,
+	texts: readonly string[] | undefined,
+): ReadonlyArray<Readonly<{ matchKey: number; start: number; text: string }>> {
+	if (startOffsets == null) {
+		return [];
+	}
+	const effectiveTexts = texts ?? [];
+	const effectiveMatchKeys =
+		matchKeys ??
+		(legacyStringIds ?? []).map((stringId) => encodeWitnessMatchFamilyId(stringId));
+	return effectiveMatchKeys.map((matchKey, index) => ({
+		matchKey,
+		start: startOffsets[index] ?? 0,
+		text: effectiveTexts[index] ?? "",
+	}));
 }
 
 function getPositionedOccurrenceSpan(
@@ -1589,8 +1671,17 @@ function getPositionedOccurrenceSpan(
 	return occurrences[occurrences.length - 1]?.localEndPosition ?? 0;
 }
 
-function readFamilyApproxLength(base: ResidentBase, familyId: number): number {
-	const stringId = base.familyLexicon.familyStringIds[familyId] ?? 0;
+function readFamilyApproxLength(
+	base: ResidentBase,
+	familyId: number,
+	shardLocalFamilySlot = getShardLocalFamilySlot(base, familyId),
+): number {
+	const resolvedFamilyId =
+		familyId >= 0
+			? familyId
+			: base.familyLexicon.familyIdByShardLocalFamilySlot[shardLocalFamilySlot] ??
+				familyId;
+	const stringId = base.familyLexicon.familyStringIds[resolvedFamilyId] ?? 0;
 	return base.stringArena.lengths[stringId] ?? 0;
 }
 

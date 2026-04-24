@@ -1,20 +1,5 @@
 import type { IndexedDocument } from "src/globals/search-types";
-import { buildResidentBaseArtifacts } from "./build";
-import {
-	EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
-	readResidentBodyFamilySupportSidecar,
-	setResidentBodyFamilySupportSidecar,
-} from "./layout/body-blocks";
-import {
-	EMPTY_RESIDENT_EXACT_TAPE_SIDECAR,
-	buildResidentExactTapeSidecar,
-	setResidentExactTapeSidecar,
-} from "./layout/exact-tapes";
-import {
-	EMPTY_RESIDENT_HAN_WITNESS_SIDECAR,
-	buildResidentHanWitnessSidecar,
-	setResidentHanWitnessSidecar,
-} from "./layout/han-route";
+import { buildResidentBase } from "./build";
 import {
 	logCoverageLexicalV3Debug,
 	nowDebugMs,
@@ -23,11 +8,8 @@ import {
 import type {
 	ResidentBase,
 	ResidentFuzzyRescueSidecar,
-	ResidentBodyFamilySupportSidecar,
-	ResidentExactTapeSidecar,
 	ResidentBaseMetrics,
 	ResidentBaseSummary,
-	ResidentHanWitnessSidecar,
 } from "./layout/types";
 import { EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR } from "./layout/fuzzy-rescue";
 import { describeResidentBase } from "./metrics";
@@ -84,12 +66,6 @@ export class CoverageLexicalV3Engine {
 	private residentBase: ResidentBase | null = null;
 	private fuzzyRescueSidecar: ResidentFuzzyRescueSidecar =
 		EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR;
-	private bodyFamilySupportSidecar: ResidentBodyFamilySupportSidecar =
-		EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR;
-	private exactTapeSidecar: ResidentExactTapeSidecar =
-		EMPTY_RESIDENT_EXACT_TAPE_SIDECAR;
-	private hanWitnessSidecar: ResidentHanWitnessSidecar =
-		EMPTY_RESIDENT_HAN_WITNESS_SIDECAR;
 	private benchmarkPhaseTrackingEnabled = false;
 	private lastBenchmarkPrepareSubphases: readonly CoverageLexicalV3BenchmarkPhaseEntry[] =
 		[];
@@ -100,40 +76,15 @@ export class CoverageLexicalV3Engine {
 		documents: readonly IndexedDocument[],
 		tokenizeDocumentText?: V3DocumentTokenizer,
 	): ResidentBase {
-		const artifacts = buildResidentBaseArtifacts(documents, tokenizeDocumentText);
-		this.residentBase = artifacts.base;
-		this.fuzzyRescueSidecar = artifacts.fuzzyRescueSidecar;
-		this.bodyFamilySupportSidecar = artifacts.bodyFamilySupportSidecar;
-		this.exactTapeSidecar = artifacts.exactTapeSidecar;
-		this.hanWitnessSidecar = artifacts.hanWitnessSidecar;
-		setResidentExactTapeSidecar(
-			artifacts.base.exactTapes,
-			artifacts.exactTapeSidecar,
-		);
-		setResidentBodyFamilySupportSidecar(
-			artifacts.base.bodyBlocks,
-			artifacts.bodyFamilySupportSidecar,
-		);
-		setResidentHanWitnessSidecar(
-			artifacts.base.hanRoute,
-			artifacts.hanWitnessSidecar,
-		);
-		return artifacts.base;
+		const residentBase = buildResidentBase(documents, tokenizeDocumentText);
+		this.loadResidentBase(residentBase);
+		return residentBase;
 	}
 
 	loadResidentBase(residentBase: ResidentBase): void {
 		this.residentBase = residentBase;
 		this.fuzzyRescueSidecar =
 			residentBase.fuzzyRescue ?? EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR;
-		this.exactTapeSidecar = buildResidentExactTapeSidecar(
-			residentBase.exactTapes,
-		);
-		this.bodyFamilySupportSidecar = readResidentBodyFamilySupportSidecar(
-			residentBase.bodyBlocks,
-		);
-		this.hanWitnessSidecar = buildResidentHanWitnessSidecar(
-			residentBase.hanRoute,
-		);
 	}
 
 	getResidentBase(): ResidentBase | null {
@@ -150,58 +101,6 @@ export class CoverageLexicalV3Engine {
 
 	clearFuzzyRescueSidecar(): void {
 		this.fuzzyRescueSidecar = EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR;
-	}
-
-	getExactTapeSidecar(): ResidentExactTapeSidecar {
-		return this.exactTapeSidecar;
-	}
-
-	setExactTapeSidecar(sidecar: ResidentExactTapeSidecar): void {
-		this.exactTapeSidecar = sidecar;
-		if (this.residentBase != null) {
-			setResidentExactTapeSidecar(this.residentBase.exactTapes, sidecar);
-		}
-	}
-
-	clearExactTapeSidecar(): void {
-		this.setExactTapeSidecar(EMPTY_RESIDENT_EXACT_TAPE_SIDECAR);
-	}
-
-	getBodyFamilySupportSidecar(): ResidentBodyFamilySupportSidecar {
-		return this.bodyFamilySupportSidecar;
-	}
-
-	setBodyFamilySupportSidecar(
-		sidecar: ResidentBodyFamilySupportSidecar,
-	): void {
-		this.bodyFamilySupportSidecar = sidecar;
-		if (this.residentBase != null) {
-			setResidentBodyFamilySupportSidecar(
-				this.residentBase.bodyBlocks,
-				sidecar,
-			);
-		}
-	}
-
-	clearBodyFamilySupportSidecar(): void {
-		this.setBodyFamilySupportSidecar(
-			EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
-		);
-	}
-
-	getHanWitnessSidecar(): ResidentHanWitnessSidecar {
-		return this.hanWitnessSidecar;
-	}
-
-	setHanWitnessSidecar(sidecar: ResidentHanWitnessSidecar): void {
-		this.hanWitnessSidecar = sidecar;
-		if (this.residentBase != null) {
-			setResidentHanWitnessSidecar(this.residentBase.hanRoute, sidecar);
-		}
-	}
-
-	clearHanWitnessSidecar(): void {
-		this.setHanWitnessSidecar(EMPTY_RESIDENT_HAN_WITNESS_SIDECAR);
 	}
 
 	getResidentBaseMetrics(): ResidentBaseMetrics | null {

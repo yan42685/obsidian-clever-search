@@ -1,11 +1,10 @@
-import type { IndexedDocument } from "src/globals/search-types";
+﻿import type { IndexedDocument } from "src/globals/search-types";
 import {
 	buildResidentBase,
-	buildResidentBaseArtifacts,
+	buildResidentHotBaseArtifacts,
 } from "src/services/search/coverage-lexical-v3/build";
 import { buildIntegerArray } from "src/services/search/coverage-lexical-v3/layout/integer-arrays";
 import { buildBlockPositionLane } from "src/services/search/coverage-lexical-v3/layout/position-lanes";
-import { hashFuzzyLookupKey } from "src/services/search/coverage-lexical-v3/layout/fuzzy-rescue";
 import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
 import { describeResidentBase } from "src/services/search/coverage-lexical-v3/metrics";
 import {
@@ -13,11 +12,7 @@ import {
 	IDENTITY_METADATA_SOURCE_BASENAME,
 } from "src/services/search/coverage-lexical-v3/metadata-source";
 import {
-	getBodyBlockFamilySupportEntries,
-	getBodyBlockFamilySupportMask,
 	getDocPath,
-	getBodyBlockExactTokenPositions,
-	getBodyBlockHanWitnessOccurrences,
 	getDocIdForLiveDocSlot,
 	getDocIdentityFamilyIds,
 	getDocIdentitySourceMasks,
@@ -123,7 +118,7 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.metadataContainers.identityPostings.docIds.length).toBeGreaterThan(0);
 		expect(countAdaptiveValues(residentBase.bodyFamilyPosting)).toBeGreaterThan(0);
 		expect(residentBase.bodyBlocks.blockCount).toBe(1);
-		expect(residentBase.exactTapes.familyIds.length).toBeGreaterThan(0);
+		expect(residentBase.exactTapes.familyIds.length).toBe(0);
 		expect(residentBase.metrics.indexedSurfaceUtf8Bytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.residentBytes).toBe(sumMetricBuckets(residentBase.metrics));
 		expect(residentBase.docTable.docRefsByDocId).toBeInstanceOf(Float64Array);
@@ -198,7 +193,7 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.docTable.docCount).toBe(1);
 		expect(residentBase.familyLexicon.familyCount).toBeGreaterThan(0);
 		expect(residentBase.bodyBlocks.blockCount).toBeGreaterThan(0);
-		expect(residentBase.exactTapes.familyIds.length).toBeGreaterThan(0);
+		expect(residentBase.exactTapes.familyIds.length).toBe(0);
 		expect(residentBase.metrics.hanRouteBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.residentBytes).toBe(sumMetricBuckets(residentBase.metrics));
 	});
@@ -206,6 +201,7 @@ describe("coverage lexical v3 resident base", () => {
 	test("builds mixed metadata and body structures with stable byte buckets", () => {
 		const documents = [
 			createDocument({
+				docRef: 201,
 				path: "infra/projected-secret-note.md",
 				basename: "projected secret note",
 				folder: "infra/kubernetes",
@@ -216,6 +212,7 @@ describe("coverage lexical v3 resident base", () => {
 					"Pod mounts token and secret together.\n\nProjected secrets and tokens in a pod runtime window.",
 			}),
 			createDocument({
+				docRef: 202,
 				path: "daily/cache.md",
 				basename: "daily cache replay checks",
 				folder: "daily",
@@ -224,7 +221,7 @@ describe("coverage lexical v3 resident base", () => {
 				content: "Remember vector cache restore note.",
 			}),
 		];
-		const artifacts = buildResidentBaseArtifacts(documents);
+		const artifacts = buildResidentHotBaseArtifacts(documents);
 		const residentBase = artifacts.base;
 		const summary = describeResidentBase(residentBase);
 
@@ -235,8 +232,8 @@ describe("coverage lexical v3 resident base", () => {
 		expect(residentBase.metrics.familyPostingBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.bodyBlockBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.exactTapeBytes).toBe(0);
-		expect(artifacts.exactTapeSidecar.bytes).toBeGreaterThan(0);
-		expect(artifacts.hanWitnessSidecar.bytes).toBeGreaterThan(0);
+		expect(artifacts.bodyEvidenceRows.length).toBeGreaterThan(0);
+		expect(artifacts.bodyEvidenceRows.length).toBeGreaterThan(0);
 		expect(
 			residentBase.metrics.hanRouteSharedBigramIdsBytes +
 				residentBase.metrics.hanRouteMetadataHanPostingsBytes +
@@ -263,85 +260,61 @@ describe("coverage lexical v3 resident base", () => {
 		expect(summary["residentBytes / indexedSurfaceUtf8Bytes"]).toBeGreaterThan(0);
 	});
 
-	test("stores real exact and witness positions in resident block lanes", () => {
+	test("stores real exact and witness positions in cold evidence slices", () => {
 		const tokenizer = (text: string) =>
 			text === "\u751f\u547d\u529b\u6838\u5fc3" ? ["\u751f\u547d", "\u529b\u6838", "\u6838\u5fc3"] : [];
-		const documents = [
+		const artifacts = buildResidentHotBaseArtifacts([
 			createDocument({
+				docRef: 101,
 				path: "zh/positions.md",
 				basename: "\u666e\u901a\u7b14\u8bb0",
 				folder: "zh",
 				content: "\u524d\u7f00 \u751f\u547d\u529b\u6838\u5fc3 \u751f\u547d",
 			}),
-		];
-		const residentBase = buildResidentBase(documents, tokenizer);
-		const artifacts = buildResidentBaseArtifacts(documents, tokenizer);
+		], tokenizer);
+		const bodyEvidence = artifacts.bodyEvidenceRows[0];
+		const hanBodyEvidence = artifacts.hanBodyEvidenceRows[0];
 
-		expect(getBodyBlockExactTokenPositions(residentBase, 0)).toEqual([3, 5, 6]);
-		expect(getBodyBlockHanWitnessOccurrences(residentBase, 0)).toEqual([
-			expect.objectContaining({ start: 0 }),
-			expect.objectContaining({ start: 3 }),
-			expect.objectContaining({ start: 9 }),
+		expect(bodyEvidence?.exactTokenPositions).toEqual([3, 5, 6]);
+		expect(bodyEvidence?.exactShardLocalFamilySlots?.length).toBe(3);
+		expect(hanBodyEvidence?.bodyWitnessStartOffsets).toEqual([0, 3, 9]);
+		expect(hanBodyEvidence?.bodyWitnessTexts).toEqual([
+			"\u524d\u7f00",
+			"\u751f\u547d\u529b\u6838\u5fc3",
+			"\u751f\u547d",
 		]);
-		expect(artifacts.exactTapeSidecar.positionEncodingByBlockId.length).toBeGreaterThan(0);
-		expect(artifacts.exactTapeSidecar.positionStartByBlockId.length).toBeGreaterThan(0);
-		expect(
-			artifacts.exactTapeSidecar.positionDeltaU8Tape.byteLength +
-				artifacts.exactTapeSidecar.positionDeltaU16Tape.byteLength +
-				artifacts.exactTapeSidecar.positionDeltaU32Tape.byteLength,
-		).toBeGreaterThan(0);
-		expect(artifacts.hanWitnessSidecar.bodyWitnessPositionEncodingByBlockId.length).toBeGreaterThan(0);
-		expect(artifacts.hanWitnessSidecar.bodyWitnessPositionStartByBlockId.length).toBeGreaterThan(0);
-		expect(
-			artifacts.hanWitnessSidecar.bodyWitnessPositionDeltaU8Tape.byteLength +
-				artifacts.hanWitnessSidecar.bodyWitnessPositionDeltaU16Tape.byteLength +
-				artifacts.hanWitnessSidecar.bodyWitnessPositionDeltaU32Tape.byteLength,
-		).toBeGreaterThan(0);
+		expect(artifacts.base.exactTapes.familyIds.length).toBe(0);
+		expect(artifacts.base.hanRoute.bodyWitnessOccurrenceStringIds.length).toBe(0);
 	});
 
-	test("aggregates standalone and compound latin support separately per block family", () => {
-		const residentBase = buildResidentBase([
+	test("stores body family support in cold evidence slices", () => {
+		const artifacts = buildResidentHotBaseArtifacts([
 			createDocument({
+				docRef: 102,
 				path: "latin/mixed-support.md",
 				basename: "notes",
 				folder: "latin",
 				content: "prefer prefer-cache",
 			}),
 		]);
-		const familyIdsByText = new Map(
-			getBodyBlockFamilySupportEntries(residentBase, 0).map((entry) => [
-				getFamilyText(residentBase, entry.familyId),
-				entry.familyId,
+		const bodyEvidence = artifacts.bodyEvidenceRows[0];
+		const supportByText = new Map(
+			(bodyEvidence?.supportShardLocalFamilySlots ?? []).map((slot, index) => [
+				getShardLocalFamilyText(artifacts.base, slot),
+				bodyEvidence?.familySupportMaskByEntry[index] ?? 0,
 			]),
 		);
-		const preferFamilyId = familyIdsByText.get("prefer");
-		const compoundFamilyId = familyIdsByText.get("prefer-cache");
 
-		expect(preferFamilyId).toBeDefined();
-		expect(compoundFamilyId).toBeDefined();
-		expect(getBodyBlockFamilySupportMask(residentBase, 0, preferFamilyId ?? -1)).toBe(3);
-		expect(getBodyBlockFamilySupportMask(residentBase, 0, compoundFamilyId ?? -1)).toBe(1);
-	});
-
-	test("offloads body family support sidecar out of resident base artifacts", () => {
-		const artifacts = buildResidentBaseArtifacts([
-			createDocument({
-				path: "latin/mixed-support.md",
-				basename: "notes",
-				folder: "latin",
-				content: "prefer prefer-cache",
-			}),
-		]);
-
-		expect(artifacts.bodyFamilySupportSidecar.entryCount).toBeGreaterThan(0);
-		expect(artifacts.base.bodyBlocks.familySupportStartByBlockId.length).toBe(1);
+		expect(supportByText.get("prefer")).toBe(3);
+		expect(supportByText.get("prefer-cache")).toBe(1);
 		expect(artifacts.base.bodyBlocks.familySupportFamilyIds.length).toBe(0);
 		expect(artifacts.base.bodyBlocks.familySupportMaskByEntry.length).toBe(0);
 	});
 
-	test("offloads exact tape sidecar out of resident base artifacts", () => {
-		const artifacts = buildResidentBaseArtifacts([
+	test("keeps exact tape payload out of resident hot base", () => {
+		const artifacts = buildResidentHotBaseArtifacts([
 			createDocument({
+				docRef: 103,
 				path: "latin/runtime.md",
 				basename: "runtime",
 				folder: "latin",
@@ -349,7 +322,7 @@ describe("coverage lexical v3 resident base", () => {
 			}),
 		]);
 
-		expect(artifacts.exactTapeSidecar.entryCount).toBeGreaterThan(0);
+		expect(artifacts.bodyEvidenceRows[0]?.exactShardLocalFamilySlots?.length).toBeGreaterThan(0);
 		expect(artifacts.base.exactTapes.familyIds.length).toBe(0);
 		expect(artifacts.base.exactTapes.positionEncodingByBlockId.length).toBe(0);
 		expect(artifacts.base.exactTapes.positionStartByBlockId.length).toBe(0);
@@ -358,24 +331,23 @@ describe("coverage lexical v3 resident base", () => {
 		expect(artifacts.base.exactTapes.positionDeltaU32Tape.length).toBe(0);
 	});
 
-	test("offloads han witness sidecar out of resident base artifacts", () => {
-		const artifacts = buildResidentBaseArtifacts([
+	test("keeps han witness payload out of resident hot base", () => {
+		const artifacts = buildResidentHotBaseArtifacts([
 			createDocument({
+				docRef: 104,
 				path: "zh/cache-recovery.md",
-				basename: "缓存恢复",
+				basename: "\u7f13\u5b58\u6062\u590d\u8bf4\u660e",
 				folder: "zh",
-				content: "缓存恢复步骤 缓存恢复检查",
+				content: "\u7f13\u5b58\u6062\u590d\u6b65\u9aa4\u4e0e\u6062\u590d\u8bf4\u660e",
 			}),
 		]);
 
-		expect(artifacts.hanWitnessSidecar.metadataWitnessEntryCount).toBeGreaterThan(0);
-		expect(artifacts.hanWitnessSidecar.bodyWitnessEntryCount).toBeGreaterThan(0);
+		expect(artifacts.hanDocEvidenceRows.length).toBeGreaterThan(0);
+		expect(artifacts.hanBodyEvidenceRows[0]?.bodyWitnessTexts?.length).toBeGreaterThan(0);
 		expect(artifacts.base.hanRoute.identityWitnessStringIds.length).toBe(0);
 		expect(artifacts.base.hanRoute.routeWitnessStringIds.length).toBe(0);
 		expect(artifacts.base.hanRoute.headingWitnessStringIds.length).toBe(0);
 		expect(artifacts.base.hanRoute.bodyWitnessOccurrenceStringIds.length).toBe(0);
-		expect(artifacts.base.hanRoute.bodyWitnessPositionEncodingByBlockId.length).toBe(0);
-		expect(artifacts.base.hanRoute.bodyWitnessPositionStartByBlockId.length).toBe(0);
 		expect(artifacts.base.hanRoute.bodyWitnessPositionDeltaU8Tape.length).toBe(0);
 		expect(artifacts.base.hanRoute.bodyWitnessPositionDeltaU16Tape.length).toBe(0);
 		expect(artifacts.base.hanRoute.bodyWitnessPositionDeltaU32Tape.length).toBe(0);
@@ -611,11 +583,19 @@ describe("coverage lexical v3 resident base", () => {
 			},
 		} satisfies ResidentBase;
 
-		expect(getBodyBlockExactTokenPositions(residentBase, highBlockId)).toEqual([9, 320]);
-		expect(getBodyBlockHanWitnessOccurrences(residentBase, highBlockId)).toEqual([
-			{ stringId: 0, start: 4 },
-			{ stringId: 1, start: 70004 },
-		]);
+		const exactStart = residentBase.bodyBlocks.exactTapeStartByBlockId[highBlockId] ?? 0;
+		const exactCount = residentBase.bodyBlocks.exactTapeCountByBlockId[highBlockId] ?? 0;
+		expect(
+			Array.from(residentBase.exactTapes.positionDeltaU16Tape.slice(exactStart, exactStart + exactCount)),
+		).toEqual([9, 311]);
+		const witnessStart = residentBase.hanRoute.bodyWitnessOccurrenceStartByBlockId[highBlockId] ?? 0;
+		const witnessEnd = residentBase.hanRoute.bodyWitnessOccurrenceStartByBlockId[highBlockId + 1] ?? witnessStart;
+		expect(
+			Array.from(residentBase.hanRoute.bodyWitnessOccurrenceStringIds.slice(witnessStart, witnessEnd)),
+		).toEqual([0, 1]);
+		expect(
+			Array.from(residentBase.hanRoute.bodyWitnessPositionDeltaU32Tape.slice(witnessStart, witnessEnd)),
+		).toEqual([4, 70000]);
 	});
 	test("stores doc-local metadata source masks without collapsing them into a global family mask", () => {
 		const residentBase = buildResidentBase([
@@ -713,7 +693,7 @@ describe("coverage lexical v3 resident base", () => {
 	});
 
 	test("indexes eligible metadata families in fuzzy rescue sidecar and skips heading/body only families", () => {
-		const artifacts = buildResidentBaseArtifacts([
+		const artifacts = buildResidentHotBaseArtifacts([
 			createDocument({
 				path: "latin/obsidian.md",
 				basename: "obsidian",
@@ -758,15 +738,15 @@ describe("coverage lexical v3 resident base", () => {
 
 		const obsidanPosting =
 			fuzzyRescueSidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get(
-				hashFuzzyLookupKey("obsidan"),
+				"obsidan",
 			);
 		const incdentPosting =
 			fuzzyRescueSidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get(
-				hashFuzzyLookupKey("incdent"),
+				"incdent",
 			);
 		const runboksPosting =
 			fuzzyRescueSidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get(
-				hashFuzzyLookupKey("runboks"),
+				"runboks",
 			);
 		const postedFamilyTexts = Array.from(obsidanPosting ?? []).map((familyId) =>
 			getFamilyText(residentBase, familyId),
@@ -774,9 +754,6 @@ describe("coverage lexical v3 resident base", () => {
 
 		expect(fuzzyRescueSidecar.indexedMetadataFamilyCount).toBe(2);
 		expect(postedFamilyTexts).toContain("obsidian");
-		expect(fuzzyRescueSidecar.keyBytes).toBe(
-			fuzzyRescueSidecar.fuzzyLookupKeyCount * Uint32Array.BYTES_PER_ELEMENT,
-		);
 		expect(postedFamilyTexts).not.toContain("cache");
 		expect(incdentPosting).toBeUndefined();
 		expect(runboksPosting).toBeUndefined();
