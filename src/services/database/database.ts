@@ -48,7 +48,7 @@ export type LexicalFuzzyRescueRow = {
   bytes: number;
   entries: ReadonlyArray<{
     fuzzyLookupKey: string;
-    familyIds: Uint32Array;
+    shardLocalFamilySlots: Uint32Array;
   }>;
 };
 
@@ -62,7 +62,10 @@ export type LexicalBodyFamilySupportRow = {
 };
 
 export type LexicalBodyEvidenceRow = {
-  blockId: number;
+  id: string;
+  docRef: DocRef;
+  generation: number;
+  blockOrdinal: number;
   exactFamilyIds: readonly number[];
   exactTokenPositions: readonly number[];
   familySupportFamilyIds: readonly number[];
@@ -70,7 +73,9 @@ export type LexicalBodyEvidenceRow = {
 };
 
 export type LexicalHanDocEvidenceRow = {
-  docId: number;
+  id: string;
+  docRef: DocRef;
+  generation: number;
   identityWitnessStringIds: readonly number[];
   identityWitnessSourceMaskByDocEntry: readonly number[];
   routeWitnessStringIds: readonly number[];
@@ -79,7 +84,10 @@ export type LexicalHanDocEvidenceRow = {
 };
 
 export type LexicalHanBodyEvidenceRow = {
-  blockId: number;
+  id: string;
+  docRef: DocRef;
+  generation: number;
+  blockOrdinal: number;
   bodyWitnessStringIds: readonly number[];
   bodyWitnessStartOffsets: readonly number[];
 };
@@ -132,7 +140,7 @@ type DocRegistryMetaRow = {
   value: number;
 };
 
-export const LEXICAL_QUERY_EVIDENCE_READY_VERSION = 1;
+export const LEXICAL_QUERY_EVIDENCE_READY_VERSION = 2;
 
 @singleton()
 export class Database {
@@ -740,7 +748,7 @@ export class Database {
 class DexieWrapper extends Dexie {
   // Dexie keeps one decimal place for version() and multiplies by 10 when opening IndexedDB.
   // Use 0.1 increments here so app-level schema bumps stay readable while mapping to IDB integers.
-  private static readonly _dbVersion = 28.3;
+  private static readonly _dbVersion = 28.4;
   private static readonly dbNamePrefix = "clever-search/";
   static readonly docRegistryNextRefKey = "nextDocRef";
   static readonly lexicalQueryEvidenceReadyKey = "lexicalQueryEvidenceReady";
@@ -755,9 +763,9 @@ class DexieWrapper extends Dexie {
   lexicalIndexedMetadata!: Dexie.Table<LexicalIndexedMetadataRow, string>;
   lexicalFuzzyRescue!: Dexie.Table<LexicalFuzzyRescueRow, string>;
   lexicalBodyFamilySupport!: Dexie.Table<LexicalBodyFamilySupportRow, string>;
-  lexicalBodyEvidence!: Dexie.Table<LexicalBodyEvidenceRow, number>;
-  lexicalHanDocEvidence!: Dexie.Table<LexicalHanDocEvidenceRow, number>;
-  lexicalHanBodyEvidence!: Dexie.Table<LexicalHanBodyEvidenceRow, number>;
+  lexicalBodyEvidence!: Dexie.Table<LexicalBodyEvidenceRow, string>;
+  lexicalHanDocEvidence!: Dexie.Table<LexicalHanDocEvidenceRow, string>;
+  lexicalHanBodyEvidence!: Dexie.Table<LexicalHanBodyEvidenceRow, string>;
   lexicalExactTapes!: Dexie.Table<LexicalExactTapeRow, string>;
   lexicalHanWitness!: Dexie.Table<LexicalHanWitnessRow, string>;
   docRegistry!: Dexie.Table<DocRegistryRow, number>;
@@ -854,9 +862,9 @@ class DexieWrapper extends Dexie {
         lexicalIndexedMetadata: "filePath",
         lexicalFuzzyRescue: "id",
         lexicalBodyFamilySupport: "id",
-        lexicalBodyEvidence: "blockId",
-        lexicalHanDocEvidence: "docId",
-        lexicalHanBodyEvidence: "blockId",
+        lexicalBodyEvidence: "id, docRef, generation, blockOrdinal, [docRef+generation+blockOrdinal]",
+        lexicalHanDocEvidence: "id, docRef, generation, [docRef+generation]",
+        lexicalHanBodyEvidence: "id, docRef, generation, blockOrdinal, [docRef+generation+blockOrdinal]",
         lexicalExactTapes: "id",
         lexicalHanWitness: "id",
         docRegistry: "docRef, path, deleted, liveGeneration, updatedAt",
@@ -873,8 +881,13 @@ class DexieWrapper extends Dexie {
         hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
         hybridTokenBudgetResets: "++id, periodKey",
       })
-      .upgrade(async () => {
+      .upgrade(async (tx) => {
         this.schemaUpgradeDetected = true;
+        await Promise.all([
+          tx.table("lexicalBodyEvidence").clear(),
+          tx.table("lexicalHanDocEvidence").clear(),
+          tx.table("lexicalHanBodyEvidence").clear(),
+        ]);
       });
   }
 

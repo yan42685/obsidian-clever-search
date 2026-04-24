@@ -219,25 +219,25 @@ function collectBoundedFuzzyMatches(
 	if (fuzzyBudgetState.exhausted) {
 		return [];
 	}
-	const candidateMetadataFamilyIdsByFuzzyLookupKey =
-		fuzzyRescueSidecar.candidateMetadataFamilyIdsByFuzzyLookupKey;
-	if (candidateMetadataFamilyIdsByFuzzyLookupKey.size === 0) {
+	const candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey =
+		fuzzyRescueSidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey;
+	if (candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.size === 0) {
 		return [];
 	}
 	const matches: V3QueryFamilyMatch[] = [];
-	const seenFamilyIds = new Set<number>();
+	const seenShardLocalFamilySlots = new Set<number>();
 	let verifiedCandidateCount = 0;
 	for (const lookupKey of buildFuzzyLookupKeys(queryUnitText)) {
-		const candidateMetadataFamilyIds =
-			candidateMetadataFamilyIdsByFuzzyLookupKey.get(lookupKey);
-		if (candidateMetadataFamilyIds == null) {
+		const candidateMetadataShardLocalFamilySlots =
+			candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get(lookupKey);
+		if (candidateMetadataShardLocalFamilySlots == null) {
 			continue;
 		}
-		for (const familyId of candidateMetadataFamilyIds) {
-			if (seenFamilyIds.has(familyId)) {
+		for (const shardLocalFamilySlot of candidateMetadataShardLocalFamilySlots) {
+			if (seenShardLocalFamilySlots.has(shardLocalFamilySlot)) {
 				continue;
 			}
-			seenFamilyIds.add(familyId);
+			seenShardLocalFamilySlots.add(shardLocalFamilySlot);
 			verifiedCandidateCount += 1;
 			if (verifiedCandidateCount > FUZZY_LOOKUP_MAX_VERIFIED_CANDIDATES) {
 				return matches;
@@ -245,7 +245,10 @@ function collectBoundedFuzzyMatches(
 			if (shouldAbortFuzzyLookup(fuzzyBudgetState, verifiedCandidateCount)) {
 				return matches;
 			}
-			const shardLocalFamilySlot = getShardLocalFamilySlot(base, familyId);
+			const familyId = getFamilyIdForShardLocalFamilySlot(
+				base,
+				shardLocalFamilySlot,
+			);
 			const familyText = getShardLocalFamilyText(base, shardLocalFamilySlot);
 			const editDistance = resolveEditDistanceAtMostOne(
 				queryUnitText,

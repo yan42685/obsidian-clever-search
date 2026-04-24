@@ -18,12 +18,14 @@ export function createMinimalResidentBaseForBlockCounts(
 	const bodyBlockStartByDocId: number[] = [];
 	const bodyBlockCountByDocId: number[] = [];
 	const docIdByBlockId: number[] = [];
+	const liveDocSlotByBlockId: number[] = [];
 	const blockOrdinalByBlockId: number[] = [];
 	for (let docId = 0; docId < blockCountsByDoc.length; docId += 1) {
 		bodyBlockStartByDocId.push(blockStart);
 		bodyBlockCountByDocId.push(blockCountsByDoc[docId] ?? 0);
 		for (let ordinal = 0; ordinal < (blockCountsByDoc[docId] ?? 0); ordinal += 1) {
 			docIdByBlockId.push(docId);
+			liveDocSlotByBlockId.push(docId);
 			blockOrdinalByBlockId.push(ordinal);
 			blockStart += 1;
 		}
@@ -99,6 +101,7 @@ export function createMinimalResidentBaseForBlockCounts(
 		bodyBlocks: {
 			blockCount: blockStart,
 			docIdByBlockId: new Uint32Array(docIdByBlockId),
+			liveDocSlotByBlockId: new Uint32Array(liveDocSlotByBlockId),
 			blockOrdinalByBlockId: new Uint32Array(blockOrdinalByBlockId),
 			exactTapeStartByBlockId: new Uint32Array(Array.from({ length: blockStart }, () => 0)),
 			exactTapeCountByBlockId: new Uint32Array(Array.from({ length: blockStart }, () => 0)),
@@ -180,6 +183,7 @@ export function createMinimalCandidate(
 ): EvidencePackingProfile {
 	return {
 		docId: overrides.docId ?? 0,
+		liveDocSlot: overrides.liveDocSlot ?? (overrides.docId ?? 0),
 		path: overrides.path ?? "doc.md",
 		stableKey: overrides.stableKey ?? overrides.path ?? "doc.md",
 		surfaceCoverageShapeKey: overrides.surfaceCoverageShapeKey ?? "l",

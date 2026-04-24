@@ -100,7 +100,7 @@ describe("coverage lexical v3 file search engine request flags", () => {
 		]);
 		const prepareSearch = jest.fn(() => ({ token: "prepared" }));
 		const hydrateRankingEvidenceForCandidates = jest.fn(async () => ({
-			hydratedEvidenceByDocId: new Map<number, unknown>(),
+			hydratedEvidenceByLiveDocSlot: new Map<number, unknown>(),
 		}));
 		const rankPreparedSearch = jest.fn((): CoverageLexicalV3SearchResult => ({
 			recallState: {
@@ -138,6 +138,9 @@ describe("coverage lexical v3 file search engine request flags", () => {
 			"freefont",
 			["freefont"],
 			{ allowPrefixMatch: false, allowFuzzyMatch: true, maxItemResults: 5 },
+			expect.objectContaining({
+				candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: expect.any(Map),
+			}),
 		);
 	});
 });

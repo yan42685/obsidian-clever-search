@@ -234,15 +234,15 @@ export class CoverageLexicalV3Engine {
 
 	rankPreparedSearch(
 		preparedSearch: CoverageLexicalV3PreparedSearch,
-		hydratedEvidenceByDocId?: ReadonlyMap<number, CandidateEvidencePackage> | null,
+		hydratedEvidenceByLiveDocSlot?: ReadonlyMap<number, CandidateEvidencePackage> | null,
 	): CoverageLexicalV3SearchResult {
 		if (this.residentBase == null) {
 			throw new Error("CoverageLexicalV3Engine.search requires a resident base");
 		}
 		const { queryAnalysis, unitFamilyMatches, guardedCandidateDocs } =
 			preparedSearch;
-		const effectiveHydratedEvidenceByDocId =
-			hydratedEvidenceByDocId ??
+		const effectiveHydratedEvidenceByLiveDocSlot =
+			hydratedEvidenceByLiveDocSlot ??
 			hydrateCandidateEvidenceBatch(this.residentBase, guardedCandidateDocs);
 		const provisionalCandidateProfiles = guardedCandidateDocs.map((candidateRecall) =>
 			buildPackingProfile(
@@ -253,7 +253,9 @@ export class CoverageLexicalV3Engine {
 				{
 					allowBodyOpaqueRescueSurfaceGroupIndices: null,
 					hydratedEvidence:
-						effectiveHydratedEvidenceByDocId.get(candidateRecall.docId) ?? null,
+						effectiveHydratedEvidenceByLiveDocSlot.get(
+							candidateRecall.liveDocSlot,
+						) ?? null,
 				},
 			),
 		);
@@ -265,17 +267,23 @@ export class CoverageLexicalV3Engine {
 					candidate.hasAnyHanRescueAssessment ||
 					hasBodyOpaqueRescueSeeds(guardedCandidateDocs[index]),
 			);
-		const allowedBodyOpaqueRescueByDocId = buildAllowedBodyOpaqueRescueSurfaceGroups(
+		const allowedBodyOpaqueRescueByLiveDocSlot = buildAllowedBodyOpaqueRescueSurfaceGroups(
 			this.residentBase!,
 			queryAnalysis,
 			guardedCandidateDocs,
 			unitFamilyMatches,
-			effectiveHydratedEvidenceByDocId,
+			effectiveHydratedEvidenceByLiveDocSlot,
+		);
+		const candidateRecallByLiveDocSlot = new Map(
+			guardedCandidateDocs.map((candidateRecall) => [
+				candidateRecall.liveDocSlot,
+				candidateRecall,
+			]),
 		);
 		const secondPassCandidateProfiles = provisionalCandidates.map(
 			(provisionalCandidate) => {
-				const candidateRecall = guardedCandidateDocs.find(
-					(item) => item.docId === provisionalCandidate.docId,
+				const candidateRecall = candidateRecallByLiveDocSlot.get(
+					provisionalCandidate.liveDocSlot,
 				);
 				if (candidateRecall == null) {
 					return provisionalCandidate;
@@ -287,9 +295,13 @@ export class CoverageLexicalV3Engine {
 					unitFamilyMatches,
 					{
 						allowBodyOpaqueRescueSurfaceGroupIndices:
-							allowedBodyOpaqueRescueByDocId.get(candidateRecall.docId) ?? null,
+							allowedBodyOpaqueRescueByLiveDocSlot.get(
+								candidateRecall.liveDocSlot,
+							) ?? null,
 						hydratedEvidence:
-							effectiveHydratedEvidenceByDocId.get(candidateRecall.docId) ?? null,
+							effectiveHydratedEvidenceByLiveDocSlot.get(
+								candidateRecall.liveDocSlot,
+							) ?? null,
 					},
 				);
 			},
@@ -343,7 +355,7 @@ export class CoverageLexicalV3Engine {
 		const guardResult = applyPrefixFanoutGuard(candidateDocs, options.maxItemResults);
 		const guardedCandidateDocs = guardResult.candidateDocs;
 		const guardMs = shouldLogDebug ? nowDebugMs() - guardStartedAtMs : 0;
-		const hydratedEvidenceByDocId = hydrateCandidateEvidenceBatch(
+		const hydratedEvidenceByLiveDocSlot = hydrateCandidateEvidenceBatch(
 			this.residentBase,
 			guardedCandidateDocs,
 		);
@@ -357,7 +369,7 @@ export class CoverageLexicalV3Engine {
 				{
 					allowBodyOpaqueRescueSurfaceGroupIndices: null,
 					hydratedEvidence:
-						hydratedEvidenceByDocId.get(candidateRecall.docId) ?? null,
+						hydratedEvidenceByLiveDocSlot.get(candidateRecall.liveDocSlot) ?? null,
 				},
 			),
 		);
@@ -369,16 +381,22 @@ export class CoverageLexicalV3Engine {
 					candidate.hasAnyHanRescueAssessment ||
 					hasBodyOpaqueRescueSeeds(guardedCandidateDocs[index]),
 			);
-		const allowedBodyOpaqueRescueByDocId = buildAllowedBodyOpaqueRescueSurfaceGroups(
+		const allowedBodyOpaqueRescueByLiveDocSlot = buildAllowedBodyOpaqueRescueSurfaceGroups(
 			this.residentBase!,
 			queryAnalysis,
 			guardedCandidateDocs,
 			unitFamilyMatches,
-			hydratedEvidenceByDocId,
+			hydratedEvidenceByLiveDocSlot,
+		);
+		const candidateRecallByLiveDocSlot = new Map(
+			guardedCandidateDocs.map((candidateRecall) => [
+				candidateRecall.liveDocSlot,
+				candidateRecall,
+			]),
 		);
 		const secondPassCandidateProfiles = provisionalCandidates.map((provisionalCandidate) => {
-				const candidateRecall = guardedCandidateDocs.find(
-					(item) => item.docId === provisionalCandidate.docId,
+				const candidateRecall = candidateRecallByLiveDocSlot.get(
+					provisionalCandidate.liveDocSlot,
 				);
 				if (candidateRecall == null) {
 					return provisionalCandidate;
@@ -390,9 +408,13 @@ export class CoverageLexicalV3Engine {
 					unitFamilyMatches,
 					{
 						allowBodyOpaqueRescueSurfaceGroupIndices:
-							allowedBodyOpaqueRescueByDocId.get(candidateRecall.docId) ?? null,
+							allowedBodyOpaqueRescueByLiveDocSlot.get(
+								candidateRecall.liveDocSlot,
+							) ?? null,
 						hydratedEvidence:
-							hydratedEvidenceByDocId.get(candidateRecall.docId) ?? null,
+							hydratedEvidenceByLiveDocSlot.get(
+								candidateRecall.liveDocSlot,
+							) ?? null,
 					},
 				);
 			});
@@ -444,7 +466,9 @@ export class CoverageLexicalV3Engine {
 				candidateDocDetails: summarizeCandidateDocs(guardedCandidateDocs),
 				provisionalCandidateDetails: summarizePackingProfiles(provisionalCandidateProfiles),
 				bodyOpaqueRescueAllowanceDetails:
-					summarizeAllowedBodyOpaqueRescueByDocId(allowedBodyOpaqueRescueByDocId),
+					summarizeAllowedBodyOpaqueRescueByLiveDocSlot(
+						allowedBodyOpaqueRescueByLiveDocSlot,
+					),
 				secondPassCandidateDetails: summarizePackingProfiles(secondPassCandidateProfiles),
 				topRankedCandidateDetails: summarizeTopRankedCandidates(rankedCandidates),
 				phaseMs: {
@@ -735,20 +759,20 @@ function summarizePackingProfiles(
 	}));
 }
 
-function summarizeAllowedBodyOpaqueRescueByDocId(
-	allowedBodyOpaqueRescueByDocId: ReadonlyMap<number, ReadonlySet<number>>,
+function summarizeAllowedBodyOpaqueRescueByLiveDocSlot(
+	allowedBodyOpaqueRescueByLiveDocSlot: ReadonlyMap<number, ReadonlySet<number>>,
 ): ReadonlyArray<{
-	docId: number;
+	liveDocSlot: number;
 	allowedSurfaceGroupIndices: readonly number[];
 }> {
-	return [...allowedBodyOpaqueRescueByDocId.entries()]
-		.map(([docId, surfaceGroupIndices]) => ({
-			docId,
+	return [...allowedBodyOpaqueRescueByLiveDocSlot.entries()]
+		.map(([liveDocSlot, surfaceGroupIndices]) => ({
+			liveDocSlot,
 			allowedSurfaceGroupIndices: [...surfaceGroupIndices].sort(
 				(left, right) => left - right,
 			),
 		}))
-		.sort((left, right) => left.docId - right.docId);
+		.sort((left, right) => left.liveDocSlot - right.liveDocSlot);
 }
 
 function hasBodyOpaqueRescueSeeds(candidateRecall: V3RecallState["candidateDocs"][number]): boolean {
@@ -762,9 +786,12 @@ function buildAllowedBodyOpaqueRescueSurfaceGroups(
 	queryAnalysis: V3RecallState["queryAnalysis"],
 	candidateDocs: V3RecallState["candidateDocs"],
 	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
-	hydratedEvidenceByDocId?: ReadonlyMap<number, CandidateEvidencePackage> | null,
+	hydratedEvidenceByLiveDocSlot?: ReadonlyMap<number, CandidateEvidencePackage> | null,
 ): ReadonlyMap<number, ReadonlySet<number>> {
-	const comparisonProfileByDocAndSurfaceGroup = new Map<string, EvidencePackingProfile>();
+	const comparisonProfileByLiveDocSlotAndSurfaceGroup = new Map<
+		string,
+		EvidencePackingProfile
+	>();
 	const bestBySurfaceGroupIndex = new Map<number, EvidencePackingProfile>();
 	const hasOtherFamilyEvidenceBySurfaceGroup = new Map<number, boolean>();
 	for (const candidateRecall of candidateDocs) {
@@ -781,11 +808,14 @@ function buildAllowedBodyOpaqueRescueSurfaceGroups(
 					allowBodyOpaqueRescueSurfaceGroupIndices: null,
 					excludeSurfaceGroupIndices: new Set<number>([groupRecall.surfaceGroupIndex]),
 					hydratedEvidence:
-						hydratedEvidenceByDocId?.get(candidateRecall.docId) ?? null,
+						hydratedEvidenceByLiveDocSlot?.get(candidateRecall.liveDocSlot) ?? null,
 				},
 			);
-			comparisonProfileByDocAndSurfaceGroup.set(
-				buildBodyOpaqueRescueGateKey(candidateRecall.docId, groupRecall.surfaceGroupIndex),
+			comparisonProfileByLiveDocSlotAndSurfaceGroup.set(
+				buildBodyOpaqueRescueGateKey(
+					candidateRecall.liveDocSlot,
+					groupRecall.surfaceGroupIndex,
+				),
 				comparisonProfile,
 			);
 			if (comparisonProfile.realizedCoverageCount > 0) {
@@ -803,7 +833,7 @@ function buildAllowedBodyOpaqueRescueSurfaceGroups(
 			}
 		}
 	}
-	const allowedByDocId = new Map<number, Set<number>>();
+	const allowedByLiveDocSlot = new Map<number, Set<number>>();
 	for (const candidateRecall of candidateDocs) {
 		for (const groupRecall of candidateRecall.hanSurfaceGroupRecalls) {
 			if (groupRecall.bodySeedBlockIds.length === 0) {
@@ -811,14 +841,17 @@ function buildAllowedBodyOpaqueRescueSurfaceGroups(
 			}
 			if (!hasOtherFamilyEvidenceBySurfaceGroup.get(groupRecall.surfaceGroupIndex)) {
 				pushAllowedBodyOpaqueRescueSurfaceGroup(
-					allowedByDocId,
-					candidateRecall.docId,
+					allowedByLiveDocSlot,
+					candidateRecall.liveDocSlot,
 					groupRecall.surfaceGroupIndex,
 				);
 				continue;
 			}
-			const comparisonProfile = comparisonProfileByDocAndSurfaceGroup.get(
-				buildBodyOpaqueRescueGateKey(candidateRecall.docId, groupRecall.surfaceGroupIndex),
+			const comparisonProfile = comparisonProfileByLiveDocSlotAndSurfaceGroup.get(
+				buildBodyOpaqueRescueGateKey(
+					candidateRecall.liveDocSlot,
+					groupRecall.surfaceGroupIndex,
+				),
 			);
 			if (comparisonProfile == null || comparisonProfile.realizedCoverageCount === 0) {
 				continue;
@@ -831,30 +864,33 @@ function buildAllowedBodyOpaqueRescueSurfaceGroups(
 				continue;
 			}
 			pushAllowedBodyOpaqueRescueSurfaceGroup(
-				allowedByDocId,
-				candidateRecall.docId,
+				allowedByLiveDocSlot,
+				candidateRecall.liveDocSlot,
 				groupRecall.surfaceGroupIndex,
 			);
 		}
 	}
-	return allowedByDocId;
+	return allowedByLiveDocSlot;
 }
 
-function buildBodyOpaqueRescueGateKey(docId: number, surfaceGroupIndex: number): string {
-	return `${docId}:${surfaceGroupIndex}`;
+function buildBodyOpaqueRescueGateKey(
+	liveDocSlot: number,
+	surfaceGroupIndex: number,
+): string {
+	return `${liveDocSlot}:${surfaceGroupIndex}`;
 }
 
 function pushAllowedBodyOpaqueRescueSurfaceGroup(
 	target: Map<number, Set<number>>,
-	docId: number,
+	liveDocSlot: number,
 	surfaceGroupIndex: number,
 ): void {
-	const existing = target.get(docId);
+	const existing = target.get(liveDocSlot);
 	if (existing != null) {
 		existing.add(surfaceGroupIndex);
 		return;
 	}
-	target.set(docId, new Set<number>([surfaceGroupIndex]));
+	target.set(liveDocSlot, new Set<number>([surfaceGroupIndex]));
 }
 
 function roundDebugMs(value: number): number {

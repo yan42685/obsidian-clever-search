@@ -82,6 +82,7 @@ import {
 	getLiveDocRouteHanWitnessStringIds,
 	getLiveDocRouteHanWitnessTexts,
 	getLiveDocRouteSourceMasks,
+	getLiveDocSlotForBlockId,
 	getLiveDocStableKey,
 	getShardLocalFamilySlot,
 	readResidentString,
@@ -549,6 +550,7 @@ export function buildPackingProfile(
 		logCoverageLexicalV3Debug("ranking.buildPackingProfile.hanOpaqueRescue", {
 			queryText: queryAnalysis.queryText,
 			docId: candidateRecall.docId,
+			liveDocSlot: candidateRecall.liveDocSlot,
 			path: getLiveDocPath(base, candidateRecall.liveDocSlot),
 			allowBodyOpaqueRescueSurfaceGroupIndices:
 				options?.allowBodyOpaqueRescueSurfaceGroupIndices == null
@@ -728,6 +730,7 @@ export function buildPackingProfile(
 	});
 	const profile: EvidencePackingProfile = {
 		docId: candidateRecall.docId,
+		liveDocSlot: candidateRecall.liveDocSlot,
 		path: getLiveDocPath(base, candidateRecall.liveDocSlot),
 		stableKey: getLiveDocStableKey(base, candidateRecall.liveDocSlot),
 		surfaceCoverageShapeKey: queryAnalysis.surfaceCoverageShapeKey,
@@ -807,14 +810,14 @@ export function hydrateCandidateEvidenceBatch(
 	candidateRecalls: readonly V3CandidateDocRecall[],
 	source?: CandidateEvidenceHydrationSource | null,
 ): ReadonlyMap<number, CandidateEvidencePackage> {
-	const hydratedByDocId = new Map<number, CandidateEvidencePackage>();
+	const hydratedByLiveDocSlot = new Map<number, CandidateEvidencePackage>();
 	for (const candidateRecall of candidateRecalls) {
-		hydratedByDocId.set(
-			candidateRecall.docId,
+		hydratedByLiveDocSlot.set(
+			candidateRecall.liveDocSlot,
 			hydrateCandidateEvidence(base, candidateRecall, source),
 		);
 	}
-	return hydratedByDocId;
+	return hydratedByLiveDocSlot;
 }
 
 function getCachedDocEvidence(
@@ -2972,7 +2975,7 @@ function summarizeSingletonHanCompletion(params: Readonly<{
 		const bodyCandidate = buildBodySingletonHanCompletionCandidate({
 			target,
 			base: params.base,
-			docId: params.candidateRecall.docId,
+			liveDocSlot: params.candidateRecall.liveDocSlot,
 			queryBigramTexts,
 			shortlistedBodyBlockIds: params.candidateRecall.shortlistedBodyBlockIds,
 			bodyOccurrencesByBlockId: params.bodyOccurrencesByBlockId,
@@ -3251,7 +3254,7 @@ function filterOverlappingTextOffsets(
 function buildBodySingletonHanCompletionCandidate(params: Readonly<{
 	target: SingletonHanTarget;
 	base: ResidentBase;
-	docId: number;
+	liveDocSlot: number;
 	queryBigramTexts: readonly string[];
 	shortlistedBodyBlockIds: readonly number[];
 	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>;
@@ -3263,7 +3266,7 @@ function buildBodySingletonHanCompletionCandidate(params: Readonly<{
 }>): SingletonHanCompletionCandidate | null {
 	const candidateBlockIds = collectCandidateSingletonHanBlockIds(
 		params.base,
-		params.docId,
+		params.liveDocSlot,
 		params.shortlistedBodyBlockIds,
 	);
 	let best: SingletonHanCompletionCandidate | null = null;
@@ -3307,7 +3310,7 @@ function buildBodySingletonHanCompletionCandidate(params: Readonly<{
 		const adjacentAnchor = buildBodySingletonHanAdjacentAnchorCandidate({
 			base: params.base,
 			blockId,
-			docId: params.docId,
+			liveDocSlot: params.liveDocSlot,
 			target: params.target,
 			charPositions,
 			weightedGapIndex: blockEvidence.weightedGapIndex,
@@ -3323,13 +3326,13 @@ function buildBodySingletonHanCompletionCandidate(params: Readonly<{
 
 function collectCandidateSingletonHanBlockIds(
 	base: ResidentBase,
-	docId: number,
+	liveDocSlot: number,
 	shortlistedBodyBlockIds: readonly number[],
 ): number[] {
 	const out = new Set<number>(shortlistedBodyBlockIds);
 	for (const blockId of shortlistedBodyBlockIds) {
 		for (const candidateBlockId of [blockId - 1, blockId + 1]) {
-			if ((base.bodyBlocks.docIdByBlockId[candidateBlockId] ?? -1) !== docId) {
+			if (getLiveDocSlotForBlockId(base, candidateBlockId) !== liveDocSlot) {
 				continue;
 			}
 			out.add(candidateBlockId);
@@ -3510,7 +3513,7 @@ function buildBodySingletonHanSameBlockAnchorCandidate(params: Readonly<{
 function buildBodySingletonHanAdjacentAnchorCandidate(params: Readonly<{
 	base: ResidentBase;
 	blockId: number;
-	docId: number;
+	liveDocSlot: number;
 	target: SingletonHanTarget;
 	charPositions: readonly number[];
 	weightedGapIndex: WeightedGapIndex;
@@ -3526,7 +3529,7 @@ function buildBodySingletonHanAdjacentAnchorCandidate(params: Readonly<{
 	const currentOrdinal =
 		params.base.bodyBlocks.blockOrdinalByBlockId[params.blockId] ?? params.blockId;
 	for (const adjacentBlockId of [params.blockId - 1, params.blockId + 1]) {
-		if ((params.base.bodyBlocks.docIdByBlockId[adjacentBlockId] ?? -1) !== params.docId) {
+		if (getLiveDocSlotForBlockId(params.base, adjacentBlockId) !== params.liveDocSlot) {
 			continue;
 		}
 		const adjacentEvidence = getCachedBodyBlockEvidence(params.base, adjacentBlockId);

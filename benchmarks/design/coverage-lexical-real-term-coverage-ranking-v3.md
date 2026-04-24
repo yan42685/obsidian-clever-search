@@ -2122,3 +2122,65 @@ Validation completed for this phase:
 
 - `npm run typecheck:build` passes on 2026-04-19
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts` passes on 2026-04-19
+
+### Phase 44
+
+Status: Completed on 2026-04-23
+
+This phase closes the remaining V3 query-time slot convergence gaps so hot-path
+scratch state no longer bounces between resident-local slots and canonical
+`docId`/`familyId` identities during candidate admission and ranking:
+
+- `BodyBlockArena` now carries resident `liveDocSlotByBlockId`, and recall-side
+  block ownership checks route through slot accessors instead of re-reading
+  `docIdByBlockId` for same-document decisions
+- candidate recall buckets, singleton scopes, prefix-fanout guard state,
+  hydrated ranking evidence maps, Han rescue metadata/body scoping, and
+  file-search-engine Han refine state now key on `liveDocSlot`
+- fuzzy rescue metadata postings and persisted fuzzy sidecars are now
+  `shardLocalFamilySlot`-native end-to-end, removing the runtime
+  `familyId -> shardLocalFamilySlot` translation that was still happening during
+  fuzzy candidate admission
+- canonical `docId` / `familyId` values remain in resident tables, persisted
+  rows, and final result materialization, but they are no longer the working key
+  space for the V3 query scratch structures touched in this phase
+- direct `buildResidentBase(...)` construction now also attaches the fuzzy
+  rescue sidecar back onto the returned resident base so direct resident tests
+  and in-memory callers continue to see the same fuzzy behavior as the
+  offloaded file-search-engine path
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-23
+- `npm test -- --runInBand tests/src/services/search/file-snapshot-store.test.ts tests/src/services/search/coverage-lexical-v3/resident-base.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/prefix-fanout-guard.test.ts tests/src/services/search/coverage-lexical-v3/family-lookup.test.ts tests/src/services/search/coverage-lexical-v3/metadata-highlights-fuzzy.test.ts tests/src/services/search/coverage-lexical-v3/ranking-stability.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine-request-flags.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine-metadata-highlights.test.ts` passes on 2026-04-23
+- `npm run benchmark:coverage-lexical` passes on 2026-04-23
+
+### Phase 45
+
+Status: Completed on 2026-04-23
+
+This phase extends the slot-convergence cleanup across the V3 hot/cold
+boundary so the persisted lexical ranking evidence rows no longer use canonical
+runtime ordinals (`docId` / `blockId`) as cold-layer lookup keys:
+
+- `lexicalBodyEvidence`, `lexicalHanDocEvidence`, and `lexicalHanBodyEvidence`
+  rows are now persisted by stable identity using `docRef + generation` and
+  `docRef + generation + blockOrdinal` row ids
+- `FileSnapshotStore` publish/read APIs now accept stable evidence locators and
+  reload evidence by canonical cold identity instead of by resident `docId` or
+  `blockId`
+- `CoverageLexicalV3FileSearchEngine` now translates resident
+  `liveDocSlot -> docRef + generation` and `blockId -> docRef + generation +
+  blockOrdinal` at the hot/cold edge, then remaps hydrated evidence back onto
+  `liveDocSlot` / `blockId` for ranking
+- the query-evidence ready marker version now advances with this schema change,
+  so upgraded databases cannot treat cleared pre-migration evidence tables as
+  still valid
+- this keeps the intended boundary explicit: resident hot loops remain
+  slot-native, while persisted cold evidence is stable-identity-native rather
+  than slot-native
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-23
+- `npm test -- --runInBand tests/src/services/search/file-snapshot-store.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine-request-flags.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/ranking-stability.test.ts` passes on 2026-04-23

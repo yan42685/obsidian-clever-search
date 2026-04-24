@@ -107,6 +107,28 @@ export type LexicalHanBodyEvidenceSnapshot = Readonly<{
 	bodyWitnessStartOffsets: readonly number[];
 }>;
 
+export type LexicalDocEvidenceLocator = Readonly<{
+	docRef: number;
+	generation: number;
+}>;
+
+export type LexicalBlockEvidenceLocator = LexicalDocEvidenceLocator &
+	Readonly<{
+		blockOrdinal: number;
+	}>;
+
+export function buildLexicalDocEvidenceRowId(
+	locator: LexicalDocEvidenceLocator,
+): string {
+	return `${locator.docRef}:${locator.generation}`;
+}
+
+export function buildLexicalBlockEvidenceRowId(
+	locator: LexicalBlockEvidenceLocator,
+): string {
+	return `${locator.docRef}:${locator.generation}:${locator.blockOrdinal}`;
+}
+
 const ACTIVE_LEXICAL_FUZZY_RESCUE_ID = "active";
 const ACTIVE_LEXICAL_BODY_FAMILY_SUPPORT_ID = "active";
 const ACTIVE_LEXICAL_EXACT_TAPE_ID = "active";
@@ -293,7 +315,7 @@ export class FileSnapshotStore {
 		);
 		if (row == null) {
 			return {
-				candidateMetadataFamilyIdsByFuzzyLookupKey: new Map(),
+				candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: new Map(),
 				indexedMetadataFamilyCount: 0,
 				fuzzyLookupKeyCount: 0,
 				bytes: 0,
@@ -309,11 +331,14 @@ export class FileSnapshotStore {
 		for (const entry of filteredEntries) {
 			filteredBytes +=
 				new TextEncoder().encode(entry.fuzzyLookupKey).byteLength +
-				entry.familyIds.byteLength;
+				entry.shardLocalFamilySlots.byteLength;
 		}
 		return {
-			candidateMetadataFamilyIdsByFuzzyLookupKey: new Map(
-				filteredEntries.map((entry) => [entry.fuzzyLookupKey, entry.familyIds]),
+			candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: new Map(
+				filteredEntries.map((entry) => [
+					entry.fuzzyLookupKey,
+					entry.shardLocalFamilySlots,
+				]),
 			),
 			indexedMetadataFamilyCount: row.indexedMetadataFamilyCount,
 			fuzzyLookupKeyCount: filteredEntries.length,
@@ -333,10 +358,11 @@ export class FileSnapshotStore {
 			indexedMetadataFamilyCount: sidecar.indexedMetadataFamilyCount,
 			fuzzyLookupKeyCount: sidecar.fuzzyLookupKeyCount,
 			bytes: sidecar.bytes,
-			entries: [...sidecar.candidateMetadataFamilyIdsByFuzzyLookupKey.entries()].map(
-				([fuzzyLookupKey, familyIds]) => ({
+			entries: [
+				...sidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.entries(),
+			].map(([fuzzyLookupKey, shardLocalFamilySlots]) => ({
 					fuzzyLookupKey,
-					familyIds,
+					shardLocalFamilySlots,
 				}),
 			),
 		};
@@ -374,20 +400,22 @@ export class FileSnapshotStore {
 	}
 
 	async readLexicalBodyEvidenceForBlocks(
-		blockIds: ReadonlyArray<number>,
-	): Promise<ReadonlyMap<number, LexicalBodyEvidenceSnapshot>> {
-		const uniqueBlockIds = Array.from(new Set(blockIds));
-		if (uniqueBlockIds.length === 0) {
-			return new Map<number, LexicalBodyEvidenceSnapshot>();
+		locators: ReadonlyArray<LexicalBlockEvidenceLocator>,
+	): Promise<ReadonlyMap<string, LexicalBodyEvidenceSnapshot>> {
+		const uniqueIds = Array.from(
+			new Set(locators.map((locator) => buildLexicalBlockEvidenceRowId(locator))),
+		);
+		if (uniqueIds.length === 0) {
+			return new Map<string, LexicalBodyEvidenceSnapshot>();
 		}
-		const rows = await this.database.db.lexicalBodyEvidence.bulkGet(uniqueBlockIds);
-		const evidenceByBlockId = new Map<number, LexicalBodyEvidenceSnapshot>();
-		for (let index = 0; index < uniqueBlockIds.length; index += 1) {
+		const rows = await this.database.db.lexicalBodyEvidence.bulkGet(uniqueIds);
+		const evidenceById = new Map<string, LexicalBodyEvidenceSnapshot>();
+		for (let index = 0; index < uniqueIds.length; index += 1) {
 			const row = rows[index];
 			if (row == null) {
 				continue;
 			}
-			evidenceByBlockId.set(uniqueBlockIds[index], {
+			evidenceById.set(uniqueIds[index], {
 				exactFamilyIds: row.exactFamilyIds,
 				exactTokenPositions: row.exactTokenPositions,
 				familySupportEntries: row.familySupportFamilyIds.map(
@@ -398,7 +426,7 @@ export class FileSnapshotStore {
 				),
 			});
 		}
-		return evidenceByBlockId;
+		return evidenceById;
 	}
 
 	async publishLexicalBodyEvidence(
@@ -409,7 +437,10 @@ export class FileSnapshotStore {
 		}
 		await this.database.db.lexicalBodyEvidence.bulkPut(
 			rows.map((row) => ({
-				blockId: row.blockId,
+				id: row.id,
+				docRef: row.docRef,
+				generation: row.generation,
+				blockOrdinal: row.blockOrdinal,
 				exactFamilyIds: [...row.exactFamilyIds],
 				exactTokenPositions: [...row.exactTokenPositions],
 				familySupportFamilyIds: [...row.familySupportFamilyIds],
@@ -419,20 +450,22 @@ export class FileSnapshotStore {
 	}
 
 	async readLexicalHanDocEvidenceForDocs(
-		docIds: ReadonlyArray<number>,
-	): Promise<ReadonlyMap<number, LexicalHanDocEvidenceSnapshot>> {
-		const uniqueDocIds = Array.from(new Set(docIds));
-		if (uniqueDocIds.length === 0) {
-			return new Map<number, LexicalHanDocEvidenceSnapshot>();
+		locators: ReadonlyArray<LexicalDocEvidenceLocator>,
+	): Promise<ReadonlyMap<string, LexicalHanDocEvidenceSnapshot>> {
+		const uniqueIds = Array.from(
+			new Set(locators.map((locator) => buildLexicalDocEvidenceRowId(locator))),
+		);
+		if (uniqueIds.length === 0) {
+			return new Map<string, LexicalHanDocEvidenceSnapshot>();
 		}
-		const rows = await this.database.db.lexicalHanDocEvidence.bulkGet(uniqueDocIds);
-		const evidenceByDocId = new Map<number, LexicalHanDocEvidenceSnapshot>();
-		for (let index = 0; index < uniqueDocIds.length; index += 1) {
+		const rows = await this.database.db.lexicalHanDocEvidence.bulkGet(uniqueIds);
+		const evidenceById = new Map<string, LexicalHanDocEvidenceSnapshot>();
+		for (let index = 0; index < uniqueIds.length; index += 1) {
 			const row = rows[index];
 			if (row == null) {
 				continue;
 			}
-			evidenceByDocId.set(uniqueDocIds[index], {
+			evidenceById.set(uniqueIds[index], {
 				identityWitnessStringIds: row.identityWitnessStringIds,
 				identityWitnessSourceMasks: row.identityWitnessSourceMaskByDocEntry,
 				routeWitnessStringIds: row.routeWitnessStringIds,
@@ -440,7 +473,7 @@ export class FileSnapshotStore {
 				headingWitnessStringIds: row.headingWitnessStringIds,
 			});
 		}
-		return evidenceByDocId;
+		return evidenceById;
 	}
 
 	async publishLexicalHanDocEvidence(
@@ -451,7 +484,9 @@ export class FileSnapshotStore {
 		}
 		await this.database.db.lexicalHanDocEvidence.bulkPut(
 			rows.map((row) => ({
-				docId: row.docId,
+				id: row.id,
+				docRef: row.docRef,
+				generation: row.generation,
 				identityWitnessStringIds: [...row.identityWitnessStringIds],
 				identityWitnessSourceMaskByDocEntry: [
 					...row.identityWitnessSourceMaskByDocEntry,
@@ -466,27 +501,27 @@ export class FileSnapshotStore {
 	}
 
 	async readLexicalHanBodyEvidenceForBlocks(
-		blockIds: ReadonlyArray<number>,
-	): Promise<ReadonlyMap<number, LexicalHanBodyEvidenceSnapshot>> {
-		const uniqueBlockIds = Array.from(new Set(blockIds));
-		if (uniqueBlockIds.length === 0) {
-			return new Map<number, LexicalHanBodyEvidenceSnapshot>();
-		}
-		const rows = await this.database.db.lexicalHanBodyEvidence.bulkGet(
-			uniqueBlockIds,
+		locators: ReadonlyArray<LexicalBlockEvidenceLocator>,
+	): Promise<ReadonlyMap<string, LexicalHanBodyEvidenceSnapshot>> {
+		const uniqueIds = Array.from(
+			new Set(locators.map((locator) => buildLexicalBlockEvidenceRowId(locator))),
 		);
-		const evidenceByBlockId = new Map<number, LexicalHanBodyEvidenceSnapshot>();
-		for (let index = 0; index < uniqueBlockIds.length; index += 1) {
+		if (uniqueIds.length === 0) {
+			return new Map<string, LexicalHanBodyEvidenceSnapshot>();
+		}
+		const rows = await this.database.db.lexicalHanBodyEvidence.bulkGet(uniqueIds);
+		const evidenceById = new Map<string, LexicalHanBodyEvidenceSnapshot>();
+		for (let index = 0; index < uniqueIds.length; index += 1) {
 			const row = rows[index];
 			if (row == null) {
 				continue;
 			}
-			evidenceByBlockId.set(uniqueBlockIds[index], {
+			evidenceById.set(uniqueIds[index], {
 				bodyWitnessStringIds: row.bodyWitnessStringIds,
 				bodyWitnessStartOffsets: row.bodyWitnessStartOffsets,
 			});
 		}
-		return evidenceByBlockId;
+		return evidenceById;
 	}
 
 	async publishLexicalHanBodyEvidence(
@@ -497,7 +532,10 @@ export class FileSnapshotStore {
 		}
 		await this.database.db.lexicalHanBodyEvidence.bulkPut(
 			rows.map((row) => ({
-				blockId: row.blockId,
+				id: row.id,
+				docRef: row.docRef,
+				generation: row.generation,
+				blockOrdinal: row.blockOrdinal,
 				bodyWitnessStringIds: [...row.bodyWitnessStringIds],
 				bodyWitnessStartOffsets: [...row.bodyWitnessStartOffsets],
 			})),

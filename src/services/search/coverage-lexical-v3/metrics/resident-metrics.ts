@@ -144,6 +144,7 @@ export function buildResidentBaseMetrics(
 		input.bodyFamilyPosting.deltaTermIds.byteLength +
 		input.bodyFamilyPosting.postingTape.byteLength +
 		input.bodyBlocks.docIdByBlockId.byteLength +
+		input.bodyBlocks.liveDocSlotByBlockId.byteLength +
 		input.bodyBlocks.blockOrdinalByBlockId.byteLength +
 		input.bodyBlocks.familySupportFamilyIds.byteLength +
 		input.bodyBlocks.familySupportMaskByEntry.byteLength +

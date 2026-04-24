@@ -461,6 +461,7 @@ describe("coverage lexical v3 resident base", () => {
 			bodyBlocks: {
 				blockCount,
 				docIdByBlockId: buildIntegerArray(new Array(blockCount).fill(0)),
+				liveDocSlotByBlockId: buildIntegerArray(new Array(blockCount).fill(0)),
 				blockOrdinalByBlockId: buildIntegerArray(Array.from({ length: blockCount }, (_, index) => index)),
 				exactTapeStartByBlockId: buildIntegerArray(new Array(blockCount).fill(0)),
 				exactTapeCountByBlockId: buildIntegerArray(new Array(blockCount).fill(0).map((value, index) => index === highBlockId ? 2 : value)),
@@ -529,7 +530,7 @@ describe("coverage lexical v3 resident base", () => {
 				bodyWitnessPositionDeltaU32Tape: witnessPositionLane.positionDeltaU32Tape,
 			},
 			fuzzyRescue: {
-				candidateMetadataFamilyIdsByFuzzyLookupKey: new Map(),
+				candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: new Map(),
 				indexedMetadataFamilyCount: 0,
 				fuzzyLookupKeyCount: 0,
 				bytes: 0,
@@ -755,15 +756,15 @@ describe("coverage lexical v3 resident base", () => {
 		const fuzzyRescueSidecar = artifacts.fuzzyRescueSidecar;
 
 		const obsidanPosting =
-			fuzzyRescueSidecar.candidateMetadataFamilyIdsByFuzzyLookupKey.get(
+			fuzzyRescueSidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get(
 				"obsidan",
 			);
 		const incdentPosting =
-			fuzzyRescueSidecar.candidateMetadataFamilyIdsByFuzzyLookupKey.get(
+			fuzzyRescueSidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get(
 				"incdent",
 			);
 		const runboksPosting =
-			fuzzyRescueSidecar.candidateMetadataFamilyIdsByFuzzyLookupKey.get(
+			fuzzyRescueSidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get(
 				"runboks",
 			);
 		const postedFamilyTexts = Array.from(obsidanPosting ?? []).map((familyId) =>

@@ -53,7 +53,13 @@ jest.mock("src/utils/my-lib", () => ({
 
 import { TFile, Vault } from "obsidian";
 import { Database } from "src/services/database/database";
-import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
+import {
+  buildLexicalBlockEvidenceRowId,
+  buildLexicalDocEvidenceRowId,
+  FileSnapshotStore,
+  type LexicalBlockEvidenceLocator,
+  type LexicalDocEvidenceLocator,
+} from "src/services/search/shared/file-snapshot-store";
 
 type SnapshotRow = {
   docRef?: number;
@@ -78,7 +84,7 @@ type LexicalFuzzyRescueRow = {
   bytes: number;
   entries: ReadonlyArray<{
     fuzzyLookupKey: string;
-    familyIds: Uint32Array;
+    shardLocalFamilySlots: Uint32Array;
   }>;
 };
 
@@ -92,7 +98,10 @@ type LexicalBodyFamilySupportRow = {
 };
 
 type LexicalBodyEvidenceRow = {
-  blockId: number;
+  id: string;
+  docRef: number;
+  generation: number;
+  blockOrdinal: number;
   exactFamilyIds: readonly number[];
   exactTokenPositions: readonly number[];
   familySupportFamilyIds: readonly number[];
@@ -100,7 +109,9 @@ type LexicalBodyEvidenceRow = {
 };
 
 type LexicalHanDocEvidenceRow = {
-  docId: number;
+  id: string;
+  docRef: number;
+  generation: number;
   identityWitnessStringIds: readonly number[];
   identityWitnessSourceMaskByDocEntry: readonly number[];
   routeWitnessStringIds: readonly number[];
@@ -109,7 +120,10 @@ type LexicalHanDocEvidenceRow = {
 };
 
 type LexicalHanBodyEvidenceRow = {
-  blockId: number;
+  id: string;
+  docRef: number;
+  generation: number;
+  blockOrdinal: number;
   bodyWitnessStringIds: readonly number[];
   bodyWitnessStartOffsets: readonly number[];
 };
@@ -417,44 +431,21 @@ function createSingletonKeyTable<T extends { id: string }>(initialRows: T[] = []
   };
 }
 
-function createBlockIdTable<T extends { blockId: number }>(initialRows: T[] = []) {
-  const rows = new Map<number, T>(
-    initialRows.map((row) => [row.blockId, { ...row }]),
+function createRowIdTable<T extends { id: string }>(initialRows: T[] = []) {
+  const rows = new Map<string, T>(
+    initialRows.map((row) => [row.id, { ...row }]),
   );
   return {
     rows,
-    async bulkGet(blockIds: readonly number[]) {
-      return blockIds.map((blockId) => {
-        const row = rows.get(blockId);
+    async bulkGet(ids: readonly string[]) {
+      return ids.map((id) => {
+        const row = rows.get(id);
         return row ? { ...row } : undefined;
       });
     },
     async bulkPut(nextRows: T[]) {
       for (const row of nextRows) {
-        rows.set(row.blockId, { ...row });
-      }
-    },
-    async toArray() {
-      return Array.from(rows.values()).map((row) => ({ ...row }));
-    },
-  };
-}
-
-function createDocIdTable<T extends { docId: number }>(initialRows: T[] = []) {
-  const rows = new Map<number, T>(
-    initialRows.map((row) => [row.docId, { ...row }]),
-  );
-  return {
-    rows,
-    async bulkGet(docIds: readonly number[]) {
-      return docIds.map((docId) => {
-        const row = rows.get(docId);
-        return row ? { ...row } : undefined;
-      });
-    },
-    async bulkPut(nextRows: T[]) {
-      for (const row of nextRows) {
-        rows.set(row.docId, { ...row });
+        rows.set(row.id, { ...row });
       }
     },
     async toArray() {
@@ -492,9 +483,9 @@ function createStoreHarness(options?: {
   const lexicalBodyFamilySupport = createSingletonKeyTable(
     options?.lexicalBodyFamilySupport,
   );
-  const lexicalBodyEvidence = createBlockIdTable(options?.lexicalBodyEvidence);
-  const lexicalHanDocEvidence = createDocIdTable(options?.lexicalHanDocEvidence);
-  const lexicalHanBodyEvidence = createBlockIdTable(options?.lexicalHanBodyEvidence);
+  const lexicalBodyEvidence = createRowIdTable(options?.lexicalBodyEvidence);
+  const lexicalHanDocEvidence = createRowIdTable(options?.lexicalHanDocEvidence);
+  const lexicalHanBodyEvidence = createRowIdTable(options?.lexicalHanBodyEvidence);
   const lexicalExactTapes = createSingletonKeyTable(options?.lexicalExactTapes);
   const lexicalHanWitness = createSingletonKeyTable(options?.lexicalHanWitness);
   const hybridDirtyShadows = createFilePathTable(options?.hybridDirtyShadows);
@@ -731,7 +722,7 @@ describe("FileSnapshotStore", () => {
     const { store, database } = createStoreHarness();
 
     await store.publishLexicalFuzzyRescue({
-      candidateMetadataFamilyIdsByFuzzyLookupKey: new Map([
+      candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: new Map([
         ["obsidan", Uint32Array.from([3, 7])],
         ["runtim", Uint32Array.from([9])],
       ]),
@@ -753,10 +744,14 @@ describe("FileSnapshotStore", () => {
     const sidecar = await store.readLexicalFuzzyRescueForLookupKeys(["obsidan"]);
     expect(sidecar.indexedMetadataFamilyCount).toBe(3);
     expect(sidecar.fuzzyLookupKeyCount).toBe(1);
-    expect(sidecar.candidateMetadataFamilyIdsByFuzzyLookupKey.get("obsidan")).toEqual(
+    expect(
+      sidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get("obsidan"),
+    ).toEqual(
       Uint32Array.from([3, 7]),
     );
-    expect(sidecar.candidateMetadataFamilyIdsByFuzzyLookupKey.has("runtim")).toBe(false);
+    expect(
+      sidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.has("runtim"),
+    ).toBe(false);
   });
 
   test("publishes and reloads lexical body family support sidecars", async () => {
@@ -804,17 +799,38 @@ describe("FileSnapshotStore", () => {
 
   test("publishes and reloads lexical body evidence for shortlisted blocks", async () => {
     const { store, database } = createStoreHarness();
+    const firstLocator: LexicalBlockEvidenceLocator = {
+      docRef: 41,
+      generation: 7,
+      blockOrdinal: 0,
+    };
+    const secondLocator: LexicalBlockEvidenceLocator = {
+      docRef: 41,
+      generation: 7,
+      blockOrdinal: 1,
+    };
+    const missingLocator: LexicalBlockEvidenceLocator = {
+      docRef: 99,
+      generation: 7,
+      blockOrdinal: 0,
+    };
 
     await store.publishLexicalBodyEvidence([
       {
-        blockId: 3,
+        id: buildLexicalBlockEvidenceRowId(firstLocator),
+        docRef: firstLocator.docRef,
+        generation: firstLocator.generation,
+        blockOrdinal: firstLocator.blockOrdinal,
         exactFamilyIds: [4, 9],
         exactTokenPositions: [1, 7],
         familySupportFamilyIds: [4, 9],
         familySupportMaskByEntry: [1, 3],
       },
       {
-        blockId: 8,
+        id: buildLexicalBlockEvidenceRowId(secondLocator),
+        docRef: secondLocator.docRef,
+        generation: secondLocator.generation,
+        blockOrdinal: secondLocator.blockOrdinal,
         exactFamilyIds: [11],
         exactTokenPositions: [2],
         familySupportFamilyIds: [11],
@@ -824,11 +840,13 @@ describe("FileSnapshotStore", () => {
 
     expect(database.db.lexicalBodyEvidence.rows.size).toBe(2);
 
-    const evidenceByBlockId = await store.readLexicalBodyEvidenceForBlocks([
-      8, 3, 99,
+    const evidenceByRowId = await store.readLexicalBodyEvidenceForBlocks([
+      secondLocator,
+      firstLocator,
+      missingLocator,
     ]);
 
-    expect(evidenceByBlockId.get(3)).toEqual({
+    expect(evidenceByRowId.get(buildLexicalBlockEvidenceRowId(firstLocator))).toEqual({
       exactFamilyIds: [4, 9],
       exactTokenPositions: [1, 7],
       familySupportEntries: [
@@ -836,20 +854,30 @@ describe("FileSnapshotStore", () => {
         { familyId: 9, supportMask: 3 },
       ],
     });
-    expect(evidenceByBlockId.get(8)).toEqual({
+    expect(evidenceByRowId.get(buildLexicalBlockEvidenceRowId(secondLocator))).toEqual({
       exactFamilyIds: [11],
       exactTokenPositions: [2],
       familySupportEntries: [{ familyId: 11, supportMask: 2 }],
     });
-    expect(evidenceByBlockId.has(99)).toBe(false);
+    expect(evidenceByRowId.has(buildLexicalBlockEvidenceRowId(missingLocator))).toBe(false);
   });
 
   test("publishes and reloads lexical Han doc evidence", async () => {
     const { store, database } = createStoreHarness();
+    const firstLocator: LexicalDocEvidenceLocator = {
+      docRef: 17,
+      generation: 5,
+    };
+    const missingLocator: LexicalDocEvidenceLocator = {
+      docRef: 18,
+      generation: 5,
+    };
 
     await store.publishLexicalHanDocEvidence([
       {
-        docId: 1,
+        id: buildLexicalDocEvidenceRowId(firstLocator),
+        docRef: firstLocator.docRef,
+        generation: firstLocator.generation,
         identityWitnessStringIds: [3, 5],
         identityWitnessSourceMaskByDocEntry: [1, 2],
         routeWitnessStringIds: [7],
@@ -860,24 +888,40 @@ describe("FileSnapshotStore", () => {
 
     expect(database.db.lexicalHanDocEvidence.rows.size).toBe(1);
 
-    const evidenceByDocId = await store.readLexicalHanDocEvidenceForDocs([1, 2]);
+    const evidenceByRowId = await store.readLexicalHanDocEvidenceForDocs([
+      firstLocator,
+      missingLocator,
+    ]);
 
-    expect(evidenceByDocId.get(1)).toEqual({
+    expect(evidenceByRowId.get(buildLexicalDocEvidenceRowId(firstLocator))).toEqual({
       identityWitnessStringIds: [3, 5],
       identityWitnessSourceMasks: [1, 2],
       routeWitnessStringIds: [7],
       routeWitnessSourceMasks: [4],
       headingWitnessStringIds: [9],
     });
-    expect(evidenceByDocId.has(2)).toBe(false);
+    expect(evidenceByRowId.has(buildLexicalDocEvidenceRowId(missingLocator))).toBe(false);
   });
 
   test("publishes and reloads lexical Han body evidence for shortlisted blocks", async () => {
     const { store, database } = createStoreHarness();
+    const firstLocator: LexicalBlockEvidenceLocator = {
+      docRef: 23,
+      generation: 9,
+      blockOrdinal: 2,
+    };
+    const missingLocator: LexicalBlockEvidenceLocator = {
+      docRef: 24,
+      generation: 9,
+      blockOrdinal: 0,
+    };
 
     await store.publishLexicalHanBodyEvidence([
       {
-        blockId: 4,
+        id: buildLexicalBlockEvidenceRowId(firstLocator),
+        docRef: firstLocator.docRef,
+        generation: firstLocator.generation,
+        blockOrdinal: firstLocator.blockOrdinal,
         bodyWitnessStringIds: [11, 13],
         bodyWitnessStartOffsets: [0, 6],
       },
@@ -885,15 +929,16 @@ describe("FileSnapshotStore", () => {
 
     expect(database.db.lexicalHanBodyEvidence.rows.size).toBe(1);
 
-    const evidenceByBlockId = await store.readLexicalHanBodyEvidenceForBlocks([
-      4, 5,
+    const evidenceByRowId = await store.readLexicalHanBodyEvidenceForBlocks([
+      firstLocator,
+      missingLocator,
     ]);
 
-    expect(evidenceByBlockId.get(4)).toEqual({
+    expect(evidenceByRowId.get(buildLexicalBlockEvidenceRowId(firstLocator))).toEqual({
       bodyWitnessStringIds: [11, 13],
       bodyWitnessStartOffsets: [0, 6],
     });
-    expect(evidenceByBlockId.has(5)).toBe(false);
+    expect(evidenceByRowId.has(buildLexicalBlockEvidenceRowId(missingLocator))).toBe(false);
   });
 
   test("publishes and reloads lexical exact tape sidecars", async () => {

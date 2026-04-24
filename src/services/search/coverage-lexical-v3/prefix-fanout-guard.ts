@@ -111,22 +111,23 @@ export function applyPrefixFanoutGuard(
 		};
 	}
 
-	const keptBlockIdsByDocId = new Map<number, Set<number>>();
+	const keptBlockIdsByLiveDocSlot = new Map<number, Set<number>>();
 	const anchoredKeptBlockCount = allocateBlocksForDocs(
 		anchored,
 		anchoredSoftBlockBudget,
-		keptBlockIdsByDocId,
+		keptBlockIdsByLiveDocSlot,
 	);
 	const unanchoredKeptBlockCount = allocateBlocksForDocs(
 		unanchored,
 		Math.max(0, totalBodyBlockGuard - anchoredKeptBlockCount),
-		keptBlockIdsByDocId,
+		keptBlockIdsByLiveDocSlot,
 	);
 
 	const guardedCandidateDocs: V3CandidateDocRecall[] = [];
 	let removedUnanchoredDocCount = 0;
 	for (const candidateRecall of candidateDocs) {
-		const keptBlockIds = keptBlockIdsByDocId.get(candidateRecall.docId) ?? EMPTY_BLOCK_SET;
+		const keptBlockIds =
+			keptBlockIdsByLiveDocSlot.get(candidateRecall.liveDocSlot) ?? EMPTY_BLOCK_SET;
 		const guardedCandidateRecall = buildGuardedCandidateRecall(
 			candidateRecall,
 			keptBlockIds,
@@ -219,7 +220,7 @@ function compareAnchoredDocs(left: GuardedDoc, right: GuardedDoc): number {
 		Number(right.hasHanMetadataGate) - Number(left.hasHanMetadataGate) ||
 		right.protectedBlockCount - left.protectedBlockCount ||
 		right.coreBlockCount - left.coreBlockCount ||
-		left.candidateRecall.docId - right.candidateRecall.docId
+		left.candidateRecall.liveDocSlot - right.candidateRecall.liveDocSlot
 	);
 }
 
@@ -228,26 +229,26 @@ function compareUnanchoredDocs(left: GuardedDoc, right: GuardedDoc): number {
 		right.protectedBlockCount - left.protectedBlockCount ||
 		right.coreBlockCount - left.coreBlockCount ||
 		left.weakPrefixOnlyBlockCount - right.weakPrefixOnlyBlockCount ||
-		left.candidateRecall.docId - right.candidateRecall.docId
+		left.candidateRecall.liveDocSlot - right.candidateRecall.liveDocSlot
 	);
 }
 
 function allocateBlocksForDocs(
 	docs: readonly GuardedDoc[],
 	budget: number,
-	keptBlockIdsByDocId: Map<number, Set<number>>,
+	keptBlockIdsByLiveDocSlot: Map<number, Set<number>>,
 ): number {
 	let remainingBudget = budget;
 	remainingBudget = allocateBlocksForDocPass(
 		docs,
 		remainingBudget,
-		keptBlockIdsByDocId,
+		keptBlockIdsByLiveDocSlot,
 		(doc) => doc.prioritizedCoreBlocks,
 	);
 	remainingBudget = allocateBlocksForDocPass(
 		docs,
 		remainingBudget,
-		keptBlockIdsByDocId,
+		keptBlockIdsByLiveDocSlot,
 		(doc) => doc.prioritizedPrefixOnlyBlocks,
 	);
 	return budget - remainingBudget;
@@ -256,21 +257,23 @@ function allocateBlocksForDocs(
 function allocateBlocksForDocPass(
 	docs: readonly GuardedDoc[],
 	remainingBudget: number,
-	keptBlockIdsByDocId: Map<number, Set<number>>,
+	keptBlockIdsByLiveDocSlot: Map<number, Set<number>>,
 	selectBlocks: (doc: GuardedDoc) => readonly V3CandidateBodyBlockRecall[],
 ): number {
 	for (const doc of docs) {
 		if (remainingBudget <= 0) {
 			break;
 		}
-		const blockIds = keptBlockIdsByDocId.get(doc.candidateRecall.docId) ?? new Set<number>();
+		const blockIds =
+			keptBlockIdsByLiveDocSlot.get(doc.candidateRecall.liveDocSlot) ??
+			new Set<number>();
 		const availableBlocks = selectBlocks(doc).filter((block) => !blockIds.has(block.blockId));
 		const keptBlocks = availableBlocks.slice(0, remainingBudget);
 		if (keptBlocks.length === 0) {
 			continue;
 		}
-		if (!keptBlockIdsByDocId.has(doc.candidateRecall.docId)) {
-			keptBlockIdsByDocId.set(doc.candidateRecall.docId, blockIds);
+		if (!keptBlockIdsByLiveDocSlot.has(doc.candidateRecall.liveDocSlot)) {
+			keptBlockIdsByLiveDocSlot.set(doc.candidateRecall.liveDocSlot, blockIds);
 		}
 		for (const block of keptBlocks) {
 			blockIds.add(block.blockId);

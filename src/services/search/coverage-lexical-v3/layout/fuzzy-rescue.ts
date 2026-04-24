@@ -10,7 +10,7 @@ const textEncoder = new TextEncoder();
 export const FUZZY_RESCUE_MIN_QUERY_LENGTH = 6;
 
 export const EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR: ResidentFuzzyRescueSidecar = {
-	candidateMetadataFamilyIdsByFuzzyLookupKey: new Map(),
+	candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: new Map(),
 	indexedMetadataFamilyCount: 0,
 	fuzzyLookupKeyCount: 0,
 	bytes: 0,
@@ -19,8 +19,12 @@ export const EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR: ResidentFuzzyRescueSidecar = {
 export function buildResidentFuzzyRescueSidecar(params: Readonly<{
 	familyTexts: readonly string[];
 	familyFlagsByFamilyId: Uint8Array;
+	shardLocalFamilySlotByFamilyId: ArrayLike<number>;
 }>): ResidentFuzzyRescueSidecar {
-	const candidateMetadataFamilyIdsByFuzzyLookupKey = new Map<string, number[]>();
+	const candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey = new Map<
+		string,
+		number[]
+	>();
 	let indexedMetadataFamilyCount = 0;
 	for (let familyId = 0; familyId < params.familyTexts.length; familyId += 1) {
 		const familyText = params.familyTexts[familyId] ?? "";
@@ -30,27 +34,34 @@ export function buildResidentFuzzyRescueSidecar(params: Readonly<{
 		}
 		indexedMetadataFamilyCount += 1;
 		for (const fuzzyLookupKey of buildFuzzyLookupKeys(familyText)) {
-			let familyIds =
-				candidateMetadataFamilyIdsByFuzzyLookupKey.get(fuzzyLookupKey);
-			if (familyIds == null) {
-				familyIds = [];
-				candidateMetadataFamilyIdsByFuzzyLookupKey.set(
+			let shardLocalFamilySlots =
+				candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get(
 					fuzzyLookupKey,
-					familyIds,
+				);
+			if (shardLocalFamilySlots == null) {
+				shardLocalFamilySlots = [];
+				candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.set(
+					fuzzyLookupKey,
+					shardLocalFamilySlots,
 				);
 			}
-			familyIds.push(familyId);
+			shardLocalFamilySlots.push(
+				params.shardLocalFamilySlotByFamilyId[familyId] ?? familyId,
+			);
 		}
 	}
 	const normalizedPostings = new Map<string, Uint32Array>();
 	let bytes = 0;
-	for (const [fuzzyLookupKey, familyIds] of candidateMetadataFamilyIdsByFuzzyLookupKey.entries()) {
-		const posting = Uint32Array.from(familyIds);
+	for (const [
+		fuzzyLookupKey,
+		shardLocalFamilySlots,
+	] of candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.entries()) {
+		const posting = Uint32Array.from(shardLocalFamilySlots);
 		normalizedPostings.set(fuzzyLookupKey, posting);
 		bytes += estimateUtf8Bytes(fuzzyLookupKey) + posting.byteLength;
 	}
 	return {
-		candidateMetadataFamilyIdsByFuzzyLookupKey: normalizedPostings,
+		candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: normalizedPostings,
 		indexedMetadataFamilyCount,
 		fuzzyLookupKeyCount: normalizedPostings.size,
 		bytes,

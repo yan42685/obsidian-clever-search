@@ -77,6 +77,7 @@ export type ResidentBodyFamilyPostingField = ResidentAdaptivePostingField;
 export type ResidentBodyBlockArena = Readonly<{
 	blockCount: number;
 	docIdByBlockId: ResidentIntegerArray;
+	liveDocSlotByBlockId: ResidentIntegerArray;
 	blockOrdinalByBlockId: ResidentIntegerArray;
 	exactTapeStartByBlockId: ResidentIntegerArray;
 	exactTapeCountByBlockId: ResidentIntegerArray;
@@ -119,7 +120,10 @@ export type ResidentAdaptivePostingField = Readonly<{
 }>;
 
 export type ResidentFuzzyRescueSidecar = Readonly<{
-	candidateMetadataFamilyIdsByFuzzyLookupKey: ReadonlyMap<string, Uint32Array>;
+	candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: ReadonlyMap<
+		string,
+		Uint32Array
+	>;
 	indexedMetadataFamilyCount: number;
 	fuzzyLookupKeyCount: number;
 	bytes: number;

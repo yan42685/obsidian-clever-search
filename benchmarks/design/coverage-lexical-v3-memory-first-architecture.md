@@ -954,3 +954,53 @@ for the singleton-Han recall path:
 - resident metrics now account for the extra singleton-char route lanes, and
   access helpers expose `collectHanMetadataDocIdsByChar(...)` plus
   `collectHanBodyBlockIdsByChar(...)`
+
+### Runtime Live-Doc Slot Convergence Note
+
+Status: Updated on 2026-04-23
+
+The current runtime implementation now closes the main remaining query-hot-path
+slot convergence gaps:
+
+- resident body blocks now carry `liveDocSlotByBlockId` as first-class block
+  ownership data alongside canonical `docId`
+- V3 query scratch state touched in candidate admission and ranking now
+  converges on resident-local slots:
+  - doc-scoped scratch maps use `liveDocSlot`
+  - fuzzy metadata candidate postings use `shardLocalFamilySlot`
+- this applies to recall candidate buckets, prefix-fanout guard state, hydrated
+  evidence caches, Han rescue metadata/body scoping, and file-search-engine Han
+  refine scratch maps
+- canonical `docId` / `familyId` identity is still retained where it belongs:
+  resident tables, persisted rows, and final result materialization; the change
+  here is specifically that query-local hot loops no longer use those canonical
+  ids as the primary scratch key space in the affected runtime path
+
+Implementation note:
+
+- the runtime is still intentionally not claiming that every resident structure
+  has been renamed away from `docId` / `familyId`
+- this milestone is specifically about hot-path convergence and removal of the
+  remaining runtime slot-translation tax in the affected V3 query path
+- direct `buildResidentBase(...)` construction now also restores the fuzzy
+  rescue sidecar onto the returned resident object so direct in-memory builds
+  behave like the offloaded runtime path for fuzzy admission
+
+### Cold Evidence Stable-Identity Note
+
+Status: Updated on 2026-04-23
+
+The current implementation also now makes the hot/cold boundary explicit for
+the V3 lexical ranking evidence rows:
+
+- resident query-time working sets remain slot-native (`liveDocSlot`,
+  `shardLocalFamilySlot`)
+- persisted cold evidence is not slot-native; `lexicalBodyEvidence`,
+  `lexicalHanDocEvidence`, and `lexicalHanBodyEvidence` now persist and reload
+  by `docRef + generation` and `docRef + generation + blockOrdinal`
+- `FileSnapshotStore` exposes stable evidence locators at this boundary, while
+  `file-search-engine` performs the runtime translation from resident slots and
+  block ids into those stable cold identifiers before hydration
+- this removes the remaining `docId` / `blockId` dependence from the current
+  batch lexical evidence hydrate path without changing the resident slot-native
+  hot-loop contract

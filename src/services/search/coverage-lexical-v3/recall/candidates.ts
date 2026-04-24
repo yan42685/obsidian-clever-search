@@ -10,7 +10,9 @@ import {
 	collectHanMetadataDocIdsByChar,
 	collectHanMetadataDocIds,
 	collectPostingDocIdsForShardLocalFamilySlot,
+	getDocIdForLiveDocSlot,
 	getLiveDocSlot,
+	getLiveDocSlotForBlockId,
 } from "./access";
 import { planHanSurfaceGroupRecallsAfterFamilyLookup } from "./han-surface-groups";
 import type {
@@ -28,7 +30,7 @@ export function recallCandidateDocs(
 	queryAnalysis: V3QueryAnalysis,
 	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
 ): V3CandidateDocRecall[] {
-	const recallByDocId = new Map<number, RecallBucket>();
+	const recallByLiveDocSlot = new Map<number, RecallBucket>();
 	for (const unitMatches of unitFamilyMatches) {
 		for (const match of unitMatches.matches) {
 			for (const docId of collectPostingDocIdsForShardLocalFamilySlot(
@@ -37,7 +39,8 @@ export function recallCandidateDocs(
 				base.metadataContainers.identityPostings.docIds,
 				match.shardLocalFamilySlot,
 			)) {
-				getOrCreateRecallBucket(recallByDocId, docId).identity.add(
+				const liveDocSlot = getLiveDocSlot(base, docId);
+				getOrCreateRecallBucket(recallByLiveDocSlot, docId, liveDocSlot).identity.add(
 					unitMatches.queryUnitIndex,
 				);
 			}
@@ -47,7 +50,8 @@ export function recallCandidateDocs(
 				base.metadataContainers.routePostings.docIds,
 				match.shardLocalFamilySlot,
 			)) {
-				getOrCreateRecallBucket(recallByDocId, docId).route.add(
+				const liveDocSlot = getLiveDocSlot(base, docId);
+				getOrCreateRecallBucket(recallByLiveDocSlot, docId, liveDocSlot).route.add(
 					unitMatches.queryUnitIndex,
 				);
 			}
@@ -57,7 +61,8 @@ export function recallCandidateDocs(
 				base.metadataContainers.headingPostings.docIds,
 				match.shardLocalFamilySlot,
 			)) {
-				getOrCreateRecallBucket(recallByDocId, docId).heading.add(
+				const liveDocSlot = getLiveDocSlot(base, docId);
+				getOrCreateRecallBucket(recallByLiveDocSlot, docId, liveDocSlot).heading.add(
 					unitMatches.queryUnitIndex,
 				);
 			}
@@ -70,11 +75,16 @@ export function recallCandidateDocs(
 				base,
 				match.shardLocalFamilySlot,
 			)) {
-				const docId = base.bodyBlocks.docIdByBlockId[blockId] ?? -1;
-				if (docId < 0) {
+				const liveDocSlot = getLiveDocSlotForBlockId(base, blockId);
+				if (liveDocSlot < 0) {
 					continue;
 				}
-				const recallBucket = getOrCreateRecallBucket(recallByDocId, docId);
+				const docId = getDocIdForLiveDocSlot(base, liveDocSlot);
+				const recallBucket = getOrCreateRecallBucket(
+					recallByLiveDocSlot,
+					docId,
+					liveDocSlot,
+				);
 				const bodyBlock = getOrCreateRecallBodyBlockBucket(recallBucket, blockId);
 				if (match.matchKind === "exact") {
 					bodyBlock.hasExactSupport = true;
@@ -90,17 +100,17 @@ export function recallCandidateDocs(
 		queryAnalysis,
 		unitFamilyMatches,
 	);
-	routeHanRescueGroupsToRecallBuckets(base, resolvedHanSurfaceGroups, recallByDocId);
-	routeSingletonHanToRecallBuckets(base, queryAnalysis, recallByDocId);
+	routeHanRescueGroupsToRecallBuckets(base, resolvedHanSurfaceGroups, recallByLiveDocSlot);
+	routeSingletonHanToRecallBuckets(base, queryAnalysis, recallByLiveDocSlot);
 	routeGlobalResidualSingletonRescueToRecallBuckets(
 		base,
 		queryAnalysis,
 		unitFamilyMatches,
-		recallByDocId,
+		recallByLiveDocSlot,
 	);
 
-	return [...recallByDocId.entries()]
-		.map<V3CandidateDocRecall>(([docId, bucket]) => {
+	return [...recallByLiveDocSlot.values()]
+		.map<V3CandidateDocRecall>((bucket) => {
 			const shortlistedBodyBlocks = [...bucket.bodyBlocks.values()]
 				.map<V3CandidateBodyBlockRecall>((bodyBlock) => ({
 					blockId: bodyBlock.blockId,
@@ -112,8 +122,8 @@ export function recallCandidateDocs(
 				}))
 				.sort((left, right) => left.blockId - right.blockId);
 			return {
-				docId,
-				liveDocSlot: getLiveDocSlot(base, docId),
+				docId: bucket.docId,
+				liveDocSlot: bucket.liveDocSlot,
 				matchedIdentityUnitIndices: [...bucket.identity].sort((left, right) => left - right),
 				matchedRouteUnitIndices: [...bucket.route].sort((left, right) => left - right),
 				matchedHeadingUnitIndices: [...bucket.heading].sort((left, right) => left - right),
@@ -140,14 +150,16 @@ export function recallCandidateDocs(
 								stats,
 							}))
 							.sort((left, right) => left.blockId - right.blockId),
-					}))
-					.sort((left, right) => left.surfaceGroupIndex - right.surfaceGroupIndex),
+				}))
+				.sort((left, right) => left.surfaceGroupIndex - right.surfaceGroupIndex),
 			};
 		})
-		.sort((left, right) => left.docId - right.docId);
+		.sort((left, right) => left.liveDocSlot - right.liveDocSlot);
 }
 
 type RecallBucket = {
+	docId: number;
+	liveDocSlot: number;
 	identity: Set<number>;
 	route: Set<number>;
 	heading: Set<number>;
@@ -187,14 +199,17 @@ type GlobalSingletonRecallScope = {
 };
 
 function getOrCreateRecallBucket(
-	recallByDocId: Map<number, RecallBucket>,
+	recallByLiveDocSlot: Map<number, RecallBucket>,
 	docId: number,
+	liveDocSlot: number,
 ): RecallBucket {
-	const existing = recallByDocId.get(docId);
+	const existing = recallByLiveDocSlot.get(liveDocSlot);
 	if (existing != null) {
 		return existing;
 	}
 	const created: RecallBucket = {
+		docId,
+		liveDocSlot,
 		identity: new Set<number>(),
 		route: new Set<number>(),
 		heading: new Set<number>(),
@@ -205,7 +220,7 @@ function getOrCreateRecallBucket(
 		hanBodyBlockGateStatsByBlockId: new Map<number, V3HanRouteGateStats>(),
 		hanSurfaceGroups: new Map<number, RecallHanSurfaceGroupBucket>(),
 	};
-	recallByDocId.set(docId, created);
+	recallByLiveDocSlot.set(liveDocSlot, created);
 	return created;
 }
 
@@ -277,7 +292,7 @@ function addMatchedGroupBigramPosition(
 function routeHanRescueGroupsToRecallBuckets(
 	base: ResidentBase,
 	resolvedHanSurfaceGroups: readonly V3ResolvedHanSurfaceGroup[],
-	recallByDocId: Map<number, RecallBucket>,
+	recallByLiveDocSlot: Map<number, RecallBucket>,
 ): void {
 	const rescueGroups = resolvedHanSurfaceGroups.filter(
 		(group) => group.rescueBigrams.length > 0,
@@ -331,7 +346,8 @@ function routeHanRescueGroupsToRecallBuckets(
 		}
 	}
 	for (const [docId, matchedPositionsByGroup] of matchedMetadataPositionsByDocAndGroup.entries()) {
-		const bucket = getOrCreateRecallBucket(recallByDocId, docId);
+		const liveDocSlot = getLiveDocSlot(base, docId);
+		const bucket = getOrCreateRecallBucket(recallByLiveDocSlot, docId, liveDocSlot);
 		for (const [surfaceGroupIndex, matchedPositions] of matchedPositionsByGroup.entries()) {
 			const totalBigramCount = totalBigramCountByGroupIndex.get(surfaceGroupIndex) ?? 0;
 			if (totalBigramCount <= 0) {
@@ -347,11 +363,12 @@ function routeHanRescueGroupsToRecallBuckets(
 		}
 	}
 	for (const [blockId, matchedPositionsByGroup] of matchedBodyPositionsByBlockAndGroup.entries()) {
-		const docId = base.bodyBlocks.docIdByBlockId[blockId] ?? -1;
-		if (docId < 0) {
+		const liveDocSlot = getLiveDocSlotForBlockId(base, blockId);
+		if (liveDocSlot < 0) {
 			continue;
 		}
-		const bucket = getOrCreateRecallBucket(recallByDocId, docId);
+		const docId = getDocIdForLiveDocSlot(base, liveDocSlot);
+		const bucket = getOrCreateRecallBucket(recallByLiveDocSlot, docId, liveDocSlot);
 		const bodyBlock = getOrCreateRecallBodyBlockBucket(bucket, blockId);
 		for (const [surfaceGroupIndex, matchedPositions] of matchedPositionsByGroup.entries()) {
 			const totalBigramCount = totalBigramCountByGroupIndex.get(surfaceGroupIndex) ?? 0;
@@ -382,7 +399,7 @@ function routeHanRescueGroupsToRecallBuckets(
 function routeSingletonHanToRecallBuckets(
 	base: ResidentBase,
 	queryAnalysis: V3QueryAnalysis,
-	recallByDocId: Map<number, RecallBucket>,
+	recallByLiveDocSlot: Map<number, RecallBucket>,
 ): void {
 	if (
 		!queryAnalysis.querySingletonHanRecallEligible ||
@@ -391,15 +408,25 @@ function routeSingletonHanToRecallBuckets(
 		return;
 	}
 	const charId = encodeHanCharId(queryAnalysis.querySingletonHanChar);
-	const existingDocIdsInOrder = [...recallByDocId.keys()];
-	const existingBlockIdsInOrder = collectExistingBodyBlockIdsInOrder(recallByDocId);
-	const metadataSingletonDocIds = collectHanMetadataDocIdsByChar(base, charId);
+	const existingLiveDocSlotsInOrder = [...recallByLiveDocSlot.keys()];
+	const existingBlockIdsInOrder = collectExistingBodyBlockIdsInOrder(recallByLiveDocSlot);
+	const metadataSingletonLiveDocSlots = [
+		...new Set(
+			collectHanMetadataDocIdsByChar(base, charId).map((docId) =>
+				getLiveDocSlot(base, docId),
+			),
+		),
+	];
 	const bodySingletonBlockIds = collectHanBodyBlockIdsByChar(base, charId);
-	const metadataSingletonDocIdSet = new Set<number>(metadataSingletonDocIds);
+	const metadataSingletonLiveDocSlotSet = new Set<number>(metadataSingletonLiveDocSlots);
 	const bodySingletonBlockIdSet = new Set<number>(bodySingletonBlockIds);
-	const finalMetadataDocIds = [
-		...existingDocIdsInOrder.filter((docId) => metadataSingletonDocIdSet.has(docId)),
-		...metadataSingletonDocIds.filter((docId) => !recallByDocId.has(docId)),
+	const finalMetadataLiveDocSlots = [
+		...existingLiveDocSlotsInOrder.filter((liveDocSlot) =>
+			metadataSingletonLiveDocSlotSet.has(liveDocSlot),
+		),
+		...metadataSingletonLiveDocSlots.filter(
+			(liveDocSlot) => !recallByLiveDocSlot.has(liveDocSlot),
+		),
 	].slice(0, 100);
 	const finalBodyBlockIds = [
 		...existingBlockIdsInOrder.filter((blockId) => bodySingletonBlockIdSet.has(blockId)),
@@ -407,15 +434,23 @@ function routeSingletonHanToRecallBuckets(
 			.filter((blockId) => !existingBlockIdsInOrder.includes(blockId))
 			.sort((left, right) => left - right),
 	].slice(0, 100);
-	for (const docId of finalMetadataDocIds) {
-		getOrCreateRecallBucket(recallByDocId, docId).hasQuerySingletonHanMetadataSupport = true;
+	for (const liveDocSlot of finalMetadataLiveDocSlots) {
+		getOrCreateRecallBucket(
+			recallByLiveDocSlot,
+			getDocIdForLiveDocSlot(base, liveDocSlot),
+			liveDocSlot,
+		).hasQuerySingletonHanMetadataSupport = true;
 	}
 	for (const blockId of finalBodyBlockIds) {
-		const docId = base.bodyBlocks.docIdByBlockId[blockId] ?? -1;
-		if (docId < 0) {
+		const liveDocSlot = getLiveDocSlotForBlockId(base, blockId);
+		if (liveDocSlot < 0) {
 			continue;
 		}
-		const recallBucket = getOrCreateRecallBucket(recallByDocId, docId);
+		const recallBucket = getOrCreateRecallBucket(
+			recallByLiveDocSlot,
+			getDocIdForLiveDocSlot(base, liveDocSlot),
+			liveDocSlot,
+		);
 		getOrCreateRecallBodyBlockBucket(recallBucket, blockId).hasSingletonHanSupport = true;
 	}
 }
@@ -424,18 +459,18 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 	base: ResidentBase,
 	queryAnalysis: V3QueryAnalysis,
 	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
-	recallByDocId: Map<number, RecallBucket>,
+	recallByLiveDocSlot: Map<number, RecallBucket>,
 ): void {
-	if (recallByDocId.size === 0) {
+	if (recallByLiveDocSlot.size === 0) {
 		return;
 	}
 	const queryBigramTexts = collectAllQueryHanBigramTexts(queryAnalysis);
 	if (queryBigramTexts.length === 0) {
 		return;
 	}
-	const singletonScopesByDocId = new Map<number, GlobalSingletonRecallScope>();
-	for (const docId of recallByDocId.keys()) {
-		singletonScopesByDocId.set(docId, createGlobalSingletonRecallScope());
+	const singletonScopesByLiveDocSlot = new Map<number, GlobalSingletonRecallScope>();
+	for (const liveDocSlot of recallByLiveDocSlot.keys()) {
+		singletonScopesByLiveDocSlot.set(liveDocSlot, createGlobalSingletonRecallScope());
 	}
 	for (const unitMatches of unitFamilyMatches) {
 		if (unitMatches.matches.length === 0) {
@@ -448,7 +483,7 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 				base.metadataContainers.identityPostings.docIds,
 				match.shardLocalFamilySlot,
 			)) {
-				const scope = singletonScopesByDocId.get(docId);
+				const scope = singletonScopesByLiveDocSlot.get(getLiveDocSlot(base, docId));
 				if (scope == null) {
 					continue;
 				}
@@ -461,7 +496,7 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 				base.metadataContainers.routePostings.docIds,
 				match.shardLocalFamilySlot,
 			)) {
-				const scope = singletonScopesByDocId.get(docId);
+				const scope = singletonScopesByLiveDocSlot.get(getLiveDocSlot(base, docId));
 				if (scope == null) {
 					continue;
 				}
@@ -472,8 +507,9 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 				base,
 				match.shardLocalFamilySlot,
 			)) {
-				const docId = base.bodyBlocks.docIdByBlockId[blockId] ?? -1;
-				const scope = singletonScopesByDocId.get(docId);
+				const scope = singletonScopesByLiveDocSlot.get(
+					getLiveDocSlotForBlockId(base, blockId),
+				);
 				if (scope == null) {
 					continue;
 				}
@@ -485,7 +521,7 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 	for (const bigramText of queryBigramTexts) {
 		const bigramId = encodeHanBigramId(bigramText);
 		for (const docId of collectHanMetadataDocIds(base, bigramId)) {
-			const scope = singletonScopesByDocId.get(docId);
+			const scope = singletonScopesByLiveDocSlot.get(getLiveDocSlot(base, docId));
 			if (scope == null) {
 				continue;
 			}
@@ -493,8 +529,9 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 			scope.hasMetadataBigramAnchor = true;
 		}
 		for (const blockId of collectHanBodyBlockIds(base, bigramId)) {
-			const docId = base.bodyBlocks.docIdByBlockId[blockId] ?? -1;
-			const scope = singletonScopesByDocId.get(docId);
+			const scope = singletonScopesByLiveDocSlot.get(
+				getLiveDocSlotForBlockId(base, blockId),
+			);
 			if (scope == null) {
 				continue;
 			}
@@ -504,9 +541,9 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 	}
 	const singletonCharRouteCache = new Map<
 		number,
-		{ metadataDocIds: Set<number>; bodyBlockIds: Set<number> }
+		{ metadataLiveDocSlots: Set<number>; bodyBlockIds: Set<number> }
 	>();
-	for (const [docId, scope] of singletonScopesByDocId.entries()) {
+	for (const [liveDocSlot, scope] of singletonScopesByLiveDocSlot.entries()) {
 		if (
 			scope.matchedFamilyUnitIndices.size === 0 &&
 			scope.matchedHanBigramTexts.size === 0
@@ -542,17 +579,21 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 		let singletonCharRoute = singletonCharRouteCache.get(charId);
 		if (singletonCharRoute == null) {
 			singletonCharRoute = {
-				metadataDocIds: new Set(collectHanMetadataDocIdsByChar(base, charId)),
+				metadataLiveDocSlots: new Set(
+					collectHanMetadataDocIdsByChar(base, charId).map((docId) =>
+						getLiveDocSlot(base, docId),
+					),
+				),
 				bodyBlockIds: new Set(collectHanBodyBlockIdsByChar(base, charId)),
 			};
 			singletonCharRouteCache.set(charId, singletonCharRoute);
 		}
-		const recallBucket = recallByDocId.get(docId);
+		const recallBucket = recallByLiveDocSlot.get(liveDocSlot);
 		if (recallBucket == null) {
 			continue;
 		}
 		if (
-			singletonCharRoute.metadataDocIds.has(docId) &&
+			singletonCharRoute.metadataLiveDocSlots.has(liveDocSlot) &&
 			(scope.hasMetadataFamilyAnchor || scope.hasMetadataBigramAnchor)
 		) {
 			recallBucket.hasScopedSingletonHanMetadataSupport = true;
@@ -566,7 +607,7 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 		}
 		const scopedBlockIds = collectScopedSingletonAnchorNeighborhoodBlockIds(
 			base,
-			docId,
+			liveDocSlot,
 			anchorBlockIds,
 		);
 		const matchedSingletonBodyBlockIds = scopedBlockIds.filter((blockId) =>
@@ -583,10 +624,10 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 }
 
 function collectExistingBodyBlockIdsInOrder(
-	recallByDocId: ReadonlyMap<number, RecallBucket>,
+	recallByLiveDocSlot: ReadonlyMap<number, RecallBucket>,
 ): number[] {
 	const out: number[] = [];
-	for (const bucket of recallByDocId.values()) {
+	for (const bucket of recallByLiveDocSlot.values()) {
 		for (const blockId of bucket.bodyBlocks.keys()) {
 			out.push(blockId);
 		}
@@ -619,13 +660,13 @@ function collectAllQueryHanBigramTexts(
 
 function collectScopedSingletonAnchorNeighborhoodBlockIds(
 	base: ResidentBase,
-	docId: number,
+	liveDocSlot: number,
 	anchorBlockIds: ReadonlySet<number>,
 ): number[] {
 	const out = new Set<number>();
 	for (const anchorBlockId of anchorBlockIds) {
 		for (const candidateBlockId of [anchorBlockId - 1, anchorBlockId, anchorBlockId + 1]) {
-			if ((base.bodyBlocks.docIdByBlockId[candidateBlockId] ?? -1) !== docId) {
+			if (getLiveDocSlotForBlockId(base, candidateBlockId) !== liveDocSlot) {
 				continue;
 			}
 			out.add(candidateBlockId);

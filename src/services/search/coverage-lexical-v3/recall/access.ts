@@ -78,6 +78,13 @@ export function getDocIdForLiveDocSlot(
 	return base.docTable.docIdByLiveDocSlot[liveDocSlot] ?? liveDocSlot;
 }
 
+export function getLiveDocSlotForBlockId(
+	base: ResidentBase,
+	blockId: number,
+): number {
+	return base.bodyBlocks.liveDocSlotByBlockId[blockId] ?? -1;
+}
+
 export function getDocRef(base: ResidentBase, docId: number): number | null {
 	const docRef = base.docTable.docRefsByDocId[docId];
 	return Number.isFinite(docRef) && docRef > 0 ? docRef : null;

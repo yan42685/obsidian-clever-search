@@ -22,7 +22,13 @@ import type {
 	V3CandidateBodyBlockRecall,
 	V3CandidateDocRecall,
 } from "src/services/search/coverage-lexical-v3/recall";
-import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
+import {
+	buildLexicalBlockEvidenceRowId,
+	buildLexicalDocEvidenceRowId,
+	FileSnapshotStore,
+	type LexicalBlockEvidenceLocator,
+	type LexicalDocEvidenceLocator,
+} from "src/services/search/shared/file-snapshot-store";
 import { container } from "tsyringe";
 
 const { Tokenizer } = jest.requireMock("src/services/search/tokenizer") as {
@@ -34,6 +40,7 @@ function createDocument(
 		Pick<IndexedDocument, "path" | "basename" | "folder">,
 ): IndexedDocument {
 	return {
+		docRef: overrides.docRef,
 		path: overrides.path,
 		basename: overrides.basename,
 		folder: overrides.folder,
@@ -41,7 +48,7 @@ function createDocument(
 		aliases: overrides.aliases,
 		tags: overrides.tags,
 		headings: overrides.headings,
-			generation: overrides.generation ?? 1,
+		generation: overrides.generation ?? 1,
 		size: overrides.size,
 	};
 }
@@ -71,6 +78,7 @@ function createPackingProfile(
 ): EvidencePackingProfile {
 	return {
 		docId: overrides.docId,
+		liveDocSlot: overrides.liveDocSlot ?? overrides.docId,
 		path: overrides.path,
 		stableKey: overrides.stableKey ?? overrides.path,
 		surfaceCoverageShapeKey: overrides.surfaceCoverageShapeKey ?? "h",
@@ -224,10 +232,14 @@ function createMapFromEntries<K, V>(
 }
 
 function createPersistedBodyEvidenceMap(
-	blockIds: readonly number[],
+	locators: readonly LexicalBlockEvidenceLocator[],
 	persistedBodyEvidence: ReadonlyMap<
-		number,
+		string,
 		{
+			id: string;
+			docRef: number;
+			generation: number;
+			blockOrdinal: number;
 			exactFamilyIds: readonly number[];
 			exactTokenPositions: readonly number[];
 			familySupportFamilyIds: readonly number[];
@@ -236,13 +248,15 @@ function createPersistedBodyEvidenceMap(
 	>,
 ) {
 	return createMapFromEntries(
-		blockIds.map((blockId) => {
-			const row = persistedBodyEvidence.get(blockId);
+		locators.map((locator) => {
+			const row = persistedBodyEvidence.get(
+				buildLexicalBlockEvidenceRowId(locator),
+			);
 			if (row == null) {
 				return null;
 			}
 			return [
-				blockId,
+				row.id,
 				{
 					exactFamilyIds: row.exactFamilyIds,
 					exactTokenPositions: row.exactTokenPositions,
@@ -252,6 +266,78 @@ function createPersistedBodyEvidenceMap(
 							supportMask: row.familySupportMaskByEntry[index] ?? 0,
 						}),
 					),
+				},
+			] as const;
+		}),
+	);
+}
+
+function createPersistedHanDocEvidenceMap(
+	locators: readonly LexicalDocEvidenceLocator[],
+	persistedHanDocEvidence: ReadonlyMap<
+		string,
+		{
+			id: string;
+			docRef: number;
+			generation: number;
+			identityWitnessStringIds: readonly number[];
+			identityWitnessSourceMaskByDocEntry: readonly number[];
+			routeWitnessStringIds: readonly number[];
+			routeWitnessSourceMaskByDocEntry: readonly number[];
+			headingWitnessStringIds: readonly number[];
+		}
+	>,
+) {
+	return createMapFromEntries(
+		locators.map((locator) => {
+			const row = persistedHanDocEvidence.get(
+				buildLexicalDocEvidenceRowId(locator),
+			);
+			if (row == null) {
+				return null;
+			}
+			return [
+				row.id,
+				{
+					identityWitnessStringIds: row.identityWitnessStringIds,
+					identityWitnessSourceMasks:
+						row.identityWitnessSourceMaskByDocEntry,
+					routeWitnessStringIds: row.routeWitnessStringIds,
+					routeWitnessSourceMasks: row.routeWitnessSourceMaskByDocEntry,
+					headingWitnessStringIds: row.headingWitnessStringIds,
+				},
+			] as const;
+		}),
+	);
+}
+
+function createPersistedHanBodyEvidenceMap(
+	locators: readonly LexicalBlockEvidenceLocator[],
+	persistedHanBodyEvidence: ReadonlyMap<
+		string,
+		{
+			id: string;
+			docRef: number;
+			generation: number;
+			blockOrdinal: number;
+			bodyWitnessStringIds: readonly number[];
+			bodyWitnessStartOffsets: readonly number[];
+		}
+	>,
+) {
+	return createMapFromEntries(
+		locators.map((locator) => {
+			const row = persistedHanBodyEvidence.get(
+				buildLexicalBlockEvidenceRowId(locator),
+			);
+			if (row == null) {
+				return null;
+			}
+			return [
+				row.id,
+				{
+					bodyWitnessStringIds: row.bodyWitnessStringIds,
+					bodyWitnessStartOffsets: row.bodyWitnessStartOffsets,
 				},
 			] as const;
 		}),
@@ -514,6 +600,7 @@ function createResidentBase(): ResidentBase {
 		bodyBlocks: {
 			blockCount: 3,
 			docIdByBlockId: new Uint32Array([0, 0, 1]),
+			liveDocSlotByBlockId: new Uint32Array([0, 0, 1]),
 			blockOrdinalByBlockId: new Uint32Array([0, 1, 0]),
 			exactTapeStartByBlockId: new Uint32Array([0, 0, 0]),
 			exactTapeCountByBlockId: new Uint32Array([0, 0, 0]),
@@ -570,12 +657,14 @@ function createResidentBaseForBlockCounts(
 	const bodyBlockStartByDocId: number[] = [];
 	const bodyBlockCountByDocId: number[] = [];
 	const docIdByBlockId: number[] = [];
+	const liveDocSlotByBlockId: number[] = [];
 	const blockOrdinalByBlockId: number[] = [];
 	for (let docId = 0; docId < blockCountsByDoc.length; docId += 1) {
 		bodyBlockStartByDocId.push(blockStart);
 		bodyBlockCountByDocId.push(blockCountsByDoc[docId]);
 		for (let ordinal = 0; ordinal < blockCountsByDoc[docId]; ordinal += 1) {
 			docIdByBlockId.push(docId);
+			liveDocSlotByBlockId.push(docId);
 			blockOrdinalByBlockId.push(ordinal);
 		}
 		blockStart += blockCountsByDoc[docId];
@@ -625,6 +714,7 @@ function createResidentBaseForBlockCounts(
 			...base.bodyBlocks,
 			blockCount: blockStart,
 			docIdByBlockId: new Uint32Array(docIdByBlockId),
+			liveDocSlotByBlockId: new Uint32Array(liveDocSlotByBlockId),
 			blockOrdinalByBlockId: new Uint32Array(blockOrdinalByBlockId),
 			exactTapeStartByBlockId: new Uint32Array(Array.from({ length: blockStart }, () => 0)),
 			exactTapeCountByBlockId: new Uint32Array(Array.from({ length: blockStart }, () => 0)),
@@ -735,7 +825,7 @@ async function runHanRefine(
 	return await (engine as unknown as {
 		refineHanSurfaceCompletion: (
 			searchResult: CoverageLexicalV3SearchResult,
-			hydratedEvidenceByDocId: ReadonlyMap<number, unknown>,
+			hydratedEvidenceByLiveDocSlot: ReadonlyMap<number, unknown>,
 		) => Promise<readonly EvidencePackingProfile[]>;
 	}).refineHanSurfaceCompletion(
 		result,
@@ -1077,7 +1167,10 @@ describe("coverage lexical v3 file search engine", () => {
 	test("offloads fuzzy rescue sidecar and reloads matching fuzzy lookup keys for fuzzy search", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let persistedFuzzyRescue: {
-			candidateMetadataFamilyIdsByFuzzyLookupKey: ReadonlyMap<string, Uint32Array>;
+			candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: ReadonlyMap<
+				string,
+				Uint32Array
+			>;
 			fuzzyLookupKeyCount: number;
 		} | null = null;
 		const snapshotStore = {
@@ -1093,17 +1186,17 @@ describe("coverage lexical v3 file search engine", () => {
 				}
 				return {
 					...persistedFuzzyRescue,
-					candidateMetadataFamilyIdsByFuzzyLookupKey: new Map(
+					candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: new Map(
 						fuzzyLookupKeys.flatMap((fuzzyLookupKey) => {
 							const familyIds =
-								persistedFuzzyRescue.candidateMetadataFamilyIdsByFuzzyLookupKey.get(
+								persistedFuzzyRescue.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get(
 									fuzzyLookupKey,
 								);
 							return familyIds == null ? [] : [[fuzzyLookupKey, familyIds] as const];
 						}),
 					),
 					fuzzyLookupKeyCount: fuzzyLookupKeys.filter((fuzzyLookupKey) =>
-						persistedFuzzyRescue.candidateMetadataFamilyIdsByFuzzyLookupKey.has(
+						persistedFuzzyRescue.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.has(
 							fuzzyLookupKey,
 						),
 					).length,
@@ -1338,8 +1431,12 @@ describe("coverage lexical v3 file search engine", () => {
 	test("does not read whole exact/body/han sidecars for non-Han ranking queries", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let persistedBodyEvidence = new Map<
-			number,
+			string,
 			{
+				id: string;
+				docRef: number;
+				generation: number;
+				blockOrdinal: number;
 				exactFamilyIds: readonly number[];
 				exactTokenPositions: readonly number[];
 				familySupportFamilyIds: readonly number[];
@@ -1363,7 +1460,10 @@ describe("coverage lexical v3 file search engine", () => {
 			publishLexicalBodyEvidence: jest.fn(
 				async (
 					rows: ReadonlyArray<{
-						blockId: number;
+						id: string;
+						docRef: number;
+						generation: number;
+						blockOrdinal: number;
 						exactFamilyIds: readonly number[];
 						exactTokenPositions: readonly number[];
 						familySupportFamilyIds: readonly number[];
@@ -1371,13 +1471,13 @@ describe("coverage lexical v3 file search engine", () => {
 					}>,
 				) => {
 					persistedBodyEvidence = new Map(
-						rows.map((row) => [row.blockId, row]),
+						rows.map((row) => [row.id, row]),
 					);
 				},
 			),
 			readLexicalBodyEvidenceForBlocks: jest.fn(
-				async (blockIds: readonly number[]) =>
-					createPersistedBodyEvidenceMap(blockIds, persistedBodyEvidence),
+				async (locators: readonly LexicalBlockEvidenceLocator[]) =>
+					createPersistedBodyEvidenceMap(locators, persistedBodyEvidence),
 			),
 			publishLexicalHanWitnesses: jest.fn(async () => undefined),
 			readLexicalHanWitnesses: jest.fn(
@@ -1392,6 +1492,7 @@ describe("coverage lexical v3 file search engine", () => {
 
 		await engine.reIndexAll([
 			createDocument({
+				docRef: 101,
 				path: "infra/projected-token.md",
 				basename: "runtime access",
 				folder: "infra/kubernetes",
@@ -1415,8 +1516,12 @@ describe("coverage lexical v3 file search engine", () => {
 	test("hydrates non-Han body ranking evidence from shortlisted block rows", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let persistedBodyEvidence = new Map<
-			number,
+			string,
 			{
+				id: string;
+				docRef: number;
+				generation: number;
+				blockOrdinal: number;
 				exactFamilyIds: readonly number[];
 				exactTokenPositions: readonly number[];
 				familySupportFamilyIds: readonly number[];
@@ -1434,7 +1539,10 @@ describe("coverage lexical v3 file search engine", () => {
 			publishLexicalBodyEvidence: jest.fn(
 				async (
 					rows: ReadonlyArray<{
-						blockId: number;
+						id: string;
+						docRef: number;
+						generation: number;
+						blockOrdinal: number;
 						exactFamilyIds: readonly number[];
 						exactTokenPositions: readonly number[];
 						familySupportFamilyIds: readonly number[];
@@ -1442,13 +1550,13 @@ describe("coverage lexical v3 file search engine", () => {
 					}>,
 				) => {
 					persistedBodyEvidence = new Map(
-						rows.map((row) => [row.blockId, row]),
+						rows.map((row) => [row.id, row]),
 					);
 				},
 			),
 			readLexicalBodyEvidenceForBlocks: jest.fn(
-				async (blockIds: readonly number[]) =>
-					createPersistedBodyEvidenceMap(blockIds, persistedBodyEvidence),
+				async (locators: readonly LexicalBlockEvidenceLocator[]) =>
+					createPersistedBodyEvidenceMap(locators, persistedBodyEvidence),
 			),
 			publishLexicalExactTapes: jest.fn(async () => undefined),
 			readLexicalExactTapes: jest.fn(async () => {
@@ -1471,6 +1579,7 @@ describe("coverage lexical v3 file search engine", () => {
 
 		await engine.reIndexAll([
 			createDocument({
+				docRef: 102,
 				path: "infra/projected-token.md",
 				basename: "runtime access",
 				folder: "infra/kubernetes",
@@ -1496,8 +1605,11 @@ describe("coverage lexical v3 file search engine", () => {
 	test("hydrates Han ranking evidence from doc/block rows without loading full Han sidecar", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let persistedHanDocEvidence = new Map<
-			number,
+			string,
 			{
+				id: string;
+				docRef: number;
+				generation: number;
 				identityWitnessStringIds: readonly number[];
 				identityWitnessSourceMaskByDocEntry: readonly number[];
 				routeWitnessStringIds: readonly number[];
@@ -1506,8 +1618,12 @@ describe("coverage lexical v3 file search engine", () => {
 			}
 		>();
 		let persistedHanBodyEvidence = new Map<
-			number,
+			string,
 			{
+				id: string;
+				docRef: number;
+				generation: number;
+				blockOrdinal: number;
 				bodyWitnessStringIds: readonly number[];
 				bodyWitnessStartOffsets: readonly number[];
 			}
@@ -1525,7 +1641,9 @@ describe("coverage lexical v3 file search engine", () => {
 			publishLexicalHanDocEvidence: jest.fn(
 				async (
 					rows: ReadonlyArray<{
-						docId: number;
+						id: string;
+						docRef: number;
+						generation: number;
 						identityWitnessStringIds: readonly number[];
 						identityWitnessSourceMaskByDocEntry: readonly number[];
 						routeWitnessStringIds: readonly number[];
@@ -1534,88 +1652,38 @@ describe("coverage lexical v3 file search engine", () => {
 					}>,
 				) => {
 					persistedHanDocEvidence = new Map(
-						rows.map((row) => [row.docId, row]),
+						rows.map((row) => [row.id, row]),
 					);
 				},
 			),
 			readLexicalHanDocEvidenceForDocs: jest.fn(
-				async (docIds: readonly number[]) =>
-					new Map(
-						docIds
-							.map((docId) => {
-								const row = persistedHanDocEvidence.get(docId);
-								if (row == null) {
-									return null;
-								}
-								return [
-									docId,
-									{
-										identityWitnessStringIds:
-											row.identityWitnessStringIds,
-										identityWitnessSourceMasks:
-											row.identityWitnessSourceMaskByDocEntry,
-										routeWitnessStringIds: row.routeWitnessStringIds,
-										routeWitnessSourceMasks:
-											row.routeWitnessSourceMaskByDocEntry,
-										headingWitnessStringIds:
-											row.headingWitnessStringIds,
-									},
-								] as const;
-							})
-							.filter(
-								(entry): entry is readonly [
-									number,
-									{
-										identityWitnessStringIds: readonly number[];
-										identityWitnessSourceMasks: readonly number[];
-										routeWitnessStringIds: readonly number[];
-										routeWitnessSourceMasks: readonly number[];
-										headingWitnessStringIds: readonly number[];
-									},
-								] => entry != null,
-							),
+				async (locators: readonly LexicalDocEvidenceLocator[]) =>
+					createPersistedHanDocEvidenceMap(
+						locators,
+						persistedHanDocEvidence,
 					),
 			),
 			publishLexicalHanBodyEvidence: jest.fn(
 				async (
 					rows: ReadonlyArray<{
-						blockId: number;
+						id: string;
+						docRef: number;
+						generation: number;
+						blockOrdinal: number;
 						bodyWitnessStringIds: readonly number[];
 						bodyWitnessStartOffsets: readonly number[];
 					}>,
 				) => {
 					persistedHanBodyEvidence = new Map(
-						rows.map((row) => [row.blockId, row]),
+						rows.map((row) => [row.id, row]),
 					);
 				},
 			),
 			readLexicalHanBodyEvidenceForBlocks: jest.fn(
-				async (blockIds: readonly number[]) =>
-					new Map(
-						blockIds
-							.map((blockId) => {
-								const row = persistedHanBodyEvidence.get(blockId);
-								if (row == null) {
-									return null;
-								}
-								return [
-									blockId,
-									{
-										bodyWitnessStringIds: row.bodyWitnessStringIds,
-										bodyWitnessStartOffsets:
-											row.bodyWitnessStartOffsets,
-									},
-								] as const;
-							})
-							.filter(
-								(entry): entry is readonly [
-									number,
-									{
-										bodyWitnessStringIds: readonly number[];
-										bodyWitnessStartOffsets: readonly number[];
-									},
-								] => entry != null,
-							),
+				async (locators: readonly LexicalBlockEvidenceLocator[]) =>
+					createPersistedHanBodyEvidenceMap(
+						locators,
+						persistedHanBodyEvidence,
 					),
 			),
 			publishLexicalExactTapes: jest.fn(async () => undefined),
@@ -1637,6 +1705,7 @@ describe("coverage lexical v3 file search engine", () => {
 
 		await engine.reIndexAll([
 			createDocument({
+				docRef: 201,
 				path: "zh/cache-recovery.md",
                 basename: "\u7f13\u5b58\u6062\u590d\u8bf4\u660e",
 				folder: "zh",
@@ -1668,12 +1737,12 @@ describe("coverage lexical v3 file search engine", () => {
 				hydrateRankingEvidenceForCandidates: (
 					preparedSearch: unknown,
 				) => Promise<{
-					hydratedEvidenceByDocId: ReadonlyMap<number, unknown>;
+					hydratedEvidenceByLiveDocSlot: ReadonlyMap<number, unknown>;
 				}>;
 			}
 		).hydrateRankingEvidenceForCandidates(preparedSearch);
 
-		expect(hydrationResult.hydratedEvidenceByDocId.size).toBeGreaterThan(0);
+		expect(hydrationResult.hydratedEvidenceByLiveDocSlot.size).toBeGreaterThan(0);
 		expect(snapshotStore.publishLexicalHanDocEvidence).toHaveBeenCalledTimes(1);
 		expect(snapshotStore.readLexicalHanDocEvidenceForDocs).toHaveBeenCalledTimes(1);
 		expect(snapshotStore.publishLexicalHanBodyEvidence).toHaveBeenCalledTimes(1);

@@ -133,6 +133,7 @@ export type SingletonHanCompletion = Readonly<{
 
 export type EvidencePackingProfile = Readonly<{
 	docId: number;
+	liveDocSlot: number;
 	path: string;
 	stableKey: string;
 	surfaceCoverageShapeKey: string;

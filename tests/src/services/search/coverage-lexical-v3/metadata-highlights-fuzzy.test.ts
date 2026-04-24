@@ -7,6 +7,7 @@ function createPackingProfile(
 ): EvidencePackingProfile {
 	return {
 		docId: overrides.docId ?? 0,
+		liveDocSlot: overrides.liveDocSlot ?? (overrides.docId ?? 0),
 		path: overrides.path,
 		stableKey: overrides.stableKey ?? overrides.path,
 		surfaceCoverageShapeKey: overrides.surfaceCoverageShapeKey ?? "l",

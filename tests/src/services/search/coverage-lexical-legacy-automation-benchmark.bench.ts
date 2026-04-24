@@ -16,13 +16,19 @@ jest.mock("src/services/database/database", () => ({
 	},
 }));
 
-jest.mock("src/services/search/shared/file-snapshot-store", () => ({
-	FileSnapshotStore: class MockFileSnapshotStore {
-		readCurrentTexts(): Promise<Map<string, string>> {
-			return Promise.resolve(new Map());
-		}
-	},
-}));
+jest.mock("src/services/search/shared/file-snapshot-store", () => {
+	const actual = jest.requireActual(
+		"src/services/search/shared/file-snapshot-store",
+	) as Record<string, unknown>;
+	return {
+		...actual,
+		FileSnapshotStore: class MockFileSnapshotStore {
+			readCurrentTexts(): Promise<Map<string, string>> {
+				return Promise.resolve(new Map());
+			}
+		},
+	};
+});
 
 const { Tokenizer } = jest.requireMock("src/services/search/tokenizer") as {
 	Tokenizer: new () => unknown;
@@ -2420,11 +2426,22 @@ function registerBenchmarkFileSnapshotStore(
 			headingsText?: string;
 		}
 	>();
-	const lexicalBodyEvidence = new Map<number, unknown>();
-	const lexicalHanDocEvidence = new Map<number, unknown>();
-	const lexicalHanBodyEvidence = new Map<number, unknown>();
+	const lexicalBodyEvidence = new Map<string, unknown>();
+	const lexicalHanDocEvidence = new Map<string, unknown>();
+	const lexicalHanBodyEvidence = new Map<string, unknown>();
 	let lexicalFuzzyRescue: unknown = null;
 	let benchmarkPersistedLexicalBytes = 0;
+
+	const buildBenchmarkLexicalDocEvidenceRowId = (locator: {
+		docRef: number;
+		generation: number;
+	}): string => `${locator.docRef}:${locator.generation}`;
+
+	const buildBenchmarkLexicalBlockEvidenceRowId = (locator: {
+		docRef: number;
+		generation: number;
+		blockOrdinal: number;
+	}): string => `${locator.docRef}:${locator.generation}:${locator.blockOrdinal}`;
 
 	const recomputePersistedLexicalBytes = () => {
 		benchmarkPersistedLexicalBytes =
@@ -2570,7 +2587,10 @@ function registerBenchmarkFileSnapshotStore(
 		) => {
 			const sidecar = lexicalFuzzyRescue as
 				| {
-						candidateMetadataFamilyIdsByFuzzyLookupKey?: ReadonlyMap<string, unknown>;
+						candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey?: ReadonlyMap<
+							string,
+							unknown
+						>;
 						fuzzyLookupKeyCount?: number;
 				  }
 				| null;
@@ -2578,11 +2598,11 @@ function registerBenchmarkFileSnapshotStore(
 				return null;
 			}
 			const candidates =
-				sidecar.candidateMetadataFamilyIdsByFuzzyLookupKey ??
+				sidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey ??
 				new Map<string, unknown>();
 			return {
 				...sidecar,
-				candidateMetadataFamilyIdsByFuzzyLookupKey: new Map(
+				candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: new Map(
 					fuzzyLookupKeys.flatMap((fuzzyLookupKey) => {
 						const familyIds = candidates.get(fuzzyLookupKey);
 						return familyIds == null ? [] : [[fuzzyLookupKey, familyIds] as const];
@@ -2595,64 +2615,95 @@ function registerBenchmarkFileSnapshotStore(
 		},
 		readLexicalFuzzyRescue: async () => lexicalFuzzyRescue,
 		publishLexicalBodyEvidence: async (
-			rows: ReadonlyArray<{
-				blockId: number;
-			}>,
+			rows: ReadonlyArray<
+				Record<string, unknown> & {
+					id: string;
+					docRef: number;
+					generation: number;
+					blockOrdinal: number;
+				}
+			>,
 		) => {
 			lexicalBodyEvidence.clear();
 			for (const row of rows) {
-				lexicalBodyEvidence.set(row.blockId, row);
+				lexicalBodyEvidence.set(row.id, row);
 			}
 			recomputePersistedLexicalBytes();
 		},
-		readLexicalBodyEvidenceForBlocks: async (blockIds: readonly number[]) => {
-			const result = new Map<number, unknown>();
-			for (const blockId of blockIds) {
-				const row = lexicalBodyEvidence.get(blockId);
+		readLexicalBodyEvidenceForBlocks: async (
+			locators: ReadonlyArray<{
+				docRef: number;
+				generation: number;
+				blockOrdinal: number;
+			}>,
+		) => {
+			const result = new Map<string, unknown>();
+			for (const locator of locators) {
+				const key = buildBenchmarkLexicalBlockEvidenceRowId(locator);
+				const row = lexicalBodyEvidence.get(key);
 				if (row !== undefined) {
-					result.set(blockId, row);
+					result.set(key, row);
 				}
 			}
 			return result;
 		},
 		publishLexicalHanDocEvidence: async (
-			rows: ReadonlyArray<{
-				docId: number;
-			}>,
+			rows: ReadonlyArray<
+				Record<string, unknown> & {
+					id: string;
+					docRef: number;
+					generation: number;
+				}
+			>,
 		) => {
 			lexicalHanDocEvidence.clear();
 			for (const row of rows) {
-				lexicalHanDocEvidence.set(row.docId, row);
+				lexicalHanDocEvidence.set(row.id, row);
 			}
 			recomputePersistedLexicalBytes();
 		},
-		readLexicalHanDocEvidenceForDocs: async (docIds: readonly number[]) => {
-			const result = new Map<number, unknown>();
-			for (const docId of docIds) {
-				const row = lexicalHanDocEvidence.get(docId);
+		readLexicalHanDocEvidenceForDocs: async (
+			locators: ReadonlyArray<{ docRef: number; generation: number }>,
+		) => {
+			const result = new Map<string, unknown>();
+			for (const locator of locators) {
+				const key = buildBenchmarkLexicalDocEvidenceRowId(locator);
+				const row = lexicalHanDocEvidence.get(key);
 				if (row !== undefined) {
-					result.set(docId, row);
+					result.set(key, row);
 				}
 			}
 			return result;
 		},
 		publishLexicalHanBodyEvidence: async (
-			rows: ReadonlyArray<{
-				blockId: number;
-			}>,
+			rows: ReadonlyArray<
+				Record<string, unknown> & {
+					id: string;
+					docRef: number;
+					generation: number;
+					blockOrdinal: number;
+				}
+			>,
 		) => {
 			lexicalHanBodyEvidence.clear();
 			for (const row of rows) {
-				lexicalHanBodyEvidence.set(row.blockId, row);
+				lexicalHanBodyEvidence.set(row.id, row);
 			}
 			recomputePersistedLexicalBytes();
 		},
-		readLexicalHanBodyEvidenceForBlocks: async (blockIds: readonly number[]) => {
-			const result = new Map<number, unknown>();
-			for (const blockId of blockIds) {
-				const row = lexicalHanBodyEvidence.get(blockId);
+		readLexicalHanBodyEvidenceForBlocks: async (
+			locators: ReadonlyArray<{
+				docRef: number;
+				generation: number;
+				blockOrdinal: number;
+			}>,
+		) => {
+			const result = new Map<string, unknown>();
+			for (const locator of locators) {
+				const key = buildBenchmarkLexicalBlockEvidenceRowId(locator);
+				const row = lexicalHanBodyEvidence.get(key);
 				if (row !== undefined) {
-					result.set(blockId, row);
+					result.set(key, row);
 				}
 			}
 			return result;

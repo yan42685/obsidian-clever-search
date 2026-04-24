@@ -155,6 +155,7 @@ function createPackingProfile(
 ): EvidencePackingProfile {
 	return {
 		docId: overrides.docId,
+		liveDocSlot: overrides.liveDocSlot ?? overrides.docId,
 		path: overrides.path,
 		stableKey: overrides.stableKey ?? overrides.path,
 		surfaceCoverageShapeKey: overrides.surfaceCoverageShapeKey ?? "h",
@@ -256,7 +257,7 @@ function attachMockSearchPipeline(
 	};
 	const prepareSearch = jest.fn(() => preparedSearch);
 	const hydrateRankingEvidenceForCandidates = jest.fn(async () => ({
-		hydratedEvidenceByDocId: new Map<number, unknown>(),
+		hydratedEvidenceByLiveDocSlot: new Map<number, unknown>(),
 	}));
 	const rankPreparedSearch = jest.fn(() => result);
 	(engine as unknown as {

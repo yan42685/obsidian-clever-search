@@ -6,6 +6,7 @@ import type {
 
 type BodyBlockBuildInput = Readonly<{
 	docId: number;
+	liveDocSlot: number;
 	ordinal: number;
 	exactTapeStart: number;
 	exactTapeCount: number;
@@ -60,6 +61,9 @@ export function buildBodyBlockArena(
 	return {
 		blockCount: blocks.length,
 		docIdByBlockId: buildIntegerArray(blocks.map((block) => block.docId)),
+		liveDocSlotByBlockId: buildIntegerArray(
+			blocks.map((block) => block.liveDocSlot),
+		),
 		blockOrdinalByBlockId: buildIntegerArray(blocks.map((block) => block.ordinal)),
 		exactTapeStartByBlockId: buildIntegerArray(
 			blocks.map((block) => block.exactTapeStart),
@@ -109,6 +113,7 @@ export function estimateBodyBlockBytes(
 ): number {
 	return (
 		arena.docIdByBlockId.byteLength +
+		arena.liveDocSlotByBlockId.byteLength +
 		arena.blockOrdinalByBlockId.byteLength +
 		arena.exactTapeStartByBlockId.byteLength +
 		arena.exactTapeCountByBlockId.byteLength +

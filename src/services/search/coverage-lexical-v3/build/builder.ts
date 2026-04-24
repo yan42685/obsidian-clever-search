@@ -134,7 +134,10 @@ export function buildResidentBase(
 		artifacts.base.hanRoute,
 		artifacts.hanWitnessSidecar,
 	);
-	return artifacts.base;
+	return {
+		...artifacts.base,
+		fuzzyRescue: artifacts.fuzzyRescueSidecar,
+	};
 }
 
 export function buildResidentBaseArtifacts(
@@ -165,6 +168,8 @@ export function buildResidentBaseArtifacts(
 	const fuzzyRescue = buildResidentFuzzyRescueSidecar({
 		familyTexts,
 		familyFlagsByFamilyId: familyLexicon.familyFlagsByFamilyId,
+		shardLocalFamilySlotByFamilyId:
+			familyLexicon.shardLocalFamilySlotByFamilyId,
 	});
 
 	const identityFamilyIdsByDoc = preparedDocuments.map((document) =>
@@ -244,6 +249,7 @@ export function buildResidentBaseArtifacts(
 	const bodyBlocks = buildBodyBlockArena(
 		blockInputs.map((block, blockId) => ({
 			docId: block.docId,
+			liveDocSlot: block.docId,
 			ordinal: block.ordinal,
 			exactTapeStart: exactTapes.startsByDraftIndex[blockId] ?? 0,
 			exactTapeCount: exactTapes.countsByDraftIndex[blockId] ?? 0,
