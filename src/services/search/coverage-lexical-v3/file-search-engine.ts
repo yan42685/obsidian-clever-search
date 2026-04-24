@@ -396,6 +396,10 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			});
 			return {
 				path: candidate.path,
+				snapshotGeneration: documentView?.generation,
+				snapshotSource: "live" as const,
+				freshnessState: "fresh" as const,
+				freshnessReason: "none" as const,
 				queryTerms,
 				matchedTerms: buildMatchedTerms(candidate, result),
 				score: candidate.realizedCoverageCount,

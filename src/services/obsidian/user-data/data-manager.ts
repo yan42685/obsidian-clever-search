@@ -15,6 +15,7 @@ import type CleverSearch from "src/main";
 import {
   Database,
   LEXICAL_QUERY_EVIDENCE_READY_VERSION,
+  type DatabaseOpenRecoveryReport,
   type DocRegistryRow,
 } from "src/services/database/database";
 
@@ -309,6 +310,63 @@ type DevFileSnapshotRuntimeRow = {
   shareOfVault: string;
   notes: string;
 };
+
+type LexicalRuntimeBreakdown = {
+  noticeLines: string[];
+  summaryLine: string | null;
+  residentGroupRows: DevStorageBreakdownRow[];
+  coldOwnedGroupRows: DevStorageBreakdownRow[];
+  overlapRows: DevStorageBreakdownRow[];
+  residentTopRows: DevStorageBreakdownRow[];
+  coldOverlapTopRows: DevStorageBreakdownRow[];
+};
+
+type LexicalRuntimeReport = {
+  indexableBytes: number;
+  persistedLexicalSnapshotBytes: number;
+  runtimeLexicalIndexBytes: number;
+  lexicalIndexBreakdown: Record<string, unknown> | null;
+  lexicalRuntimeBreakdown: LexicalRuntimeBreakdown;
+  fileSnapshotRuntimeEstimate: FileSnapshotRuntimeMemoryEstimate;
+  coverageLexicalV3PersistedStorageBreakdown: CoverageLexicalV3PersistedStorageBreakdown;
+};
+
+type CoverageLexicalV3PersistedStorageBreakdown = {
+  totalBytes: number;
+  artifactBytes: number;
+  registryBytes: number;
+  snapshotBytes: number;
+  metadataBytes: number;
+  evidenceBytes: number;
+  fuzzyRescueBytes: number;
+};
+
+const COVERAGE_LEXICAL_V3_PERSISTED_ARTIFACT_TABLES = [
+  "lexicalSearchSnapshots",
+  "lexicalIndexedMetadata",
+  "lexicalFuzzyRescue",
+  "lexicalBodyFamilySupport",
+  "lexicalBodyEvidence",
+  "lexicalHanDocEvidence",
+  "lexicalHanBodyEvidence",
+  "lexicalExactTapes",
+  "lexicalHanWitness",
+] as const;
+
+const COVERAGE_LEXICAL_V3_PERSISTED_REGISTRY_TABLES = [
+  "lexicalIndexedFileRefs",
+  "docRegistry",
+  "docRegistryMeta",
+] as const;
+
+const COVERAGE_LEXICAL_V3_PERSISTED_EVIDENCE_TABLES = [
+  "lexicalBodyFamilySupport",
+  "lexicalBodyEvidence",
+  "lexicalHanDocEvidence",
+  "lexicalHanBodyEvidence",
+  "lexicalExactTapes",
+  "lexicalHanWitness",
+] as const;
 
 type DevHeapContextRow = {
   metric: string;
@@ -1300,8 +1358,11 @@ export class DataManager {
   }
 
   private async runSearchBootstrapPipeline(): Promise<SearchBootstrapCompletionSummary> {
-    const databaseUpgradeDetected =
-      await this.database.openAndConsumeSchemaUpgradeFlag();
+    const openReport = await this.database.openAndConsumeSchemaUpgradeReport();
+    if (openReport.recovery) {
+      this.notifyDatabaseOpenRecovery(openReport.recovery);
+    }
+    const databaseUpgradeDetected = openReport.schemaUpgradeDetected;
     if (databaseUpgradeDetected) {
       await this.database.clearLexicalQueryEvidenceReadyMarker();
     }
@@ -2173,6 +2234,23 @@ export class DataManager {
         async (ids) => await this.deletePersistedLexicalMutationJournalEntries(ids),
       ),
     };
+  }
+
+  private notifyDatabaseOpenRecovery(
+    report: DatabaseOpenRecoveryReport,
+  ): void {
+    if (report.mode === "targeted-reset") {
+      new MyNotice(
+        "Local Clever Search indexes were rebuilt after a Dexie schema repair. Settings and token stats were preserved.",
+        12000,
+      );
+      return;
+    }
+
+    new MyNotice(
+      "Local Clever Search database was rebuilt after a Dexie schema repair. Settings were preserved; token stats may have been reset.",
+      12000,
+    );
   }
 
   private async listLexicalRecoveryStates(): Promise<IndexRecoveryStateRow[]> {
@@ -4151,8 +4229,16 @@ export class DataManager {
     this.notifyHybridRuntimeStatusChanged();
 
     const task = this.commitSearchBootstrapRun()
-      .then(() => {
+      .then(async () => {
         this.markSearchBootstrapPhaseCompleted("commit", "commit");
+        try {
+          await this.logStartupLexicalMemorySummary();
+        } catch (error) {
+          logger.warn(
+            "[clever-search] failed to log startup lexical memory summary:",
+            error,
+          );
+        }
         if (isDevEnvironment) {
           const commitMs = this.searchBootstrapMetrics?.commitMs ?? 0;
           logger.info(
@@ -4960,27 +5046,12 @@ export class DataManager {
     return `Hybrid indexing preflight: ${report.filesToAdd} file(s) to add/update, ${report.filesToDelete} to delete, vault ${this.formatBytes(report.totalBytes)}${largeFileText}, shared snapshots ${this.formatBytes(report.sharedSnapshotBytes)}, current hybrid index ${this.formatBytes(report.currentHybridBytes)}, estimated hybrid index ${this.formatBytes(report.estimatedHybridBytes)}. ${quotaText}. Large files will be indexed serially.`;
   }
   private async noticeDevStorageStats() {
-    const indexableFiles = this.dataProvider.allFilesToBeIndexed();
-    const indexableBytes = indexableFiles.reduce(
-      (sum, file) => sum + file.stat.size,
-      0,
-    );
-    const storageUsage = await this.database.estimatePluginStorageUsage();
-    const bytesByName = new Map(
-      storageUsage.tables.map((item) => [item.name, item.bytes]),
-    );
-    const persistedLexicalSnapshotBytes = this.lexicalEngine.supportsSerializedFileIndex()
-      ? (bytesByName.get("lexicalSearchSnapshots") ?? 0)
-      : 0;
-    const runtimeLexicalIndexBytes = this.lexicalEngine.estimateFileIndexBytes(
-      persistedLexicalSnapshotBytes,
-    );
-    const lexicalIndexBreakdown = this.lexicalEngine.getFileIndexBreakdown();
-    const lexicalRuntimeBreakdown = this.buildLexicalRuntimeBreakdown(
-      lexicalIndexBreakdown,
-      runtimeLexicalIndexBytes,
+    const {
       indexableBytes,
-    );
+      persistedLexicalSnapshotBytes,
+      runtimeLexicalIndexBytes,
+      lexicalRuntimeBreakdown,
+    } = await this.collectLexicalRuntimeReport();
     const localOnlyHint =
       "Local-only: no embedding API, no rerank API, no token usage.";
 
@@ -5110,19 +5181,204 @@ export class DataManager {
       .join("\n");
   }
 
+  private async collectLexicalRuntimeReport(): Promise<LexicalRuntimeReport> {
+    const indexableFiles = this.dataProvider.allFilesToBeIndexed();
+    const indexableBytes = indexableFiles.reduce(
+      (sum, file) => sum + file.stat.size,
+      0,
+    );
+    const storageUsage = await this.database.estimatePluginStorageUsage();
+    const bytesByName = new Map(
+      storageUsage.tables.map((item) => [item.name, item.bytes]),
+    );
+    const persistedLexicalSnapshotBytes =
+      this.lexicalEngine.supportsSerializedFileIndex()
+        ? (bytesByName.get("lexicalSearchSnapshots") ?? 0)
+        : 0;
+    const runtimeLexicalIndexBytes = this.lexicalEngine.estimateFileIndexBytes(
+      persistedLexicalSnapshotBytes,
+    );
+    const lexicalIndexBreakdown = this.lexicalEngine.getFileIndexBreakdown();
+    const lexicalRuntimeBreakdown = this.buildLexicalRuntimeBreakdown(
+      lexicalIndexBreakdown,
+      runtimeLexicalIndexBytes,
+      indexableBytes,
+    );
+    const coverageLexicalV3PersistedStorageBreakdown =
+      this.buildCoverageLexicalV3PersistedStorageBreakdown(bytesByName);
+    const fileSnapshotRuntimeEstimate =
+      this.fileSnapshotStore.getRuntimeMemoryEstimate();
+    return {
+      indexableBytes,
+      persistedLexicalSnapshotBytes,
+      runtimeLexicalIndexBytes,
+      lexicalIndexBreakdown,
+      lexicalRuntimeBreakdown,
+      fileSnapshotRuntimeEstimate,
+      coverageLexicalV3PersistedStorageBreakdown,
+    };
+  }
+
+  private buildCoverageLexicalV3PersistedStorageBreakdown(
+    bytesByName: ReadonlyMap<string, number>,
+  ): CoverageLexicalV3PersistedStorageBreakdown {
+    const sumBytes = (tableNames: readonly string[]) =>
+      tableNames.reduce((sum, tableName) => sum + (bytesByName.get(tableName) ?? 0), 0);
+    const snapshotBytes = bytesByName.get("lexicalSearchSnapshots") ?? 0;
+    const metadataBytes = bytesByName.get("lexicalIndexedMetadata") ?? 0;
+    const fuzzyRescueBytes = bytesByName.get("lexicalFuzzyRescue") ?? 0;
+    const evidenceBytes = sumBytes(COVERAGE_LEXICAL_V3_PERSISTED_EVIDENCE_TABLES);
+    const artifactBytes = sumBytes(COVERAGE_LEXICAL_V3_PERSISTED_ARTIFACT_TABLES);
+    const registryBytes = sumBytes(COVERAGE_LEXICAL_V3_PERSISTED_REGISTRY_TABLES);
+    return {
+      totalBytes: artifactBytes + registryBytes,
+      artifactBytes,
+      registryBytes,
+      snapshotBytes,
+      metadataBytes,
+      evidenceBytes,
+      fuzzyRescueBytes,
+    };
+  }
+
+  private buildStartupLexicalMemorySummaryLines(
+    report: LexicalRuntimeReport,
+  ): string[] {
+    const lines = [
+      "Search bootstrap: searchable " +
+        (this.searchBootstrapMetrics?.searchableMs ?? 0) +
+        " ms | commit " +
+        (this.searchBootstrapMetrics?.commitMs ?? 0) +
+        " ms",
+      "Persisted lexical snapshot: " +
+        this.formatBytes(report.persistedLexicalSnapshotBytes),
+    ];
+    const currentTextRuntimeBytes = report.fileSnapshotRuntimeEstimate.totalBytes;
+    if (currentTextRuntimeBytes > 0) {
+      lines.push(
+        "Current text cache: " +
+          this.formatBytes(currentTextRuntimeBytes) +
+          " (" +
+          report.fileSnapshotRuntimeEstimate.fileCount +
+          " live file(s))",
+      );
+    }
+
+    if (report.lexicalIndexBreakdown?.__backend === "coverage-lexical-v3") {
+      const breakdown =
+        report.lexicalIndexBreakdown as CoverageLexicalV3RuntimeMemoryBreakdown;
+      const residentTotal =
+        breakdown.metrics.residentBytes || report.runtimeLexicalIndexBytes;
+      const auxiliaryBytes = breakdown.metrics.auxiliaryBytes;
+      const residentHotBytes = Math.max(0, residentTotal - auxiliaryBytes);
+      const coldEvidenceBytes = Math.max(
+        0,
+        breakdown.metrics.exactTapePositionBytes +
+          breakdown.metrics.hanRouteMetadataWitnessBytes +
+          breakdown.metrics.hanRouteBodyWitnessBytes +
+          breakdown.metrics.hanRouteBodyWitnessPositionBytes,
+      );
+      const persistedColdStorage =
+        report.coverageLexicalV3PersistedStorageBreakdown;
+      lines.push(
+        "Coverage V3 startup memory: resident-hot " +
+          this.formatBytes(residentHotBytes) +
+          " | auxiliary " +
+          this.formatBytes(auxiliaryBytes) +
+          " | resident-total " +
+          this.formatBytes(residentTotal) +
+          " (" +
+          this.formatPercent(residentTotal, report.indexableBytes) +
+          " of vault)",
+      );
+      if (persistedColdStorage.totalBytes > 0) {
+        lines.push(
+          "Coverage V3 cold storage: artifacts " +
+            this.formatBytes(persistedColdStorage.artifactBytes) +
+            " | registry/meta " +
+            this.formatBytes(persistedColdStorage.registryBytes) +
+            " | total " +
+            this.formatBytes(persistedColdStorage.totalBytes) +
+            " (" +
+            this.formatPercent(
+              persistedColdStorage.totalBytes,
+              report.indexableBytes,
+            ) +
+            " of vault)",
+        );
+        const coldSliceParts = [
+          persistedColdStorage.snapshotBytes > 0
+            ? "snapshot " + this.formatBytes(persistedColdStorage.snapshotBytes)
+            : null,
+          persistedColdStorage.evidenceBytes > 0
+            ? "evidence " + this.formatBytes(persistedColdStorage.evidenceBytes)
+            : null,
+          persistedColdStorage.metadataBytes > 0
+            ? "metadata " + this.formatBytes(persistedColdStorage.metadataBytes)
+            : null,
+          persistedColdStorage.fuzzyRescueBytes > 0
+            ? "fuzzy-rescue " +
+              this.formatBytes(persistedColdStorage.fuzzyRescueBytes)
+            : null,
+        ].filter((part): part is string => part !== null);
+        if (coldSliceParts.length > 0) {
+          lines.push("Coverage V3 cold slices: " + coldSliceParts.join(" | "));
+        }
+      }
+      const hotTopRows = report.lexicalRuntimeBreakdown.residentTopRows.filter(
+        (row) => row.segment !== "auxiliary",
+      );
+      if (hotTopRows.length > 0) {
+        lines.push(
+          "Coverage V3 hot groups: " +
+            hotTopRows
+              .slice(0, 4)
+              .map((row) => row.segment + " " + row.size)
+              .join(" | "),
+        );
+      }
+      if (auxiliaryBytes > 0) {
+        lines.push(
+          "Coverage V3 auxiliary sidecars: " +
+            this.formatBytes(auxiliaryBytes) +
+            " (" +
+            this.formatPercent(auxiliaryBytes, residentTotal) +
+            " of resident)",
+        );
+      }
+      if (coldEvidenceBytes > 0) {
+        lines.push(
+          "Coverage V3 cold-at-query evidence: " +
+            this.formatBytes(coldEvidenceBytes) +
+            " (" +
+            this.formatPercent(coldEvidenceBytes, residentTotal) +
+            " of resident)",
+        );
+      }
+      return lines;
+    }
+
+    return [...lines, ...report.lexicalRuntimeBreakdown.noticeLines.slice(0, 4)];
+  }
+
+  private async logStartupLexicalMemorySummary(): Promise<void> {
+    const report = await this.collectLexicalRuntimeReport();
+    const summaryLines = this.buildStartupLexicalMemorySummaryLines(report);
+    if (summaryLines.length === 0) {
+      return;
+    }
+    console.groupCollapsed("[clever-search] startup lexical memory");
+    for (const line of summaryLines) {
+      console.log(`[clever-search] ${line}`);
+    }
+    console.groupEnd();
+  }
+
   private buildLexicalRuntimeBreakdown(
     breakdown: Record<string, unknown> | null,
     runtimeLexicalIndexBytes: number,
     indexableBytes: number,
-  ): {
-    noticeLines: string[];
-    summaryLine: string | null;
-    residentGroupRows: DevStorageBreakdownRow[];
-    coldOwnedGroupRows: DevStorageBreakdownRow[];
-    overlapRows: DevStorageBreakdownRow[];
-    residentTopRows: DevStorageBreakdownRow[];
-    coldOverlapTopRows: DevStorageBreakdownRow[];
-  } {
+  ): LexicalRuntimeBreakdown {
     const emptyResult = {
       noticeLines: [],
       summaryLine: null,

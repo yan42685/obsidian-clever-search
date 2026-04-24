@@ -50,6 +50,8 @@ export type HybridLexicalLaneMetadataValues = {
 
 export type HybridLexicalLaneFileCandidate = {
 	filePath: string;
+	snapshotGeneration?: number;
+	snapshotSource?: "live" | "indexed" | "shadow";
 	fileScore: number;
 	fileRank: number;
 	basename: string;
@@ -74,6 +76,8 @@ export type HybridLexicalLaneLocalSignals = {
 
 export type HybridLexicalLaneBlockCandidate = {
 	filePath: string;
+	snapshotGeneration?: number;
+	snapshotSource?: "live" | "indexed" | "shadow";
 	blockId: string;
 	startOffset: number;
 	endOffset: number;
@@ -112,6 +116,8 @@ export type HybridLexicalLaneRankedBlockCandidate =
 
 export type HybridLexicalLaneDisplayCandidate = {
 	filePath: string;
+	snapshotGeneration?: number;
+	snapshotSource?: "live" | "indexed" | "shadow";
 	basename: string;
 	headingChain: string[];
 	segmentText: string;

@@ -142,6 +142,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		});
 		mockInstanceMap.set(FileSnapshotStore, {
 			readIndexedTexts: jest.fn(async () => new Map()),
+			readIndexedTextSnapshots: jest.fn(async () => new Map()),
 		});
 		mockInstanceMap.set(ViewRegistry, {
 			viewTypeByPath: jest.fn(() => "markdown"),
@@ -661,8 +662,18 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		const snapshotStore = mockInstanceMap.get(FileSnapshotStore);
 		const dataProvider = mockInstanceMap.get(DataProvider);
 
-		snapshotStore.readIndexedTexts.mockResolvedValue(
-			new Map([["notes/stale.md", "shadow body line"]]),
+		snapshotStore.readIndexedTextSnapshots.mockResolvedValue(
+			new Map([
+				[
+					"notes/stale.md",
+					{
+						path: "notes/stale.md",
+						text: "shadow body line",
+						generation: 180,
+						source: "shadow",
+					},
+				],
+			]),
 		);
 		lexicalEngine.searchLinesByFileItem.mockResolvedValue([
 			{
@@ -695,7 +706,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 
 		const subItems = await service.getFileSubItems("shadow", staleItem);
 
-		expect(snapshotStore.readIndexedTexts).toHaveBeenCalledWith([
+		expect(snapshotStore.readIndexedTextSnapshots).toHaveBeenCalledWith([
 			{
 				path: "notes/stale.md",
 				generation: 180,
@@ -708,6 +719,40 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		expect(subItems[0].snippet).toBe("shadow body line");
 		expect(staleItem.nativeSubItemsReady).toBe(true);
 		expect(staleItem.snapshotSource).toBe("shadow");
+	});
+
+	test("downgrades stale-grace hybrid subitems to lexical-only when shadow snapshot is missing", async () => {
+		const { FileItem, EngineType } = require("src/globals/search-types");
+		const { DataProvider } = require("src/services/obsidian/user-data/data-provider");
+		const { FileSnapshotStore } = require("src/services/search/shared/file-snapshot-store");
+		const { service } = createHarness();
+
+		const snapshotStore = mockInstanceMap.get(FileSnapshotStore);
+		const dataProvider = mockInstanceMap.get(DataProvider);
+		snapshotStore.readIndexedTextSnapshots.mockResolvedValue(new Map());
+
+		const staleItem = new FileItem(
+			EngineType.HYBRID,
+			"notes/stale.md",
+			["shadow"],
+			["shadow"],
+			[],
+			"nothing",
+			false,
+		);
+		staleItem.freshnessState = "stale_grace";
+		staleItem.freshnessReason = "embedding_updating";
+		staleItem.snapshotGeneration = 180;
+		staleItem.snapshotSource = "shadow";
+
+		const subItems = await service.getFileSubItems("shadow", staleItem);
+
+		expect(subItems).toEqual([]);
+		expect(dataProvider.readPlainText).not.toHaveBeenCalled();
+		expect(staleItem.freshnessState).toBe("lexical_only");
+		expect(staleItem.freshnessReason).toBe("shadow_missing");
+		expect(staleItem.snapshotSource).toBe("live");
+		expect(staleItem.bannerKey).toBeNull();
 	});
 
 });

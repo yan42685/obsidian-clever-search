@@ -20,12 +20,42 @@ describe("coverage lexical v3 size anchor", () => {
 		const { documents } = fixtureModule.createAutomationCorpus();
 		const residentBase = buildResidentBase(documents);
 		const summary = describeResidentBase(residentBase);
+		const rawMarkdownBytes = residentBase.metrics.rawMarkdownUtf8Bytes;
+		const residentBytes = residentBase.metrics.residentBytes;
+		const auxiliaryBytes = residentBase.metrics.auxiliaryBytes;
+		const snapshotBytes = residentBytes;
+		const coldEvidenceBytes = Math.max(
+			0,
+			residentBase.metrics.exactTapePositionBytes +
+				residentBase.metrics.hanRouteMetadataWitnessBytes +
+				residentBase.metrics.hanRouteBodyWitnessBytes +
+				residentBase.metrics.hanRouteBodyWitnessPositionBytes,
+		);
 		const payload = {
 			documentCount: residentBase.docTable.docCount,
 			familyCount: residentBase.familyLexicon.familyCount,
 			blockCount: residentBase.bodyBlocks.blockCount,
 			exactTapeValueCount: residentBase.exactTapes.familyIds.length,
 			metrics: residentBase.metrics,
+			storageBaseline: {
+				rawMarkdownBytes,
+				residentBytes,
+				auxiliaryBytes,
+				coldEvidenceBytes,
+				snapshotBytes,
+				residentVsRaw: ratio(residentBytes, rawMarkdownBytes),
+				auxiliaryVsResident: ratio(auxiliaryBytes, residentBytes),
+				coldEvidenceVsResident: ratio(coldEvidenceBytes, residentBytes),
+				snapshotVsResident: ratio(snapshotBytes, residentBytes),
+				fuzzyRescue: {
+					lookupKeyCount: residentBase.fuzzyRescue.fuzzyLookupKeyCount,
+					indexedMetadataFamilyCount:
+						residentBase.fuzzyRescue.indexedMetadataFamilyCount,
+					bytes: residentBase.fuzzyRescue.bytes,
+					keyBytes: residentBase.fuzzyRescue.keyBytes,
+					postingBytes: residentBase.fuzzyRescue.postingBytes,
+				},
+			},
 			buckets: summary.buckets,
 		};
 
@@ -47,7 +77,16 @@ describe("coverage lexical v3 size anchor", () => {
 		expect(residentBase.metrics.residentBytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.indexedSurfaceUtf8Bytes).toBeGreaterThan(0);
 		expect(residentBase.metrics.auxiliaryBytes).toBeGreaterThanOrEqual(0);
+		expect(payload.storageBaseline.coldEvidenceBytes).toBeGreaterThanOrEqual(0);
+		expect(payload.storageBaseline.snapshotVsResident).toBe(1);
 		expect(residentBase.metrics["residentBytes / indexedSurfaceUtf8Bytes"]).toBeGreaterThan(0);
 		expect(summary.buckets).toHaveLength(10);
 	});
 });
+
+function ratio(numerator: number, denominator: number): number | null {
+	if (denominator <= 0) {
+		return null;
+	}
+	return Number((numerator / denominator).toFixed(6));
+}

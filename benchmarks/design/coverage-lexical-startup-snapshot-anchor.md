@@ -148,3 +148,40 @@ The startup benchmark should run three distinct modes once binary persistence ex
   - startup hydrate ratio
 - keep persisted binary encoding work secondary until the live resident layout stabilizes again
 
+## Storage Baseline Diagnostic Update
+
+Updated on 2026-04-24:
+
+- V3 size-anchor output now includes a diagnostic `storageBaseline` payload with:
+  - raw markdown bytes
+  - resident bytes
+  - auxiliary bytes
+  - cold-evidence bytes
+  - snapshot bytes, currently represented by resident bytes until binary
+    snapshot persistence is promoted
+  - resident/raw, auxiliary/resident, cold-evidence/resident, and
+    snapshot/resident ratios
+- this is intentionally a measurement-only addition; persisted Dexie cold-layer
+  compression remains out of scope until the live resident/on-demand boundary
+  and the binary snapshot contract are stable
+
+## Startup Console Diagnostic Update
+
+Updated on 2026-04-24:
+
+- plugin startup console output for V3 now reports both:
+  - hot resident memory:
+    - `resident-hot`
+    - `auxiliary`
+    - `resident-total`
+  - cold persisted storage:
+    - `artifacts`
+    - `registry/meta`
+    - `total`
+    - slice hints for `snapshot`, `evidence`, `metadata`, and `fuzzy-rescue`
+- startup output also now logs a separate `cold-at-query evidence` line so the
+  runtime can distinguish:
+  - persisted cold storage on disk
+  - resident-but-query-cold evidence retained off the hot path
+- this keeps the startup console aligned with the V3 size-anchor vocabulary
+  instead of showing only the hot-memory half of the picture

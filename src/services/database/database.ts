@@ -25,7 +25,7 @@ import type {
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
-import { inject, singleton } from "tsyringe";
+import { singleton } from "tsyringe";
 import { PrivateApi } from "../obsidian/private-api";
 
 type LexicalIndexedFileRefRow = BaseIndexedFileRef;
@@ -46,9 +46,11 @@ export type LexicalFuzzyRescueRow = {
   indexedMetadataFamilyCount: number;
   fuzzyLookupKeyCount: number;
   bytes: number;
+  postingBytes?: number;
+  keyBytes?: number;
   entries: ReadonlyArray<{
-    fuzzyLookupKey: string;
-    shardLocalFamilySlots: Uint32Array;
+    fuzzyLookupKey: number;
+    shardLocalFamilySlots: Uint16Array | Uint32Array;
   }>;
 };
 
@@ -140,15 +142,65 @@ type DocRegistryMetaRow = {
   value: number;
 };
 
+const DOC_REGISTRY_NEXT_REF_KEY = "nextDocRef";
+const LEXICAL_QUERY_EVIDENCE_READY_KEY = "lexicalQueryEvidenceReady";
+const TARGETED_INDEX_RESET_TABLES = [
+  "lexicalSearchSnapshots",
+  "lexicalIndexedFileRefs",
+  "lexicalIndexedMetadata",
+  "lexicalFuzzyRescue",
+  "lexicalBodyFamilySupport",
+  "lexicalBodyEvidence",
+  "lexicalHanDocEvidence",
+  "lexicalHanBodyEvidence",
+  "lexicalExactTapes",
+  "lexicalHanWitness",
+  "docRegistry",
+  "indexRecoveryState",
+  "indexArtifactState",
+  "lexicalMutationJournal",
+  "pendingDocOperations",
+  "hybridChunks",
+  "fileSnapshots",
+  "hybridDirtyShadows",
+  "hybridChunkVectors",
+  "hybridHnswSmall",
+  "hybridIndexedFileRefs",
+] as const;
+
 export const LEXICAL_QUERY_EVIDENCE_READY_VERSION = 2;
+
+export type DatabaseOpenRecoveryReport = {
+  mode: "targeted-reset" | "full-reset";
+  dbName: string;
+  targetVersion: number;
+  initialErrorName: string;
+  initialErrorMessage: string;
+  preservedTokenStats: boolean;
+};
+
+export type DatabaseOpenReport = {
+  schemaUpgradeDetected: boolean;
+  recovery: DatabaseOpenRecoveryReport | null;
+};
 
 @singleton()
 export class Database {
-  readonly db = getInstance(DexieWrapper);
+  readonly db = new DexieWrapper(getInstance(PrivateApi));
+  private static readonly attemptedUpgradeRecoveryKeys = new Set<string>();
 
   async openAndConsumeSchemaUpgradeFlag(): Promise<boolean> {
-    await this.db.open();
-    return this.db.consumeSchemaUpgradeDetected();
+    const report = await this.openAndConsumeSchemaUpgradeReport();
+    return report.schemaUpgradeDetected;
+  }
+
+  async openAndConsumeSchemaUpgradeReport(): Promise<DatabaseOpenReport> {
+    const recovery = await this.openWithUpgradeRecovery();
+    const schemaUpgradeDetected = this.db.consumeSchemaUpgradeDetected();
+    return {
+      schemaUpgradeDetected: schemaUpgradeDetected || recovery !== null,
+      recovery,
+    };
   }
 
   async estimatePluginStorageUsage(): Promise<{
@@ -742,16 +794,174 @@ export class Database {
     };
   }
 
+  private async openWithUpgradeRecovery(): Promise<DatabaseOpenRecoveryReport | null> {
+    try {
+      await this.db.open();
+      return null;
+    } catch (error) {
+      if (!this.isDexieUpgradeError(error)) {
+        throw error;
+      }
+
+      const recoveryKey = [
+        this.db.dbName,
+        this.db.dbVersion,
+        error.name,
+        error.message,
+      ].join("|");
+      if (Database.attemptedUpgradeRecoveryKeys.has(recoveryKey)) {
+        throw error;
+      }
+      Database.attemptedUpgradeRecoveryKeys.add(recoveryKey);
+
+      const initialErrorName = error.name;
+      const initialErrorMessage = error.message;
+      const initialErrorSummary = {
+        dbName: this.db.dbName,
+        targetVersion: this.db.dbVersion,
+        errorName: initialErrorName,
+        errorMessage: initialErrorMessage,
+      };
+
+      this.db.close();
+      console.warn(
+        "[clever-search] Dexie startup upgrade failed; attempting targeted index reset.",
+        initialErrorSummary,
+      );
+
+      try {
+        await this.resetTargetedPersistentIndexState();
+        await this.db.open();
+        console.warn(
+          "[clever-search] Dexie startup upgrade recovered by clearing persisted lexical/hybrid indexes. Settings and token stats were preserved.",
+          initialErrorSummary,
+        );
+        return {
+          mode: "targeted-reset",
+          dbName: this.db.dbName,
+          targetVersion: this.db.dbVersion,
+          initialErrorName,
+          initialErrorMessage,
+          preservedTokenStats: true,
+        };
+      } catch (targetedResetError) {
+        console.warn(
+          "[clever-search] Targeted Dexie recovery failed; deleting the local Clever Search database as a final fallback.",
+          {
+            ...initialErrorSummary,
+            targetedResetError,
+          },
+        );
+      }
+
+      this.db.close();
+      await this.deleteDatabaseByName(this.db.dbName);
+
+      try {
+        await this.db.open();
+        console.warn(
+          "[clever-search] Dexie startup upgrade recovered by rebuilding the local search database. Settings were preserved; token stats may have been reset.",
+          initialErrorSummary,
+        );
+        return {
+          mode: "full-reset",
+          dbName: this.db.dbName,
+          targetVersion: this.db.dbVersion,
+          initialErrorName,
+          initialErrorMessage,
+          preservedTokenStats: false,
+        };
+      } catch (finalError) {
+        console.warn(
+          "[clever-search] Dexie startup upgrade recovery failed even after deleting the local search database.",
+          {
+            ...initialErrorSummary,
+            finalError,
+          },
+        );
+        throw error;
+      }
+    }
+  }
+
+  private isDexieUpgradeError(
+    error: unknown,
+  ): error is Error & { name: string; message: string } {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      "name" in error &&
+      "message" in error &&
+      (error as { name?: unknown }).name === "UpgradeError"
+    );
+  }
+
+  private async resetTargetedPersistentIndexState(): Promise<void> {
+    const database = await this.openIndexedDbByName(this.db.dbName);
+    try {
+      const availableStoreNames = new Set(Array.from(database.objectStoreNames));
+      const storeNames = TARGETED_INDEX_RESET_TABLES.filter((storeName) =>
+        availableStoreNames.has(storeName),
+      );
+      const shouldTouchMeta = availableStoreNames.has("docRegistryMeta");
+      if (storeNames.length === 0 && !shouldTouchMeta) {
+        return;
+      }
+      const transactionStores = shouldTouchMeta
+        ? [...storeNames, "docRegistryMeta"]
+        : [...storeNames];
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction(transactionStores, "readwrite");
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () =>
+          reject(transaction.error ?? new Error("Targeted index reset failed."));
+        transaction.onabort = () =>
+          reject(transaction.error ?? new Error("Targeted index reset aborted."));
+        for (const storeName of storeNames) {
+          transaction.objectStore(storeName).clear();
+        }
+        if (shouldTouchMeta) {
+          const metaStore = transaction.objectStore("docRegistryMeta");
+          metaStore.delete(DOC_REGISTRY_NEXT_REF_KEY);
+          metaStore.delete(LEXICAL_QUERY_EVIDENCE_READY_KEY);
+        }
+      });
+    } finally {
+      database.close();
+    }
+  }
+
+  private async openIndexedDbByName(name: string): Promise<IDBDatabase> {
+    return await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(name);
+      request.onerror = () =>
+        reject(request.error ?? new Error(`Failed to open IndexedDB ${name}.`));
+      request.onsuccess = () => resolve(request.result);
+      request.onblocked = () =>
+        reject(new Error(`Opening IndexedDB ${name} was blocked.`));
+    });
+  }
+
+  private async deleteDatabaseByName(name: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(name);
+      request.onerror = () =>
+        reject(request.error ?? new Error(`Failed to delete IndexedDB ${name}.`));
+      request.onsuccess = () => resolve();
+      request.onblocked = () =>
+        reject(new Error(`Deleting IndexedDB ${name} was blocked.`));
+    });
+  }
+
 }
 
-@singleton()
-class DexieWrapper extends Dexie {
+export class DexieWrapper extends Dexie {
   // Dexie keeps one decimal place for version() and multiplies by 10 when opening IndexedDB.
   // Use 0.1 increments here so app-level schema bumps stay readable while mapping to IDB integers.
   private static readonly _dbVersion = 28.4;
   private static readonly dbNamePrefix = "clever-search/";
-  static readonly docRegistryNextRefKey = "nextDocRef";
-  static readonly lexicalQueryEvidenceReadyKey = "lexicalQueryEvidenceReady";
+  static readonly docRegistryNextRefKey = DOC_REGISTRY_NEXT_REF_KEY;
+  static readonly lexicalQueryEvidenceReadyKey = LEXICAL_QUERY_EVIDENCE_READY_KEY;
   private privateApi: PrivateApi;
   private schemaUpgradeDetected = false;
   pluginSetting!: Dexie.Table<{ id?: number; data: OuterSetting }, number>;
@@ -785,7 +995,7 @@ class DexieWrapper extends Dexie {
   hybridTokenSavings!: Dexie.Table<HybridTokenSavingRecord, number>;
   hybridTokenBudgetResets!: Dexie.Table<HybridTokenBudgetResetRecord, number>;
 
-  constructor(@inject(PrivateApi) privateApi: PrivateApi) {
+  constructor(privateApi: PrivateApi) {
     super(DexieWrapper.dbNamePrefix + privateApi.getAppId());
     this.privateApi = privateApi;
     this.version(21)
@@ -852,6 +1062,46 @@ class DexieWrapper extends Dexie {
           tx.table("hybridTokenStats").clear(),
           tx.table("hybridTokenSavings").clear(),
           tx.table("hybridTokenBudgetResets").clear(),
+        ]);
+      });
+    // Primary-key changes must always go through a bridge version that drops
+    // the old stores first. Dexie cannot rewrite an existing object store's
+    // primary key in place.
+    // Bridge the 28.2 -> 28.4 lexical evidence key migration.
+    // Dexie cannot rewrite an existing object store's primary key in place, so
+    // we drop the old evidence tables one version earlier and recreate them at 28.4.
+    this.version(28.3)
+      .stores({
+        pluginSetting: "++id",
+        lexicalSearchSnapshots: "++id",
+        lexicalIndexedFileRefs: "path",
+        lexicalIndexedMetadata: "filePath",
+        lexicalFuzzyRescue: "id",
+        lexicalBodyFamilySupport: "id",
+        lexicalExactTapes: "id",
+        lexicalHanWitness: "id",
+        docRegistry: "docRef, path, deleted, liveGeneration, updatedAt",
+        docRegistryMeta: "key",
+        hybridChunks: "++id, filePath",
+        fileSnapshots: "filePath",
+        hybridDirtyShadows: "filePath",
+        hybridChunkVectors: "filePath",
+        hybridHnswSmall: "id",
+        hybridIndexedFileRefs: "path",
+        indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
+        indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
+        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
+        hybridTokenBudgetResets: "++id, periodKey",
+      })
+      .upgrade(async (tx) => {
+        this.schemaUpgradeDetected = true;
+        await Promise.all([
+          tx.table("lexicalSearchSnapshots").clear(),
+          tx.table("lexicalIndexedFileRefs").clear(),
+          tx
+            .table("docRegistryMeta")
+            .delete(DexieWrapper.lexicalQueryEvidenceReadyKey),
         ]);
       });
     this.version(DexieWrapper._dbVersion)

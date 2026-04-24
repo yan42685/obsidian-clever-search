@@ -39,6 +39,7 @@ export async function buildHybridLexicalLaneFileShortlist(params: {
 		limit: params.limit,
 		matches: matchedFiles.map((match, index) => ({
 			path: match.path,
+			generation: match.snapshotGeneration,
 			score: match.score ?? 0,
 			rank: index,
 		})),
@@ -72,6 +73,7 @@ export function buildHybridLexicalLaneFileCandidates(params: {
 	limit?: number;
 	matches: ReadonlyArray<{
 		path: string;
+		generation?: number;
 		score?: number;
 		rank?: number;
 	}>;
@@ -86,6 +88,8 @@ export function buildHybridLexicalLaneFileCandidates(params: {
 			const headings = metadata?.headings ?? [];
 			return {
 				filePath: match.path,
+				snapshotGeneration: match.generation,
+				snapshotSource: "live" as const,
 				fileScore: match.score ?? 0,
 				fileRank: match.rank ?? index,
 				basename: FileUtil.getBasename(match.path),

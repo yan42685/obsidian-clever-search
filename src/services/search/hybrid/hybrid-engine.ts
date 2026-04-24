@@ -66,6 +66,7 @@ import {
 } from "./hybrid-profiler";
 import { analyzeHybridStoredFileConsistency } from "./hybrid-consistency";
 import { FileSnapshotStore } from "../shared/file-snapshot-store";
+import { buildLexicalOnlyFreshness } from "./freshness";
 
 const DEFAULT_MAX_FILE_RESULTS = 10;
 const MIN_FILE_RESULTS = 1;
@@ -172,6 +173,22 @@ function throwIfHybridQueryAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw createHybridAbortError();
   }
+}
+
+function markHybridItemsLexicalOnly(items: FileItem[]): FileItem[] {
+  for (const item of items) {
+    const freshness = buildLexicalOnlyFreshness("dense_unavailable", {
+      snapshotGeneration: item.snapshotGeneration,
+    });
+    item.freshnessState = freshness.state;
+    item.freshnessReason = freshness.reason;
+    item.snapshotGeneration = freshness.snapshotGeneration;
+    item.snapshotSource = freshness.snapshotSource;
+    item.nativeSubItemsReady = freshness.nativeSubItemsReady;
+    item.bannerKey = freshness.bannerKey;
+    item.bannerMessage = freshness.bannerMessage;
+  }
+  return items;
 }
 
 function escapeSnippetHtml(text: string): string {
@@ -608,7 +625,9 @@ export class HybridEngine {
       );
       const issue = buildHybridSearchIssue(error);
       return {
-        items: buildHybridLexicalLaneFileItems(prepared.query, lexicalCandidates),
+        items: markHybridItemsLexicalOnly(
+          buildHybridLexicalLaneFileItems(prepared.query, lexicalCandidates),
+        ),
         fallbackNoticeKey:
           prepared.fallbackNoticeKey ?? "hybridNotice.searchFallbackToLexical",
         fallbackNoticeMessage:
@@ -680,7 +699,7 @@ export class HybridEngine {
       );
       const issue = buildHybridSearchIssue(error);
       return {
-        items: baseItems,
+        items: markHybridItemsLexicalOnly(baseItems),
         fallbackNoticeKey:
           prepared.fallbackNoticeKey ?? "hybridNotice.searchFallbackToLexical",
         fallbackNoticeMessage:
@@ -791,7 +810,7 @@ export class HybridEngine {
     const refs = await this.fileSnapshotStore.getHybridIndexedFileRefs(
       denseRows.map(({ row }) => row.filePath),
     );
-    const snapshotTextsByPath = await this.fileSnapshotStore.readIndexedTexts(
+    const snapshotsByPath = await this.fileSnapshotStore.readIndexedTextSnapshots(
       denseRows.map(({ row }) => ({
         path: row.filePath,
         generation: refs.get(row.filePath)?.generation,
@@ -809,10 +828,11 @@ export class HybridEngine {
       ) {
         continue;
       }
-      const snapshotText = snapshotTextsByPath.get(denseRow.row.filePath);
-      if (!snapshotText) {
+      const snapshot = snapshotsByPath.get(denseRow.row.filePath);
+      if (!snapshot) {
         continue;
       }
+      const snapshotText = snapshot.text;
       let lineOffsets = lineOffsetsByPath.get(denseRow.row.filePath);
       if (!lineOffsets) {
         lineOffsets = buildLineOffsets(snapshotText);
@@ -823,6 +843,8 @@ export class HybridEngine {
         denseRow.score,
         snapshotText,
         lineOffsets,
+        snapshot.generation,
+        snapshot.source,
       );
       if (!candidate) {
         continue;
@@ -863,6 +885,8 @@ export class HybridEngine {
     score: number,
     snapshotText: string,
     lineOffsets: number[],
+    snapshotGeneration: number | undefined,
+    snapshotSource: HybridLexicalLaneDisplayCandidate["snapshotSource"],
   ): HybridLexicalLaneDisplayCandidate | null {
     const rawChunk = buildRawChunkFromOffsets(
       row.filePath,
@@ -897,6 +921,8 @@ export class HybridEngine {
 
     return {
       filePath: row.filePath,
+      snapshotGeneration,
+      snapshotSource,
       basename: FileUtil.getBasename(row.filePath),
       headingChain,
       segmentText: headingChain.join(" > "),

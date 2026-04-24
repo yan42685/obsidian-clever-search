@@ -81,6 +81,12 @@ export type MatchedFile = {
   folderWeakHighlightRanges?: HighlightRange[];
   directSubItems?: FileSubItem[];
   nativeSubItemsReady?: boolean;
+  freshnessState?: FileItemFreshnessState;
+  freshnessReason?: FileItemFreshnessReason;
+  snapshotGeneration?: number;
+  snapshotSource?: FileItemSnapshotSource;
+  bannerKey?: LocaleKey | null;
+  bannerMessage?: string | null;
 };
 
 export type HybridSearchOutcome =
@@ -115,9 +121,10 @@ export type FileItemFreshnessReason =
   | "embedding_wait_interval"
   | "embedding_updating"
   | "embedding_failed"
+  | "dense_unavailable"
   | "shadow_missing";
 
-export type FileItemSnapshotSource = "live" | "shadow";
+export type FileItemSnapshotSource = "live" | "indexed" | "shadow";
 
 export class SearchResult {
   sourcePath: string;

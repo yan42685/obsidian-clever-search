@@ -22,6 +22,7 @@ import { singleton } from "tsyringe";
 import type { Database } from "src/services/database/database";
 import { EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR } from "../coverage-lexical-v3/layout/body-blocks";
 import { EMPTY_RESIDENT_EXACT_TAPE_SIDECAR } from "../coverage-lexical-v3/layout/exact-tapes";
+import { hashFuzzyLookupKey } from "../coverage-lexical-v3/layout/fuzzy-rescue";
 import { EMPTY_RESIDENT_HAN_WITNESS_SIDECAR } from "../coverage-lexical-v3/layout/han-route";
 
 type PersistedFileSnapshotRow = {
@@ -42,6 +43,15 @@ type IndexedTextRequest = {
 	path: string;
 	generation?: number;
 };
+
+export type IndexedTextSnapshotSource = "live" | "indexed" | "shadow";
+
+export type IndexedTextSnapshot = Readonly<{
+	path: string;
+	text: string;
+	generation?: number;
+	source: IndexedTextSnapshotSource;
+}>;
 
 type IndexedTextPublishRequest = {
 	path: string;
@@ -198,11 +208,20 @@ export class FileSnapshotStore {
 	async readIndexedTexts(
 		requests: ReadonlyArray<IndexedTextRequest>,
 	): Promise<Map<string, string>> {
+		const snapshots = await this.readIndexedTextSnapshots(requests);
+		return new Map(
+			[...snapshots.entries()].map(([path, snapshot]) => [path, snapshot.text]),
+		);
+	}
+
+	async readIndexedTextSnapshots(
+		requests: ReadonlyArray<IndexedTextRequest>,
+	): Promise<Map<string, IndexedTextSnapshot>> {
 		const expectedGenerations = new Map<string, number | undefined>();
 		for (const request of requests) {
 			expectedGenerations.set(request.path, request.generation);
 		}
-		return await this.readGenerationAlignedTexts(
+		return await this.readGenerationAlignedTextSnapshots(
 			requests.map((request) => request.path),
 			expectedGenerations,
 		);
@@ -310,6 +329,9 @@ export class FileSnapshotStore {
 	async readLexicalFuzzyRescueForLookupKeys(
 		fuzzyLookupKeys: ReadonlyArray<string>,
 	): Promise<ResidentFuzzyRescueSidecar> {
+		const fuzzyLookupKeyHashes = new Set(
+			fuzzyLookupKeys.map((key) => hashFuzzyLookupKey(key)),
+		);
 		const row = await this.database.db.lexicalFuzzyRescue.get(
 			ACTIVE_LEXICAL_FUZZY_RESCUE_ID,
 		);
@@ -319,19 +341,24 @@ export class FileSnapshotStore {
 				indexedMetadataFamilyCount: 0,
 				fuzzyLookupKeyCount: 0,
 				bytes: 0,
+				postingBytes: 0,
+				keyBytes: 0,
 			};
 		}
 		const filteredEntries =
 			fuzzyLookupKeys.length === 0
 				? row.entries
 				: row.entries.filter((entry) =>
-						fuzzyLookupKeys.includes(entry.fuzzyLookupKey),
+						fuzzyLookupKeyHashes.has(entry.fuzzyLookupKey),
 					);
 		let filteredBytes = 0;
+		let filteredKeyBytes = 0;
+		let filteredPostingBytes = 0;
 		for (const entry of filteredEntries) {
-			filteredBytes +=
-				new TextEncoder().encode(entry.fuzzyLookupKey).byteLength +
-				entry.shardLocalFamilySlots.byteLength;
+			const keyBytes = Uint32Array.BYTES_PER_ELEMENT;
+			filteredKeyBytes += keyBytes;
+			filteredPostingBytes += entry.shardLocalFamilySlots.byteLength;
+			filteredBytes += keyBytes + entry.shardLocalFamilySlots.byteLength;
 		}
 		return {
 			candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: new Map(
@@ -342,7 +369,9 @@ export class FileSnapshotStore {
 			),
 			indexedMetadataFamilyCount: row.indexedMetadataFamilyCount,
 			fuzzyLookupKeyCount: filteredEntries.length,
-			bytes: fuzzyLookupKeys.length === 0 ? row.bytes : filteredBytes,
+			bytes: filteredBytes,
+			postingBytes: filteredPostingBytes,
+			keyBytes: filteredKeyBytes,
 		};
 	}
 
@@ -358,6 +387,8 @@ export class FileSnapshotStore {
 			indexedMetadataFamilyCount: sidecar.indexedMetadataFamilyCount,
 			fuzzyLookupKeyCount: sidecar.fuzzyLookupKeyCount,
 			bytes: sidecar.bytes,
+			postingBytes: sidecar.postingBytes,
+			keyBytes: sidecar.keyBytes,
 			entries: [
 				...sidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.entries(),
 			].map(([fuzzyLookupKey, shardLocalFamilySlots]) => ({
@@ -1073,15 +1104,33 @@ export class FileSnapshotStore {
 		filePaths: string[],
 		expectedGenerations?: ReadonlyMap<string, number | undefined>,
 	): Promise<Map<string, string>> {
+		const snapshots = await this.readGenerationAlignedTextSnapshots(
+			filePaths,
+			expectedGenerations,
+		);
+		return new Map(
+			[...snapshots.entries()].map(([path, snapshot]) => [path, snapshot.text]),
+		);
+	}
+
+	private async readGenerationAlignedTextSnapshots(
+		filePaths: string[],
+		expectedGenerations?: ReadonlyMap<string, number | undefined>,
+	): Promise<Map<string, IndexedTextSnapshot>> {
 		const uniquePaths = Array.from(new Set(filePaths));
-		const snapshots = new Map<string, string>();
+		const snapshots = new Map<string, IndexedTextSnapshot>();
 		const missingPaths: string[] = [];
 
 		for (const filePath of uniquePaths) {
 			const expectedGeneration = expectedGenerations?.get(filePath);
 			const current = this.getCurrentFile(filePath);
 			if (current && this.isGenerationMatch(current.generation, expectedGeneration)) {
-				snapshots.set(filePath, current.text);
+				snapshots.set(filePath, {
+					path: filePath,
+					text: current.text,
+					generation: current.generation,
+					source: "live",
+				});
 				continue;
 			}
 			missingPaths.push(filePath);
@@ -1098,7 +1147,12 @@ export class FileSnapshotStore {
 			const filePath = missingPaths[index];
 			const expectedGeneration = expectedGenerations?.get(filePath);
 			if (row && this.isGenerationMatch(row.generation, expectedGeneration)) {
-				snapshots.set(filePath, row.plainText);
+				snapshots.set(filePath, {
+					path: filePath,
+					text: row.plainText,
+					generation: row.generation,
+					source: "indexed",
+				});
 				continue;
 			}
 			shadowMissingPaths.push(filePath);
@@ -1118,7 +1172,12 @@ export class FileSnapshotStore {
 			if (!this.isGenerationMatch(row.generation, expectedGeneration)) {
 				continue;
 			}
-			snapshots.set(row.filePath, row.plainText);
+			snapshots.set(row.filePath, {
+				path: row.filePath,
+				text: row.plainText,
+				generation: row.generation,
+				source: "shadow",
+			});
 		}
 
 		return snapshots;

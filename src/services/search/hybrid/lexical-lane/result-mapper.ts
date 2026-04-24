@@ -4,6 +4,10 @@ import {
 	FileSubItem,
 } from "src/globals/search-types";
 import type { HybridLexicalLaneDisplayCandidate } from "./contracts";
+import {
+	HYBRID_LEXICAL_LANE_MAX_DISPLAY_FILES,
+	HYBRID_LEXICAL_LANE_MAX_SUBITEMS_PER_FILE,
+} from "./config";
 
 export function buildHybridLexicalLaneFileItems(
 	queryText: string,
@@ -15,10 +19,20 @@ export function buildHybridLexicalLaneFileItems(
 			aggregateScore: number;
 			bestScore: number;
 			subItems: FileSubItem[];
+			snapshotGeneration?: number;
+			snapshotSource?: "live" | "indexed" | "shadow";
 		}
 	>();
 
 	for (const candidate of candidates) {
+		if (
+			!shouldAcceptDisplayCandidateForFileQuota(
+				byFile,
+				candidate.filePath,
+			)
+		) {
+			continue;
+		}
 		const subItem = new FileSubItem(
 			candidate.snippetText,
 			candidate.startLine,
@@ -33,6 +47,8 @@ export function buildHybridLexicalLaneFileItems(
 			aggregateScore: candidate.score,
 			bestScore: candidate.score,
 			subItems: [],
+			snapshotGeneration: candidate.snapshotGeneration,
+			snapshotSource: candidate.snapshotSource,
 		};
 		entry.subItems.push(subItem);
 		if (!byFile.has(candidate.filePath)) {
@@ -57,16 +73,39 @@ export function buildHybridLexicalLaneFileItems(
 			}
 			return right[1].bestScore - left[1].bestScore;
 		})
-		.map(([filePath, entry]) =>
-			new FileItem(
+		.map(([filePath, entry]) => {
+			const item = new FileItem(
 				EngineType.HYBRID,
 				filePath,
 				[queryText],
 				[],
 				entry.subItems,
 				null,
-			),
-		);
+			);
+			item.nativeSubItemsReady = true;
+			item.snapshotGeneration = entry.snapshotGeneration;
+			item.snapshotSource = entry.snapshotSource ?? "live";
+			item.freshnessState = item.snapshotSource === "shadow" ? "stale_grace" : "fresh";
+			item.freshnessReason =
+				item.snapshotSource === "shadow" ? "embedding_updating" : "none";
+			return item;
+		});
+}
+
+function shouldAcceptDisplayCandidateForFileQuota(
+	byFile: ReadonlyMap<
+		string,
+		{
+			subItems: readonly FileSubItem[];
+		}
+	>,
+	filePath: string,
+): boolean {
+	const existing = byFile.get(filePath);
+	if (existing) {
+		return existing.subItems.length < HYBRID_LEXICAL_LANE_MAX_SUBITEMS_PER_FILE;
+	}
+	return byFile.size < HYBRID_LEXICAL_LANE_MAX_DISPLAY_FILES;
 }
 
 function computeHybridLexicalLaneFileAggregateScore(

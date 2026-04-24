@@ -169,7 +169,18 @@ describe("HybridEngine search fallback notices", () => {
 
 		const finalized = await engine.finalizePreparedRecall(createPreparedRecall(), 10);
 
-		expect(finalized.items).toEqual([{ id: "notes/a.md:0" }, { id: "notes/b.md:1" }]);
+		expect(finalized.items.map((item: any) => item.id)).toEqual([
+			"notes/a.md:0",
+			"notes/b.md:1",
+		]);
+		expect(finalized.items.map((item: any) => item.freshnessState)).toEqual([
+			"lexical_only",
+			"lexical_only",
+		]);
+		expect(finalized.items.map((item: any) => item.freshnessReason)).toEqual([
+			"dense_unavailable",
+			"dense_unavailable",
+		]);
 		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(finalized.fallbackToLexicalSearch).toBe(true);
 	});
@@ -187,7 +198,14 @@ describe("HybridEngine search fallback notices", () => {
 
 		const finalized = await engine.finalizePreparedRecall(createPreparedRecall(), 10);
 
-		expect(finalized.items).toEqual([{ id: "notes/a.md:0" }, { id: "notes/b.md:1" }]);
+		expect(finalized.items.map((item: any) => item.id)).toEqual([
+			"notes/a.md:0",
+			"notes/b.md:1",
+		]);
+		expect(finalized.items.map((item: any) => item.freshnessState)).toEqual([
+			"lexical_only",
+			"lexical_only",
+		]);
 		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(finalized.fallbackToLexicalSearch).toBe(true);
 	});
@@ -206,7 +224,14 @@ describe("HybridEngine search fallback notices", () => {
 			10,
 		);
 
-		expect(finalized.items).toEqual([{ id: "notes/a.md:0" }, { id: "notes/b.md:1" }]);
+		expect(finalized.items.map((item: any) => item.id)).toEqual([
+			"notes/a.md:0",
+			"notes/b.md:1",
+		]);
+		expect(finalized.items.map((item: any) => item.freshnessState)).toEqual([
+			"lexical_only",
+			"lexical_only",
+		]);
 		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(finalized.fallbackToLexicalSearch).toBe(true);
 	});
@@ -223,6 +248,34 @@ describe("HybridEngine search fallback notices", () => {
 
 		expect(finalized.fallbackNoticeKey).toBe("hybridNotice.searchFallbackToLexical");
 		expect(finalized.fallbackToLexicalSearch).toBe(true);
+		expect(finalized.items.map((item: any) => item.freshnessState)).toEqual([
+			"lexical_only",
+			"lexical_only",
+		]);
+	});
+
+	test("dense display candidates preserve snapshot generation and source", () => {
+		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
+		const engine = new HybridEngine() as any;
+
+		const candidate = engine.buildDenseDisplayCandidate(
+			{
+				filePath: "notes/a.md",
+				startOffset: 0,
+				endOffset: 11,
+			},
+			0.91,
+			"hello world",
+			[0],
+			123,
+			"shadow",
+		);
+
+		expect(candidate).toMatchObject({
+			filePath: "notes/a.md",
+			snapshotGeneration: 123,
+			snapshotSource: "shadow",
+		});
 	});
 
 	test("drops dense candidate when positional overlap covers at least 70% of lexical span", () => {

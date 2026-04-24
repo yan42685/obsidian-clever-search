@@ -1004,3 +1004,74 @@ the V3 lexical ranking evidence rows:
 - this removes the remaining `docId` / `blockId` dependence from the current
   batch lexical evidence hydrate path without changing the resident slot-native
   hot-loop contract
+
+### Hybrid Bridge And Auxiliary Packing Note
+
+Status: Updated on 2026-04-24
+
+The next runtime usability slice is now implemented through the first unified
+hybrid freshness contract:
+
+- the V3 hybrid lexical-subitems bridge no longer throws the placeholder
+  `V3 hybrid lexical subitems not implemented` error for non-empty snapshots
+- hybrid lexical-lane local block recall can now receive V3 bridge spans for
+  exact local lexical evidence without importing legacy `coverage-lexical/` or
+  `coverage-lexical-v2/` runtime helpers
+- hybrid lexical-lane result materialization now caps the display surface to the
+  top `3` files with at most `2` subitems each after global block/display
+  ranking, so the UI gets at most six lexical-lane subitems while still allowing
+  cross-file block competition before file grouping
+- hybrid `FileItem` materialization now marks native subitems ready and carries
+  snapshot generation/source through to the item-level freshness fields; shadow
+  sources materialize as `stale_grace`, live/indexed sources as `fresh`
+- final hybrid result decoration now uses a shared resolver for `fresh`,
+  `stale_grace`, and `lexical_only`; dense/rerank fallback results are marked
+  `lexical_only` with no per-file stale banner, while `stale_grace` keeps the
+  existing embedding-update banner keys
+- the bridge remains intentionally conservative: it uses generation-selected
+  snapshot text supplied by the caller and only emits local exact spans that can
+  be rendered into block candidates
+- `fuzzyRescue` postings are now width-adaptive (`Uint16Array` when all
+  shard-local family slots fit, otherwise `Uint32Array`) and de-duplicated per
+  lookup key before being retained or persisted
+- `fuzzyRescue` lookup keys are now retained as stable 32-bit hash keys instead
+  of full resident strings; fuzzy lookup still verifies candidates against the
+  original family text, so hash collisions can add candidates but do not produce
+  unverified fuzzy matches
+- V3 size-anchor output now includes a read-only `storageBaseline` section for
+  raw markdown, resident, auxiliary, cold-evidence, and snapshot-size ratios;
+  this is diagnostic only and does not start persisted-byte compression work
+
+Implementation note:
+
+- local block recall now reads through `FileSnapshotStore.readIndexedTextSnapshots(...)`
+  so generation-aligned live, persisted indexed, and matching dirty shadow
+  snapshots can be distinguished before V3 bridge rendering; the bridge still
+  consumes the snapshot text it is handed and does not independently choose
+  among snapshot sources
+- dense display candidates now also read snapshot text through
+  `FileSnapshotStore.readIndexedTextSnapshots(...)`, so rerank preserves the
+  candidate's `snapshotGeneration` and `snapshotSource` instead of treating
+  dense snippets as source-less text
+- stale-grace subitem hydration now refuses to silently fall back to live text;
+  if the requested generation-aligned shadow/indexed snapshot is missing, the
+  item is downgraded to `lexical_only`
+- persisted fuzzy-rescue rows now use the compact 32-bit hash-key shape directly;
+  no legacy string-key restore compatibility is retained in this workstream
+- the current storage baseline treats the resident layout as the snapshot proxy
+  until a concrete binary snapshot contract is promoted
+
+Validation completed for this slice:
+
+- `npm run typecheck:build` passes on 2026-04-24
+- targeted V3 bridge, hybrid local-block-recall, resident-base, and size-anchor
+  tests pass on 2026-04-24
+- targeted hybrid result-mapper and Han hydration tests pass after aligning the
+  Han test with the current doc-evidence-only candidate shape
+- targeted local block recall coverage now verifies generation-aligned indexed
+  and shadow snapshots propagate `snapshotGeneration` and `snapshotSource` into
+  block candidates
+- targeted resident-base fuzzy-rescue coverage verifies hash-key lookup and the
+  compact key-byte accounting contract
+- targeted hybrid freshness, rerank fallback, result-mapper, snapshot ownership,
+  local-block-recall, and SearchService shadow-subitem tests pass on 2026-04-24

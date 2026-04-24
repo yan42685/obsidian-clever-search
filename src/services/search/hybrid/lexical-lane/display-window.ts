@@ -21,6 +21,8 @@ export function buildHybridLexicalLaneDisplayCandidate(params: {
 	});
 	return {
 		filePath: candidate.filePath,
+		snapshotGeneration: candidate.snapshotGeneration,
+		snapshotSource: candidate.snapshotSource,
 		basename: FileUtil.getBasename(candidate.filePath),
 		headingChain: [...candidate.headingChain],
 		segmentText: candidate.bridgePreviewText

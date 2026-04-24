@@ -1,9 +1,9 @@
-import { DataProvider } from "src/services/obsidian/user-data/data-provider";
 import {
   buildCoverageLexicalV3HybridLexicalSubitems,
   type CoverageLexicalV3HybridLexicalSubitemsCandidateSpan,
   type CoverageLexicalV3HybridLexicalSubitemsRenderPayload,
 } from "src/services/search/coverage-lexical-v3/hybrid-lexical-subitems";
+import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import { getInstance } from "src/utils/my-lib";
 import {
   buildLineOffsets,
@@ -23,12 +23,22 @@ export async function buildHybridLexicalLaneLocalBlockCandidates(params: {
   blockCandidates: HybridLexicalLaneBlockCandidate[];
   snapshotTextByPath: Map<string, string>;
 }> {
-  const dataProvider = getInstance(DataProvider);
+  const snapshotStore = getInstance(FileSnapshotStore);
   const blockCandidates: HybridLexicalLaneBlockCandidate[] = [];
   const snapshotTextByPath = new Map<string, string>();
+  const snapshotsByPath = await snapshotStore.readIndexedTextSnapshots(
+    params.files.map((file) => ({
+      path: file.filePath,
+      generation: file.snapshotGeneration,
+    })),
+  );
 
   for (const file of params.files) {
-    const snapshotText = await dataProvider.readPlainText(file.filePath);
+    const snapshot = snapshotsByPath.get(file.filePath);
+    if (!snapshot) {
+      continue;
+    }
+    const snapshotText = snapshot.text;
     if (!snapshotText.trim()) {
       continue;
     }
@@ -36,7 +46,11 @@ export async function buildHybridLexicalLaneLocalBlockCandidates(params: {
     blockCandidates.push(
       ...buildHybridLexicalLaneBlockCandidatesForSnapshot({
         queryText: params.queryText,
-        file,
+        file: {
+          ...file,
+          snapshotGeneration: snapshot.generation,
+          snapshotSource: snapshot.source,
+        },
         snapshotText,
         maxBlocksPerFile: params.maxBlocksPerFile,
       }),
@@ -86,6 +100,8 @@ export function buildHybridLexicalLaneBlockCandidatesForSnapshot(params: {
               lineOffsets,
               headingChainByLine,
               snapshotText: params.snapshotText,
+              snapshotGeneration: params.file.snapshotGeneration,
+              snapshotSource: params.file.snapshotSource,
             }),
           ]
         : [];
@@ -99,6 +115,8 @@ function createBlockCandidate(params: {
   lineOffsets: number[];
   headingChainByLine: string[][];
   snapshotText: string;
+  snapshotGeneration?: number;
+  snapshotSource?: "live" | "indexed" | "shadow";
 }): HybridLexicalLaneBlockCandidate {
   const { file, span, payload, lineOffsets, headingChainByLine, snapshotText } =
     params;
@@ -110,6 +128,8 @@ function createBlockCandidate(params: {
   const endLineOffset = lineOffsets[endLine] ?? 0;
   return {
     filePath: file.filePath,
+    snapshotGeneration: params.snapshotGeneration,
+    snapshotSource: params.snapshotSource,
     blockId: `${file.filePath}#${span.start}-${span.end}`,
     startOffset: span.start,
     endOffset: span.end,

@@ -37,6 +37,10 @@ import { ViewRegistry, ViewType } from "./view-registry";
 import {
 	buildHybridSearchIssue,
 } from "../search/hybrid/provider-error";
+import {
+	buildLexicalOnlyFreshness,
+	resolveHybridFileItemFreshness,
+} from "../search/hybrid/freshness";
 
 export type PreparedHybridSearchResult = {
 	prepared: PreparedHybridRecall | null;
@@ -329,51 +333,44 @@ export class SearchService {
 			DataManager,
 		).getHybridFileFreshnessMap(hybridItems.map((item) => item.path));
 		for (const item of hybridItems) {
-			const freshness = freshnessByPath.get(item.path);
-			if (!freshness) {
-				item.freshnessState = "lexical_only";
-				item.freshnessReason = "shadow_missing";
-				item.snapshotGeneration = undefined;
-				item.snapshotSource = "live";
-				item.bannerKey = null;
-				item.bannerMessage = null;
-				continue;
-			}
-
-			item.freshnessState = freshness.state;
-			item.freshnessReason = freshness.reason;
-			item.snapshotGeneration = freshness.snapshotGeneration;
-			item.snapshotSource = freshness.snapshotSource;
-			item.nativeSubItemsReady =
-				freshness.state === "stale_grace" ? false : item.nativeSubItemsReady;
-			const banner = this.buildHybridItemBanner(item);
-			item.bannerKey = banner.key;
-			item.bannerMessage = banner.message;
+			const freshness = resolveHybridFileItemFreshness({
+				...freshnessByPath.get(item.path),
+				nativeSubItemsReady: item.nativeSubItemsReady,
+			});
+			this.applyHybridFileItemFreshness(item, freshness);
 		}
 
 		return result;
 	}
 
-	private buildHybridItemBanner(item: FileItem): {
-		key: FileItem["bannerKey"];
-		message: string | null;
-	} {
-		if (item.freshnessState !== "stale_grace") {
-			return {
-				key: null,
-				message: null,
-			};
+	private applyHybridFileItemFreshness(
+		item: FileItem,
+		freshness: ReturnType<typeof resolveHybridFileItemFreshness>,
+	): void {
+		item.freshnessState = freshness.state;
+		item.freshnessReason = freshness.reason;
+		item.snapshotGeneration = freshness.snapshotGeneration;
+		item.snapshotSource = freshness.snapshotSource;
+		item.nativeSubItemsReady = freshness.nativeSubItemsReady;
+		item.bannerKey = freshness.bannerKey;
+		item.bannerMessage = freshness.bannerMessage;
+	}
+
+	private markResultItemsLexicalOnly(
+		result: SearchResult,
+		reason: Parameters<typeof buildLexicalOnlyFreshness>[0],
+	): void {
+		for (const item of result.items) {
+			if (!(item instanceof FileItem)) {
+				continue;
+			}
+			this.applyHybridFileItemFreshness(
+				item,
+				buildLexicalOnlyFreshness(reason, {
+					snapshotGeneration: item.snapshotGeneration,
+				}),
+			);
 		}
-		if (item.freshnessReason === "embedding_wait_interval") {
-			return {
-				key: "hybridNotice.fileEmbeddingWaitInterval",
-				message: null,
-			};
-		}
-		return {
-			key: "hybridNotice.fileEmbeddingUpdating",
-			message: null,
-		};
 	}
 
 	private resolveHybridFallbackNoticeKey(
@@ -435,7 +432,7 @@ export class SearchService {
 				options.issueKind ||
 				options.issueMessage,
 		);
-		return this.attachHybridFallbackNotice(
+		const fallbackResult = this.attachHybridFallbackNotice(
 			lexicalResult,
 			options.noticeMessage ?? null,
 			options.outcome ??
@@ -449,6 +446,8 @@ export class SearchService {
 			options.noticeContext ?? "default",
 			...(options.noticeKeys ?? []),
 		);
+		this.markResultItemsLexicalOnly(fallbackResult, "dense_unavailable");
+		return fallbackResult;
 	}
 
 	private buildHybridFailureResult(
@@ -856,21 +855,30 @@ export class SearchService {
 		fileItem: FileItem,
 	): Promise<FileSubItem[]> {
 		if (fileItem.snapshotGeneration === undefined) {
-			fileItem.nativeSubItemsReady = true;
+			this.applyHybridFileItemFreshness(
+				fileItem,
+				buildLexicalOnlyFreshness("shadow_missing"),
+			);
 			return fileItem.subItems;
 		}
 
-		const snapshotTexts = await this.fileSnapshotStore.readIndexedTexts([
+		const snapshots = await this.fileSnapshotStore.readIndexedTextSnapshots([
 			{
 				path: fileItem.path,
 				generation: fileItem.snapshotGeneration,
 			},
 		]);
-		const snapshotText = snapshotTexts.get(fileItem.path);
-		if (!snapshotText) {
-			fileItem.nativeSubItemsReady = true;
+		const snapshot = snapshots.get(fileItem.path);
+		if (!snapshot || snapshot.source === "live") {
+			this.applyHybridFileItemFreshness(
+				fileItem,
+				buildLexicalOnlyFreshness("shadow_missing", {
+					snapshotGeneration: fileItem.snapshotGeneration,
+				}),
+			);
 			return fileItem.subItems;
 		}
+		const snapshotText = snapshot.text;
 
 		const lines = snapshotText
 			.split(FileUtil.SPLIT_EOL)
@@ -908,7 +916,7 @@ export class SearchService {
 			});
 		fileItem.subItems = shadowSubItems;
 		fileItem.nativeSubItemsReady = true;
-		fileItem.snapshotSource = "shadow";
+		fileItem.snapshotSource = snapshot.source;
 		return shadowSubItems;
 	}
 

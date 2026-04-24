@@ -58,11 +58,21 @@ jest.mock("obsidian", () => {
 
 jest.mock("src/services/obsidian/transformed-api", () => ({
   MyNotice: class MyNotice {
-    constructor(_message?: string, _timeout?: number) {}
+    static messages: string[] = [];
+
+    constructor(message?: string, _timeout?: number) {
+      if (message) {
+        MyNotice.messages.push(message);
+      }
+    }
     setText(_text: string) {
       return this;
     }
     hide() {}
+
+    static clear() {
+      MyNotice.messages = [];
+    }
   },
 }));
 
@@ -123,6 +133,12 @@ jest.mock("src/services/obsidian/translations/locale-helper", () => ({
   t: (key: string) => key,
 }));
 
+const { MyNotice } = jest.requireMock(
+  "src/services/obsidian/transformed-api",
+) as {
+  MyNotice: { messages: string[]; clear(): void };
+};
+
 type Harness = ReturnType<typeof createHarness>;
 
 function createFile(path: string, text: string, mtime: number): TFile {
@@ -178,6 +194,10 @@ function createHarness(params: {
     getIndexedDocumentMetadata: jest.fn(() => ({})),
   };
   manager.database = {
+    openAndConsumeSchemaUpgradeReport: jest.fn(async () => ({
+      schemaUpgradeDetected: false,
+      recovery: null,
+    })),
     getLexicalSearchSnapshot: jest.fn(async () => lexicalSearchSnapshot),
     setLexicalSearchSnapshot: jest.fn(async (snapshot: Record<string, unknown>) => {
       lexicalSearchSnapshot = { ...snapshot };
@@ -448,6 +468,10 @@ function createBootstrapMetrics() {
 }
 
 describe("DataManager lexical startup reconcile", () => {
+  beforeEach(() => {
+    MyNotice.clear();
+  });
+
   test("forces full rebuild when a persisted lexical snapshot exists but the fine-grained evidence marker is not ready", async () => {
     const harness = createHarness({
       files: [],
@@ -617,7 +641,10 @@ describe("DataManager lexical startup reconcile", () => {
       previousLexicalQueryEvidenceReady: true,
     });
 
-    harness.database.openAndConsumeSchemaUpgradeFlag = jest.fn(async () => true);
+    harness.database.openAndConsumeSchemaUpgradeReport = jest.fn(async () => ({
+      schemaUpgradeDetected: true,
+      recovery: null,
+    }));
     harness.manager.prepareLexicalBootstrapPlan = jest.fn(async () => ({
       needsFullReindex: true,
       needsRefHeal: false,
@@ -643,6 +670,155 @@ describe("DataManager lexical startup reconcile", () => {
     await expect(
       harness.database.hasLexicalQueryEvidenceReadyMarker(),
     ).resolves.toBe(false);
+  });
+
+  test("shows a preserving-stats notice after targeted Dexie recovery", async () => {
+    const harness = createHarness({
+      files: [],
+      texts: new Map(),
+      previousIndexedFileRefs: [],
+      previousLexicalQueryEvidenceReady: true,
+    });
+
+    harness.database.openAndConsumeSchemaUpgradeReport = jest.fn(async () => ({
+      schemaUpgradeDetected: true,
+      recovery: {
+        mode: "targeted-reset",
+        dbName: "clever-search/test",
+        targetVersion: 28.4,
+        initialErrorName: "UpgradeError",
+        initialErrorMessage: "Not yet support for changing primary key",
+        preservedTokenStats: true,
+      },
+    }));
+    harness.manager.prepareLexicalBootstrapPlan = jest.fn(async () => ({
+      needsFullReindex: true,
+      needsRefHeal: false,
+      persistentRecoveryPlan: null,
+    }));
+    harness.manager.healLexicalBootstrapPlan = jest.fn(async () => {});
+    harness.manager.prepareHybridBootstrapPlan = jest.fn(async () => null);
+    Object.defineProperty(harness.manager, "hybridEngine", {
+      configurable: true,
+      value: {
+        isEnabled: jest.fn(() => false),
+      },
+    });
+
+    await harness.manager.runSearchBootstrapPipeline();
+
+    expect(MyNotice.messages).toContain(
+      "Local Clever Search indexes were rebuilt after a Dexie schema repair. Settings and token stats were preserved.",
+    );
+  });
+
+  test("shows a token-reset warning notice after full Dexie recovery fallback", async () => {
+    const harness = createHarness({
+      files: [],
+      texts: new Map(),
+      previousIndexedFileRefs: [],
+      previousLexicalQueryEvidenceReady: true,
+    });
+
+    harness.database.openAndConsumeSchemaUpgradeReport = jest.fn(async () => ({
+      schemaUpgradeDetected: true,
+      recovery: {
+        mode: "full-reset",
+        dbName: "clever-search/test",
+        targetVersion: 28.4,
+        initialErrorName: "UpgradeError",
+        initialErrorMessage: "Not yet support for changing primary key",
+        preservedTokenStats: false,
+      },
+    }));
+    harness.manager.prepareLexicalBootstrapPlan = jest.fn(async () => ({
+      needsFullReindex: true,
+      needsRefHeal: false,
+      persistentRecoveryPlan: null,
+    }));
+    harness.manager.healLexicalBootstrapPlan = jest.fn(async () => {});
+    harness.manager.prepareHybridBootstrapPlan = jest.fn(async () => null);
+    Object.defineProperty(harness.manager, "hybridEngine", {
+      configurable: true,
+      value: {
+        isEnabled: jest.fn(() => false),
+      },
+    });
+
+    await harness.manager.runSearchBootstrapPipeline();
+
+    expect(MyNotice.messages).toContain(
+      "Local Clever Search database was rebuilt after a Dexie schema repair. Settings were preserved; token stats may have been reset.",
+    );
+  });
+
+  test("startup V3 memory summary includes cold storage slices", async () => {
+    const harness = createHarness({
+      files: [],
+      texts: new Map(),
+      previousIndexedFileRefs: [],
+    });
+
+    const lines = harness.manager.buildStartupLexicalMemorySummaryLines({
+      indexableBytes: 1000,
+      persistedLexicalSnapshotBytes: 120,
+      runtimeLexicalIndexBytes: 400,
+      lexicalIndexBreakdown: {
+        __backend: "coverage-lexical-v3",
+        metrics: {
+          residentBytes: 400,
+          auxiliaryBytes: 40,
+          exactTapePositionBytes: 30,
+          hanRouteMetadataWitnessBytes: 20,
+          hanRouteBodyWitnessBytes: 10,
+          hanRouteBodyWitnessPositionBytes: 5,
+        },
+      },
+      lexicalRuntimeBreakdown: {
+        noticeLines: [],
+        summaryLine: null,
+        residentGroupRows: [],
+        coldOwnedGroupRows: [],
+        overlapRows: [],
+        residentTopRows: [
+          {
+            segment: "docArena",
+            bytes: 200,
+            size: "200 B",
+            shareOfLexical: "50.0%",
+            shareOfVault: "20.0%",
+          },
+        ],
+        coldOverlapTopRows: [],
+      },
+      fileSnapshotRuntimeEstimate: {
+        pathBytes: 0,
+        currentTextBytes: 0,
+        generationBytes: 0,
+        fileCount: 0,
+        slotCount: 0,
+        freeSlotCount: 0,
+        totalBytes: 0,
+        largestEntries: [],
+      },
+      coverageLexicalV3PersistedStorageBreakdown: {
+        totalBytes: 260,
+        artifactBytes: 240,
+        registryBytes: 20,
+        snapshotBytes: 120,
+        metadataBytes: 30,
+        evidenceBytes: 70,
+        fuzzyRescueBytes: 20,
+      },
+    } as any);
+
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Coverage V3 cold storage: artifacts"),
+        expect.stringContaining("Coverage V3 cold slices: snapshot"),
+        expect.stringContaining("Coverage V3 cold-at-query evidence:"),
+      ]),
+    );
   });
 
   test("keeps lexical blocked until lexical bootstrap commit finishes", async () => {

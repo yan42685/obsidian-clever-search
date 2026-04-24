@@ -1746,7 +1746,7 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(snapshotStore.publishLexicalHanDocEvidence).toHaveBeenCalledTimes(1);
 		expect(snapshotStore.readLexicalHanDocEvidenceForDocs).toHaveBeenCalledTimes(1);
 		expect(snapshotStore.publishLexicalHanBodyEvidence).toHaveBeenCalledTimes(1);
-		expect(snapshotStore.readLexicalHanBodyEvidenceForBlocks).toHaveBeenCalledTimes(1);
+		expect(snapshotStore.readLexicalHanBodyEvidenceForBlocks).toHaveBeenCalledTimes(0);
 		expect(snapshotStore.readLexicalHanWitnesses).not.toHaveBeenCalled();
 	});
 

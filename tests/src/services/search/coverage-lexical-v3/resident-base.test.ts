@@ -5,6 +5,7 @@ import {
 } from "src/services/search/coverage-lexical-v3/build";
 import { buildIntegerArray } from "src/services/search/coverage-lexical-v3/layout/integer-arrays";
 import { buildBlockPositionLane } from "src/services/search/coverage-lexical-v3/layout/position-lanes";
+import { hashFuzzyLookupKey } from "src/services/search/coverage-lexical-v3/layout/fuzzy-rescue";
 import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
 import { describeResidentBase } from "src/services/search/coverage-lexical-v3/metrics";
 import {
@@ -757,15 +758,15 @@ describe("coverage lexical v3 resident base", () => {
 
 		const obsidanPosting =
 			fuzzyRescueSidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get(
-				"obsidan",
+				hashFuzzyLookupKey("obsidan"),
 			);
 		const incdentPosting =
 			fuzzyRescueSidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get(
-				"incdent",
+				hashFuzzyLookupKey("incdent"),
 			);
 		const runboksPosting =
 			fuzzyRescueSidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get(
-				"runboks",
+				hashFuzzyLookupKey("runboks"),
 			);
 		const postedFamilyTexts = Array.from(obsidanPosting ?? []).map((familyId) =>
 			getFamilyText(residentBase, familyId),
@@ -773,6 +774,9 @@ describe("coverage lexical v3 resident base", () => {
 
 		expect(fuzzyRescueSidecar.indexedMetadataFamilyCount).toBe(2);
 		expect(postedFamilyTexts).toContain("obsidian");
+		expect(fuzzyRescueSidecar.keyBytes).toBe(
+			fuzzyRescueSidecar.fuzzyLookupKeyCount * Uint32Array.BYTES_PER_ELEMENT,
+		);
 		expect(postedFamilyTexts).not.toContain("cache");
 		expect(incdentPosting).toBeUndefined();
 		expect(runboksPosting).toBeUndefined();
