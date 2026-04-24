@@ -17,6 +17,7 @@ import {
   LEXICAL_QUERY_EVIDENCE_READY_VERSION,
   type DatabaseOpenRecoveryReport,
   type DocRegistryRow,
+  type LexicalColdEvidenceStorageBreakdown,
 } from "src/services/database/database";
 
 import {
@@ -339,6 +340,7 @@ type CoverageLexicalV3PersistedStorageBreakdown = {
   metadataBytes: number;
   evidenceBytes: number;
   fuzzyRescueBytes: number;
+  coldEvidenceBreakdown?: LexicalColdEvidenceStorageBreakdown;
 };
 
 const COVERAGE_LEXICAL_V3_PERSISTED_ARTIFACT_TABLES = [
@@ -5205,7 +5207,10 @@ export class DataManager {
       indexableBytes,
     );
     const coverageLexicalV3PersistedStorageBreakdown =
-      this.buildCoverageLexicalV3PersistedStorageBreakdown(bytesByName);
+      this.buildCoverageLexicalV3PersistedStorageBreakdown(
+        bytesByName,
+        storageUsage.lexicalColdEvidenceBreakdown,
+      );
     const fileSnapshotRuntimeEstimate =
       this.fileSnapshotStore.getRuntimeMemoryEstimate();
     return {
@@ -5221,6 +5226,7 @@ export class DataManager {
 
   private buildCoverageLexicalV3PersistedStorageBreakdown(
     bytesByName: ReadonlyMap<string, number>,
+    coldEvidenceBreakdown?: LexicalColdEvidenceStorageBreakdown,
   ): CoverageLexicalV3PersistedStorageBreakdown {
     const sumBytes = (tableNames: readonly string[]) =>
       tableNames.reduce((sum, tableName) => sum + (bytesByName.get(tableName) ?? 0), 0);
@@ -5238,6 +5244,7 @@ export class DataManager {
       metadataBytes,
       evidenceBytes,
       fuzzyRescueBytes,
+      coldEvidenceBreakdown,
     };
   }
 
@@ -5323,6 +5330,85 @@ export class DataManager {
         ].filter((part): part is string => part !== null);
         if (coldSliceParts.length > 0) {
           lines.push("Coverage V3 cold slices: " + coldSliceParts.join(" | "));
+        }
+        const coldEvidenceBreakdown = persistedColdStorage.coldEvidenceBreakdown;
+        if (coldEvidenceBreakdown !== undefined) {
+          lines.push(
+            "Coverage V3 cold evidence tables: body " +
+              this.formatBytes(coldEvidenceBreakdown.tables.lexicalBodyEvidence) +
+              " | han-doc " +
+              this.formatBytes(coldEvidenceBreakdown.tables.lexicalHanDocEvidence) +
+              " | han-body " +
+              this.formatBytes(coldEvidenceBreakdown.tables.lexicalHanBodyEvidence),
+          );
+          const bodyPayloadBytes =
+            coldEvidenceBreakdown.bodyEvidence.exactFamilySlotBytes +
+            coldEvidenceBreakdown.bodyEvidence.exactPositionBytes +
+            coldEvidenceBreakdown.bodyEvidence.supportFamilySlotBytes +
+            coldEvidenceBreakdown.bodyEvidence.supportMaskBytes;
+          const hanDocPayloadBytes =
+            coldEvidenceBreakdown.hanDocEvidence.witnessMatchKeyBytes +
+            coldEvidenceBreakdown.hanDocEvidence.witnessTextBytes +
+            coldEvidenceBreakdown.hanDocEvidence.sourceMaskBytes;
+          const hanBodyPayloadBytes =
+            coldEvidenceBreakdown.hanBodyEvidence.witnessMatchKeyBytes +
+            coldEvidenceBreakdown.hanBodyEvidence.witnessTextBytes +
+            coldEvidenceBreakdown.hanBodyEvidence.startOffsetBytes;
+          lines.push(
+            "Coverage V3 cold evidence payloads: body " +
+              this.formatBytes(bodyPayloadBytes) +
+              " | han-doc " +
+              this.formatBytes(hanDocPayloadBytes) +
+              " | han-body " +
+              this.formatBytes(hanBodyPayloadBytes),
+          );
+          lines.push(
+            "Coverage V3 cold evidence fields: exactSlots " +
+              this.formatBytes(coldEvidenceBreakdown.bodyEvidence.exactFamilySlotBytes) +
+              " | exactPos " +
+              this.formatBytes(coldEvidenceBreakdown.bodyEvidence.exactPositionBytes) +
+              " | supportSlots " +
+              this.formatBytes(coldEvidenceBreakdown.bodyEvidence.supportFamilySlotBytes) +
+              " | witnessKeys " +
+              this.formatBytes(
+                coldEvidenceBreakdown.hanDocEvidence.witnessMatchKeyBytes +
+                  coldEvidenceBreakdown.hanBodyEvidence.witnessMatchKeyBytes,
+              ) +
+              " | witnessText " +
+              this.formatBytes(
+                coldEvidenceBreakdown.hanDocEvidence.witnessTextBytes +
+                  coldEvidenceBreakdown.hanBodyEvidence.witnessTextBytes,
+              ) +
+              " | masks/offsets " +
+              this.formatBytes(
+                coldEvidenceBreakdown.bodyEvidence.supportMaskBytes +
+                  coldEvidenceBreakdown.hanDocEvidence.sourceMaskBytes +
+                  coldEvidenceBreakdown.hanBodyEvidence.startOffsetBytes,
+              ),
+          );
+          const witnessTextTotal = coldEvidenceBreakdown.witnessTextDedup.totalBytes;
+          if (witnessTextTotal > 0) {
+            lines.push(
+              "Coverage V3 witness text dedup potential: row-local " +
+                this.formatBytes(
+                  Math.max(
+                    0,
+                    witnessTextTotal -
+                      coldEvidenceBreakdown.witnessTextDedup.rowLocalUniqueBytes,
+                  ),
+                ) +
+                " | doc-local " +
+                this.formatBytes(
+                  Math.max(
+                    0,
+                    witnessTextTotal -
+                      coldEvidenceBreakdown.witnessTextDedup.docLocalUniqueBytes,
+                  ),
+                ) +
+                " of " +
+                this.formatBytes(witnessTextTotal),
+            );
+          }
         }
       }
       const hotTopRows = report.lexicalRuntimeBreakdown.residentTopRows.filter(

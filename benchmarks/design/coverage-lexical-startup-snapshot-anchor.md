@@ -243,3 +243,65 @@ Validation completed for this update:
 - `npm run typecheck:build -- --pretty false` passes on 2026-04-25.
 - targeted resident-base and file-search-engine tests pass with chunked cold
   evidence writes on 2026-04-25.
+
+## Slice-Local Cold Storage Compression Update
+
+Status: Updated on 2026-04-25
+
+- persisted cold evidence compression is now in scope only for slice-local binary
+  lanes that preserve the existing `docRef + generation` and
+  `docRef + generation + blockOrdinal` replacement model.
+- `lexicalBodyEvidence`, `lexicalHanDocEvidence`, and `lexicalHanBodyEvidence`
+  now persist numeric lanes as typed arrays and skip empty evidence rows.
+- this intentionally avoids global cold string pooling or cross-row compression,
+  so shard-local merge identity, row-local witness text ownership, and
+  incremental rebuild friendliness remain unchanged.
+- schema version `28.6` rebuilds V3 cold evidence rows to avoid compatibility
+  reads for the older `number[]` storage shape.
+
+Validation completed for this update:
+
+- `npm run typecheck:build -- --pretty false` passes on 2026-04-25.
+- targeted store/hydration/build/runtime tests pass on 2026-04-25:
+  `file-snapshot-store.test.ts`, `coverage-lexical-v3/evidence-hydration.test.ts`,
+  `coverage-lexical-v3/resident-base.test.ts`, and
+  `coverage-lexical-v3/file-search-engine.test.ts`.
+
+## Cold Evidence Storage Breakdown Update
+
+Status: Updated on 2026-04-25
+
+- startup lexical memory output now reports V3 cold evidence table bytes for
+  body, Han-doc, and Han-body slices.
+- it also reports payload bytes grouped by exact slots, exact positions, support
+  slots, witness keys, witness texts, masks, and offsets.
+- this is measurement-only: it keeps the existing typed-array slice rows,
+  row-local witness texts, and doc/block replacement keys intact.
+- the purpose is to decide whether any later Dexie compact phase should target
+  body exact/support lanes, Han witness text, or row overhead, without violating
+  shard-local merge constraints.
+
+Validation completed for this update:
+
+- `npm run typecheck:build -- --pretty false` passes on 2026-04-25.
+- targeted startup/store/build/runtime tests pass on 2026-04-25.
+
+## Body Evidence Packed Payload Update
+
+Status: Completed on 2026-04-25
+
+- `lexicalBodyEvidence` now stores exact/support numeric cold evidence as a
+  row-local `bodyEvidencePayload` instead of separate Dexie fields.
+- the payload uses adaptive unsigned lane widths and remains keyed by
+  `docRef + generation + blockOrdinal`, preserving incremental block-slice
+  replacement.
+- startup cold evidence breakdown continues to report exact slots, exact
+  positions, support slots, masks, and offsets by decoding the packed payload
+  metadata for diagnostics.
+- schema version `28.7` rebuilds V3 cold evidence rows for the packed body
+  evidence format.
+
+Validation completed for this update:
+
+- `npm run typecheck:build -- --pretty false` passes on 2026-04-25.
+- targeted store/build/runtime/startup tests pass on 2026-04-25.

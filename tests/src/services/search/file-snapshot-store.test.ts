@@ -102,10 +102,7 @@ type LexicalBodyEvidenceRow = {
   docRef: number;
   generation: number;
   blockOrdinal: number;
-  exactFamilyIds: readonly number[];
-  exactTokenPositions: readonly number[];
-  familySupportFamilyIds: readonly number[];
-  familySupportMaskByEntry: readonly number[];
+  bodyEvidencePayload: Uint8Array;
 };
 
 type LexicalHanDocEvidenceRow = {
@@ -839,6 +836,13 @@ describe("FileSnapshotStore", () => {
     ]);
 
     expect(database.db.lexicalBodyEvidence.rows.size).toBe(2);
+		const storedBodyRow = database.db.lexicalBodyEvidence.rows.get(
+			buildLexicalBlockEvidenceRowId(firstLocator),
+		);
+		expect(storedBodyRow?.bodyEvidencePayload).toBeInstanceOf(Uint8Array);
+		expect(
+			"exactFamilyIds" in (storedBodyRow as Record<string, unknown>),
+		).toBe(false);
 
     const evidenceByRowId = await store.readLexicalBodyEvidenceForBlocks([
       secondLocator,
@@ -878,11 +882,14 @@ describe("FileSnapshotStore", () => {
         id: buildLexicalDocEvidenceRowId(firstLocator),
         docRef: firstLocator.docRef,
         generation: firstLocator.generation,
-        identityWitnessStringIds: [3, 5],
-        identityWitnessSourceMaskByDocEntry: [1, 2],
-        routeWitnessStringIds: [7],
-        routeWitnessSourceMaskByDocEntry: [4],
-        headingWitnessStringIds: [9],
+        identityWitnessMatchKeys: new Int32Array([-1500000003, -1500000005]),
+        identityWitnessTexts: ["identity-a", "identity-b"],
+        identityWitnessSourceMaskByDocEntry: new Uint8Array([1, 2]),
+        routeWitnessMatchKeys: new Int32Array([-1500000007]),
+        routeWitnessTexts: ["route-a"],
+        routeWitnessSourceMaskByDocEntry: new Uint8Array([4]),
+        headingWitnessMatchKeys: new Int32Array([-1500000009]),
+        headingWitnessTexts: ["heading-a"],
       },
     ]);
 
@@ -894,11 +901,14 @@ describe("FileSnapshotStore", () => {
     ]);
 
     expect(evidenceByRowId.get(buildLexicalDocEvidenceRowId(firstLocator))).toEqual({
-      identityWitnessStringIds: [3, 5],
+      identityWitnessMatchKeys: [-1500000003, -1500000005],
+      identityWitnessTexts: ["identity-a", "identity-b"],
       identityWitnessSourceMasks: [1, 2],
-      routeWitnessStringIds: [7],
+      routeWitnessMatchKeys: [-1500000007],
+      routeWitnessTexts: ["route-a"],
       routeWitnessSourceMasks: [4],
-      headingWitnessStringIds: [9],
+      headingWitnessMatchKeys: [-1500000009],
+      headingWitnessTexts: ["heading-a"],
     });
     expect(evidenceByRowId.has(buildLexicalDocEvidenceRowId(missingLocator))).toBe(false);
   });
@@ -922,8 +932,9 @@ describe("FileSnapshotStore", () => {
         docRef: firstLocator.docRef,
         generation: firstLocator.generation,
         blockOrdinal: firstLocator.blockOrdinal,
-        bodyWitnessStringIds: [11, 13],
-        bodyWitnessStartOffsets: [0, 6],
+        bodyWitnessMatchKeys: new Int32Array([-1500000011, -1500000013]),
+        bodyWitnessTexts: ["body-a", "body-b"],
+        bodyWitnessStartOffsets: new Uint32Array([0, 6]),
       },
     ]);
 
@@ -935,7 +946,8 @@ describe("FileSnapshotStore", () => {
     ]);
 
     expect(evidenceByRowId.get(buildLexicalBlockEvidenceRowId(firstLocator))).toEqual({
-      bodyWitnessStringIds: [11, 13],
+      bodyWitnessMatchKeys: [-1500000011, -1500000013],
+      bodyWitnessTexts: ["body-a", "body-b"],
       bodyWitnessStartOffsets: [0, 6],
     });
     expect(evidenceByRowId.has(buildLexicalBlockEvidenceRowId(missingLocator))).toBe(false);

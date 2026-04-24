@@ -809,6 +809,37 @@ describe("DataManager lexical startup reconcile", () => {
         metadataBytes: 30,
         evidenceBytes: 70,
         fuzzyRescueBytes: 20,
+        coldEvidenceBreakdown: {
+          tables: {
+            lexicalBodyEvidence: 30,
+            lexicalHanDocEvidence: 25,
+            lexicalHanBodyEvidence: 15,
+          },
+          bodyEvidence: {
+            rowMetadataBytes: 5,
+            exactFamilySlotBytes: 8,
+            exactPositionBytes: 6,
+            supportFamilySlotBytes: 7,
+            supportMaskBytes: 4,
+          },
+          hanDocEvidence: {
+            rowMetadataBytes: 4,
+            witnessMatchKeyBytes: 9,
+            witnessTextBytes: 10,
+            sourceMaskBytes: 2,
+          },
+          hanBodyEvidence: {
+            rowMetadataBytes: 3,
+            witnessMatchKeyBytes: 5,
+            witnessTextBytes: 4,
+            startOffsetBytes: 3,
+          },
+          witnessTextDedup: {
+            totalBytes: 14,
+            rowLocalUniqueBytes: 10,
+            docLocalUniqueBytes: 8,
+          },
+        },
       },
     } as any);
 
@@ -816,6 +847,10 @@ describe("DataManager lexical startup reconcile", () => {
       expect.arrayContaining([
         expect.stringContaining("Coverage V3 cold storage: artifacts"),
         expect.stringContaining("Coverage V3 cold slices: snapshot"),
+        expect.stringContaining("Coverage V3 cold evidence tables:"),
+        expect.stringContaining("Coverage V3 cold evidence payloads:"),
+        expect.stringContaining("Coverage V3 cold evidence fields:"),
+        expect.stringContaining("Coverage V3 witness text dedup potential:"),
         expect.stringContaining("Coverage V3 cold-at-query evidence:"),
       ]),
     );

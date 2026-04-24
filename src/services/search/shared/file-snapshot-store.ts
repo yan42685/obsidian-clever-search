@@ -37,6 +37,185 @@ function estimateUtf8Bytes(text: string): number {
 	return textEncoder.encode(text).byteLength;
 }
 
+function toReadonlyNumbers(values?: ArrayLike<number>): readonly number[] | undefined {
+	if (values == null) {
+		return undefined;
+	}
+	return Array.from(values);
+}
+
+function hasEntries(values?: ArrayLike<unknown>): boolean {
+	return values != null && values.length > 0;
+}
+
+type PackedUnsignedLane = Uint8Array | Uint16Array | Uint32Array;
+
+export type LexicalBodyEvidencePublishRow = Omit<
+	LexicalBodyEvidenceRow,
+	"bodyEvidencePayload"
+> & {
+	exactFamilyIds?: ArrayLike<number>;
+	exactShardLocalFamilySlots?: ArrayLike<number>;
+	exactTokenPositions: ArrayLike<number>;
+	familySupportFamilyIds?: ArrayLike<number>;
+	supportShardLocalFamilySlots?: ArrayLike<number>;
+	familySupportMaskByEntry: ArrayLike<number>;
+};
+
+type DecodedBodyEvidencePayload = Readonly<{
+	exactFamilyIds?: readonly number[];
+	exactShardLocalFamilySlots?: readonly number[];
+	exactTokenPositions: readonly number[];
+	familySupportFamilyIds?: readonly number[];
+	supportShardLocalFamilySlots?: readonly number[];
+	familySupportMaskByEntry: readonly number[];
+}>;
+
+const BODY_EVIDENCE_PAYLOAD_VERSION = 1;
+const PACKED_LANE_ABSENT = 0;
+const PACKED_LANE_U8 = 1;
+const PACKED_LANE_U16 = 2;
+const PACKED_LANE_U32 = 3;
+
+function encodeBodyEvidencePayload(row: LexicalBodyEvidencePublishRow): Uint8Array {
+	const exactFamilyIds = packOptionalUnsignedLane(row.exactFamilyIds);
+	const exactShardLocalFamilySlots = packOptionalUnsignedLane(
+		row.exactShardLocalFamilySlots,
+	);
+	const exactTokenPositions = packRequiredUnsignedLane(row.exactTokenPositions);
+	const familySupportFamilyIds = packOptionalUnsignedLane(row.familySupportFamilyIds);
+	const supportShardLocalFamilySlots = packOptionalUnsignedLane(
+		row.supportShardLocalFamilySlots,
+	);
+	const familySupportMaskByEntry = new Uint8Array(row.familySupportMaskByEntry);
+	const lanes = [
+		exactFamilyIds,
+		exactShardLocalFamilySlots,
+		exactTokenPositions,
+		familySupportFamilyIds,
+		supportShardLocalFamilySlots,
+		familySupportMaskByEntry,
+	];
+	const headerBytes = 2 + lanes.length * 5;
+	const payloadBytes = lanes.reduce((sum, lane) => sum + lane.byteLength, 0);
+	const payload = new Uint8Array(headerBytes + payloadBytes);
+	payload[0] = BODY_EVIDENCE_PAYLOAD_VERSION;
+	payload[1] = lanes.length;
+	const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+	let headerOffset = 2;
+	let laneOffset = headerBytes;
+	for (const lane of lanes) {
+		payload[headerOffset] = encodePackedLaneKind(lane);
+		view.setUint32(headerOffset + 1, lane.length, true);
+		payload.set(new Uint8Array(lane.buffer, lane.byteOffset, lane.byteLength), laneOffset);
+		headerOffset += 5;
+		laneOffset += lane.byteLength;
+	}
+	return payload;
+}
+
+function decodeBodyEvidencePayload(payload: Uint8Array): DecodedBodyEvidencePayload {
+	if (payload[0] !== BODY_EVIDENCE_PAYLOAD_VERSION) {
+		return {
+			exactTokenPositions: [],
+			familySupportMaskByEntry: [],
+		};
+	}
+	const laneCount = payload[1] ?? 0;
+	const headerBytes = 2 + laneCount * 5;
+	const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+	const lanes: readonly number[][] = Array.from({ length: laneCount }, (_, index) => {
+		const headerOffset = 2 + index * 5;
+		const kind = payload[headerOffset] ?? PACKED_LANE_ABSENT;
+		const length = view.getUint32(headerOffset + 1, true);
+		let byteOffset = headerBytes;
+		for (let previousIndex = 0; previousIndex < index; previousIndex += 1) {
+			const previousKind = payload[2 + previousIndex * 5] ?? PACKED_LANE_ABSENT;
+			const previousLength = view.getUint32(2 + previousIndex * 5 + 1, true);
+			byteOffset += previousLength * packedLaneBytesPerElement(previousKind);
+		}
+		return unpackUnsignedLane(payload, byteOffset, kind, length);
+	});
+	return {
+		exactFamilyIds: emptyToUndefined(lanes[0]),
+		exactShardLocalFamilySlots: emptyToUndefined(lanes[1]),
+		exactTokenPositions: lanes[2] ?? [],
+		familySupportFamilyIds: emptyToUndefined(lanes[3]),
+		supportShardLocalFamilySlots: emptyToUndefined(lanes[4]),
+		familySupportMaskByEntry: lanes[5] ?? [],
+	};
+}
+
+function packOptionalUnsignedLane(values?: ArrayLike<number>): PackedUnsignedLane {
+	return values == null ? new Uint8Array() : packRequiredUnsignedLane(values);
+}
+
+function packRequiredUnsignedLane(values: ArrayLike<number>): PackedUnsignedLane {
+	let maxValue = 0;
+	for (let index = 0; index < values.length; index += 1) {
+		maxValue = Math.max(maxValue, values[index] ?? 0);
+	}
+	if (maxValue <= 0xff) {
+		return new Uint8Array(Array.from(values));
+	}
+	if (maxValue <= 0xffff) {
+		return new Uint16Array(Array.from(values));
+	}
+	return new Uint32Array(Array.from(values));
+}
+
+function encodePackedLaneKind(lane: PackedUnsignedLane): number {
+	if (lane.length === 0) {
+		return PACKED_LANE_ABSENT;
+	}
+	if (lane instanceof Uint8Array) {
+		return PACKED_LANE_U8;
+	}
+	if (lane instanceof Uint16Array) {
+		return PACKED_LANE_U16;
+	}
+	return PACKED_LANE_U32;
+}
+
+function packedLaneBytesPerElement(kind: number): 0 | 1 | 2 | 4 {
+	switch (kind) {
+		case PACKED_LANE_U8:
+			return 1;
+		case PACKED_LANE_U16:
+			return 2;
+		case PACKED_LANE_U32:
+			return 4;
+		default:
+			return 0;
+	}
+}
+
+function unpackUnsignedLane(
+	payload: Uint8Array,
+	byteOffset: number,
+	kind: number,
+	length: number,
+): number[] {
+	switch (kind) {
+		case PACKED_LANE_U8:
+			return Array.from(payload.slice(byteOffset, byteOffset + length));
+		case PACKED_LANE_U16:
+			return Array.from(
+				new Uint16Array(payload.buffer, payload.byteOffset + byteOffset, length),
+			);
+		case PACKED_LANE_U32:
+			return Array.from(
+				new Uint32Array(payload.buffer, payload.byteOffset + byteOffset, length),
+			);
+		default:
+			return [];
+	}
+}
+
+function emptyToUndefined(values: readonly number[] | undefined): readonly number[] | undefined {
+	return values == null || values.length === 0 ? undefined : values;
+}
+
 type PersistedFileShadowRow = {
 	docRef?: number;
 	filePath: string;
@@ -453,21 +632,23 @@ export class FileSnapshotStore {
 			if (row == null) {
 				continue;
 			}
+			const decoded = decodeBodyEvidencePayload(row.bodyEvidencePayload);
+			const familySupportMasks = decoded.familySupportMaskByEntry;
 			evidenceById.set(uniqueIds[index], {
-				exactFamilyIds: row.exactFamilyIds,
-				exactShardLocalFamilySlots: row.exactShardLocalFamilySlots,
-				exactTokenPositions: row.exactTokenPositions,
-				familySupportEntries: row.familySupportFamilyIds?.map(
+				exactFamilyIds: decoded.exactFamilyIds,
+				exactShardLocalFamilySlots: decoded.exactShardLocalFamilySlots,
+				exactTokenPositions: decoded.exactTokenPositions,
+				familySupportEntries: decoded.familySupportFamilyIds?.map(
 					(familyId, supportIndex) => ({
 						familyId,
-						supportMask: row.familySupportMaskByEntry[supportIndex] ?? 0,
+						supportMask: familySupportMasks[supportIndex] ?? 0,
 					}),
 				),
 				supportEntriesByShardLocalFamilySlot:
-					row.supportShardLocalFamilySlots?.map(
+					decoded.supportShardLocalFamilySlots?.map(
 						(shardLocalFamilySlot, supportIndex) => ({
 							shardLocalFamilySlot,
-							supportMask: row.familySupportMaskByEntry[supportIndex] ?? 0,
+							supportMask: familySupportMasks[supportIndex] ?? 0,
 						}),
 					),
 			});
@@ -476,35 +657,30 @@ export class FileSnapshotStore {
 	}
 
 	async publishLexicalBodyEvidence(
-		rows: ReadonlyArray<LexicalBodyEvidenceRow>,
+		rows: ReadonlyArray<LexicalBodyEvidencePublishRow>,
 	): Promise<void> {
 		if (rows.length === 0) {
 			return;
 		}
-		await this.database.db.lexicalBodyEvidence.bulkPut(
-			rows.map((row) => ({
+		const persistedRows = rows
+			.filter(
+				(row) =>
+					hasEntries(row.exactFamilyIds) ||
+					hasEntries(row.exactShardLocalFamilySlots) ||
+					hasEntries(row.familySupportFamilyIds) ||
+					hasEntries(row.supportShardLocalFamilySlots),
+			)
+			.map((row) => ({
 				id: row.id,
 				docRef: row.docRef,
 				generation: row.generation,
 				blockOrdinal: row.blockOrdinal,
-				exactFamilyIds:
-					row.exactFamilyIds == null ? undefined : [...row.exactFamilyIds],
-				exactShardLocalFamilySlots:
-					row.exactShardLocalFamilySlots == null
-						? undefined
-						: [...row.exactShardLocalFamilySlots],
-				exactTokenPositions: [...row.exactTokenPositions],
-				familySupportFamilyIds:
-					row.familySupportFamilyIds == null
-						? undefined
-						: [...row.familySupportFamilyIds],
-				supportShardLocalFamilySlots:
-					row.supportShardLocalFamilySlots == null
-						? undefined
-						: [...row.supportShardLocalFamilySlots],
-				familySupportMaskByEntry: [...row.familySupportMaskByEntry],
-			})),
-		);
+				bodyEvidencePayload: encodeBodyEvidencePayload(row),
+			}));
+		if (persistedRows.length === 0) {
+			return;
+		}
+		await this.database.db.lexicalBodyEvidence.bulkPut(persistedRows);
 	}
 
 	async readLexicalHanDocEvidenceForDocs(
@@ -524,16 +700,20 @@ export class FileSnapshotStore {
 				continue;
 			}
 			evidenceById.set(uniqueIds[index], {
-				identityWitnessStringIds: row.identityWitnessStringIds,
-				identityWitnessMatchKeys: row.identityWitnessMatchKeys,
+				identityWitnessStringIds: toReadonlyNumbers(row.identityWitnessStringIds),
+				identityWitnessMatchKeys: toReadonlyNumbers(row.identityWitnessMatchKeys),
 				identityWitnessTexts: row.identityWitnessTexts,
-				identityWitnessSourceMasks: row.identityWitnessSourceMaskByDocEntry,
-				routeWitnessStringIds: row.routeWitnessStringIds,
-				routeWitnessMatchKeys: row.routeWitnessMatchKeys,
+				identityWitnessSourceMasks: Array.from(
+					row.identityWitnessSourceMaskByDocEntry,
+				),
+				routeWitnessStringIds: toReadonlyNumbers(row.routeWitnessStringIds),
+				routeWitnessMatchKeys: toReadonlyNumbers(row.routeWitnessMatchKeys),
 				routeWitnessTexts: row.routeWitnessTexts,
-				routeWitnessSourceMasks: row.routeWitnessSourceMaskByDocEntry,
-				headingWitnessStringIds: row.headingWitnessStringIds,
-				headingWitnessMatchKeys: row.headingWitnessMatchKeys,
+				routeWitnessSourceMasks: Array.from(
+					row.routeWitnessSourceMaskByDocEntry,
+				),
+				headingWitnessStringIds: toReadonlyNumbers(row.headingWitnessStringIds),
+				headingWitnessMatchKeys: toReadonlyNumbers(row.headingWitnessMatchKeys),
 				headingWitnessTexts: row.headingWitnessTexts,
 			});
 		}
@@ -546,53 +726,62 @@ export class FileSnapshotStore {
 		if (rows.length === 0) {
 			return;
 		}
-		await this.database.db.lexicalHanDocEvidence.bulkPut(
-			rows.map((row) => ({
+		const persistedRows = rows
+			.filter(
+				(row) =>
+					hasEntries(row.identityWitnessMatchKeys) ||
+					hasEntries(row.routeWitnessMatchKeys) ||
+					hasEntries(row.headingWitnessMatchKeys),
+			)
+			.map((row) => ({
 				id: row.id,
 				docRef: row.docRef,
 				generation: row.generation,
 				identityWitnessStringIds:
 					row.identityWitnessStringIds == null
 						? undefined
-						: [...row.identityWitnessStringIds],
+						: new Uint32Array(row.identityWitnessStringIds),
 				identityWitnessMatchKeys:
 					row.identityWitnessMatchKeys == null
 						? undefined
-						: [...row.identityWitnessMatchKeys],
+						: new Int32Array(row.identityWitnessMatchKeys),
 				identityWitnessTexts:
 					row.identityWitnessTexts == null
 						? undefined
 						: [...row.identityWitnessTexts],
-				identityWitnessSourceMaskByDocEntry: [
-					...row.identityWitnessSourceMaskByDocEntry,
-				],
+				identityWitnessSourceMaskByDocEntry: new Uint8Array(
+					row.identityWitnessSourceMaskByDocEntry,
+				),
 				routeWitnessStringIds:
 					row.routeWitnessStringIds == null
 						? undefined
-						: [...row.routeWitnessStringIds],
+						: new Uint32Array(row.routeWitnessStringIds),
 				routeWitnessMatchKeys:
 					row.routeWitnessMatchKeys == null
 						? undefined
-						: [...row.routeWitnessMatchKeys],
+						: new Int32Array(row.routeWitnessMatchKeys),
 				routeWitnessTexts:
 					row.routeWitnessTexts == null ? undefined : [...row.routeWitnessTexts],
-				routeWitnessSourceMaskByDocEntry: [
-					...row.routeWitnessSourceMaskByDocEntry,
-				],
+				routeWitnessSourceMaskByDocEntry: new Uint8Array(
+					row.routeWitnessSourceMaskByDocEntry,
+				),
 				headingWitnessStringIds:
 					row.headingWitnessStringIds == null
 						? undefined
-						: [...row.headingWitnessStringIds],
+						: new Uint32Array(row.headingWitnessStringIds),
 				headingWitnessMatchKeys:
 					row.headingWitnessMatchKeys == null
 						? undefined
-						: [...row.headingWitnessMatchKeys],
+						: new Int32Array(row.headingWitnessMatchKeys),
 				headingWitnessTexts:
 					row.headingWitnessTexts == null
 						? undefined
 						: [...row.headingWitnessTexts],
-			})),
-		);
+			}));
+		if (persistedRows.length === 0) {
+			return;
+		}
+		await this.database.db.lexicalHanDocEvidence.bulkPut(persistedRows);
 	}
 
 	async readLexicalHanBodyEvidenceForBlocks(
@@ -612,10 +801,10 @@ export class FileSnapshotStore {
 				continue;
 			}
 			evidenceById.set(uniqueIds[index], {
-				bodyWitnessStringIds: row.bodyWitnessStringIds,
-				bodyWitnessMatchKeys: row.bodyWitnessMatchKeys,
+				bodyWitnessStringIds: toReadonlyNumbers(row.bodyWitnessStringIds),
+				bodyWitnessMatchKeys: toReadonlyNumbers(row.bodyWitnessMatchKeys),
 				bodyWitnessTexts: row.bodyWitnessTexts,
-				bodyWitnessStartOffsets: row.bodyWitnessStartOffsets,
+				bodyWitnessStartOffsets: Array.from(row.bodyWitnessStartOffsets),
 			});
 		}
 		return evidenceById;
@@ -627,8 +816,9 @@ export class FileSnapshotStore {
 		if (rows.length === 0) {
 			return;
 		}
-		await this.database.db.lexicalHanBodyEvidence.bulkPut(
-			rows.map((row) => ({
+		const persistedRows = rows
+			.filter((row) => hasEntries(row.bodyWitnessMatchKeys))
+			.map((row) => ({
 				id: row.id,
 				docRef: row.docRef,
 				generation: row.generation,
@@ -636,16 +826,19 @@ export class FileSnapshotStore {
 				bodyWitnessStringIds:
 					row.bodyWitnessStringIds == null
 						? undefined
-						: [...row.bodyWitnessStringIds],
+						: new Uint32Array(row.bodyWitnessStringIds),
 				bodyWitnessMatchKeys:
 					row.bodyWitnessMatchKeys == null
 						? undefined
-						: [...row.bodyWitnessMatchKeys],
+						: new Int32Array(row.bodyWitnessMatchKeys),
 				bodyWitnessTexts:
 					row.bodyWitnessTexts == null ? undefined : [...row.bodyWitnessTexts],
-				bodyWitnessStartOffsets: [...row.bodyWitnessStartOffsets],
-			})),
-		);
+				bodyWitnessStartOffsets: new Uint32Array(row.bodyWitnessStartOffsets),
+			}));
+		if (persistedRows.length === 0) {
+			return;
+		}
+		await this.database.db.lexicalHanBodyEvidence.bulkPut(persistedRows);
 	}
 
 	async readLexicalExactTapes(): Promise<ResidentExactTapeSidecar> {

@@ -1,6 +1,5 @@
-import type { IndexedDocument } from "src/globals/search-types";
+﻿import type { IndexedDocument } from "src/globals/search-types";
 import type {
-	LexicalBodyEvidenceRow,
 	LexicalHanBodyEvidenceRow,
 	LexicalHanDocEvidenceRow,
 } from "src/services/database/database";
@@ -54,9 +53,33 @@ import {
 import {
 	buildLexicalBlockEvidenceRowId,
 	buildLexicalDocEvidenceRowId,
+	type LexicalBodyEvidencePublishRow,
 } from "../../shared/file-snapshot-store";
 
 const textEncoder = new TextEncoder();
+
+function toUint32Array(values: readonly number[]): Uint32Array {
+	return new Uint32Array(values);
+}
+
+function toInt32Array(values: readonly number[]): Int32Array {
+	return new Int32Array(values);
+}
+
+function toUint8Array(values: readonly number[]): Uint8Array {
+	return new Uint8Array(values);
+}
+
+function mapToUint32Array(
+	values: readonly number[],
+	mapper: (value: number) => number,
+): Uint32Array {
+	const mapped = new Uint32Array(values.length);
+	for (let index = 0; index < values.length; index += 1) {
+		mapped[index] = mapper(values[index]);
+	}
+	return mapped;
+}
 
 const STRING_SOURCE_PATH = 1 << 0;
 const STRING_SOURCE_FAMILY = 1 << 1;
@@ -109,7 +132,7 @@ type PreparedBodyBlock = Readonly<{
 export type ResidentHotBaseArtifacts = Readonly<{
 	base: ResidentBase;
 	fuzzyRescueSidecar: ResidentFuzzyRescueSidecar;
-	bodyEvidenceRows: readonly LexicalBodyEvidenceRow[];
+	bodyEvidenceRows: readonly LexicalBodyEvidencePublishRow[];
 	hanDocEvidenceRows: readonly LexicalHanDocEvidenceRow[];
 	hanBodyEvidenceRows: readonly LexicalHanBodyEvidenceRow[];
 }>;
@@ -122,7 +145,7 @@ export type ResidentHotBaseStreamingArtifacts = Readonly<{
 }>;
 
 export type ResidentColdEvidenceSink = Readonly<{
-	publishBodyEvidence: (rows: readonly LexicalBodyEvidenceRow[]) => Promise<void>;
+	publishBodyEvidence: (rows: readonly LexicalBodyEvidencePublishRow[]) => Promise<void>;
 	publishHanDocEvidence: (rows: readonly LexicalHanDocEvidenceRow[]) => Promise<void>;
 	publishHanBodyEvidence: (rows: readonly LexicalHanBodyEvidenceRow[]) => Promise<void>;
 }>;
@@ -199,7 +222,7 @@ export function buildResidentHotBaseArtifacts(
 		ordinal: number;
 		summaryFamilyIds: readonly number[];
 	}> = [];
-	const bodyEvidenceRows: LexicalBodyEvidenceRow[] = [];
+	const bodyEvidenceRows: LexicalBodyEvidencePublishRow[] = [];
 	const hanBodyEvidenceRows: LexicalHanBodyEvidenceRow[] = [];
 	const bodyBlockStartByDocId: number[] = [];
 	const bodyBlockCountByDocId: number[] = [];
@@ -234,16 +257,18 @@ export function buildResidentHotBaseArtifacts(
 					docRef: document.docRef,
 					generation: document.generation,
 					blockOrdinal: block.ordinal,
-					exactShardLocalFamilySlots: exactFamilyIds.map(
+					exactShardLocalFamilySlots: mapToUint32Array(
+						exactFamilyIds,
 						(familyId) =>
 							familyLexicon.shardLocalFamilySlotByFamilyId[familyId] ?? familyId,
 					),
-					exactTokenPositions: [...block.exactFamilyStartOffsets],
-					supportShardLocalFamilySlots: supportDraft.familyIds.map(
+					exactTokenPositions: toUint32Array(block.exactFamilyStartOffsets),
+					supportShardLocalFamilySlots: mapToUint32Array(
+						supportDraft.familyIds,
 						(familyId) =>
 							familyLexicon.shardLocalFamilySlotByFamilyId[familyId] ?? familyId,
 					),
-					familySupportMaskByEntry: [...supportDraft.supportMasks],
+					familySupportMaskByEntry: toUint8Array(supportDraft.supportMasks),
 				});
 				hanBodyEvidenceRows.push({
 					id: buildLexicalBlockEvidenceRowId({
@@ -254,9 +279,11 @@ export function buildResidentHotBaseArtifacts(
 					docRef: document.docRef,
 					generation: document.generation,
 					blockOrdinal: block.ordinal,
-					bodyWitnessMatchKeys: block.hanWitnessTexts.map(buildStableWitnessMatchKey),
+					bodyWitnessMatchKeys: toInt32Array(
+						block.hanWitnessTexts.map(buildStableWitnessMatchKey),
+					),
 					bodyWitnessTexts: [...block.hanWitnessTexts],
-					bodyWitnessStartOffsets: [...block.hanWitnessStartOffsets],
+					bodyWitnessStartOffsets: toUint32Array(block.hanWitnessStartOffsets),
 				});
 			}
 		}
@@ -322,20 +349,20 @@ export function buildResidentHotBaseArtifacts(
 			}),
 			docRef: document.docRef,
 			generation: document.generation,
-			identityWitnessMatchKeys: document.identityHanWitnessTexts.map(
-				buildStableWitnessMatchKey,
+			identityWitnessMatchKeys: toInt32Array(
+				document.identityHanWitnessTexts.map(buildStableWitnessMatchKey),
 			),
 			identityWitnessTexts: [...document.identityHanWitnessTexts],
-			identityWitnessSourceMaskByDocEntry: [
-				...document.identityHanWitnessSourceMasks,
-			],
-			routeWitnessMatchKeys: document.routeHanWitnessTexts.map(
-				buildStableWitnessMatchKey,
+			identityWitnessSourceMaskByDocEntry: toUint8Array(
+				document.identityHanWitnessSourceMasks,
+			),
+			routeWitnessMatchKeys: toInt32Array(
+				document.routeHanWitnessTexts.map(buildStableWitnessMatchKey),
 			),
 			routeWitnessTexts: [...document.routeHanWitnessTexts],
-			routeWitnessSourceMaskByDocEntry: [...document.routeHanWitnessSourceMasks],
-			headingWitnessMatchKeys: document.headingHanWitnessTexts.map(
-				buildStableWitnessMatchKey,
+			routeWitnessSourceMaskByDocEntry: toUint8Array(document.routeHanWitnessSourceMasks),
+			headingWitnessMatchKeys: toInt32Array(
+				document.headingHanWitnessTexts.map(buildStableWitnessMatchKey),
 			),
 			headingWitnessTexts: [...document.headingHanWitnessTexts],
 		}));
@@ -446,7 +473,7 @@ export async function buildResidentHotBaseArtifactsStreaming(
 	const bodyBlockCountByDocId: number[] = [];
 	let coldEvidenceFlushCount = 0;
 	let maxColdEvidenceChunkSize = 0;
-	let bodyEvidenceChunk: LexicalBodyEvidenceRow[] = [];
+	let bodyEvidenceChunk: LexicalBodyEvidencePublishRow[] = [];
 	let hanBodyEvidenceChunk: LexicalHanBodyEvidenceRow[] = [];
 	let hanDocEvidenceChunk: LexicalHanDocEvidenceRow[] = [];
 	const flushBodyEvidence = async (): Promise<void> => {
@@ -510,16 +537,18 @@ export async function buildResidentHotBaseArtifactsStreaming(
 					docRef: document.docRef,
 					generation: document.generation,
 					blockOrdinal: block.ordinal,
-					exactShardLocalFamilySlots: exactFamilyIds.map(
+					exactShardLocalFamilySlots: mapToUint32Array(
+						exactFamilyIds,
 						(familyId) =>
 							familyLexicon.shardLocalFamilySlotByFamilyId[familyId] ?? familyId,
 					),
-					exactTokenPositions: [...block.exactFamilyStartOffsets],
-					supportShardLocalFamilySlots: supportDraft.familyIds.map(
+					exactTokenPositions: toUint32Array(block.exactFamilyStartOffsets),
+					supportShardLocalFamilySlots: mapToUint32Array(
+						supportDraft.familyIds,
 						(familyId) =>
 							familyLexicon.shardLocalFamilySlotByFamilyId[familyId] ?? familyId,
 					),
-					familySupportMaskByEntry: [...supportDraft.supportMasks],
+					familySupportMaskByEntry: toUint8Array(supportDraft.supportMasks),
 				});
 				hanBodyEvidenceChunk.push({
 					id: buildLexicalBlockEvidenceRowId({
@@ -530,9 +559,11 @@ export async function buildResidentHotBaseArtifactsStreaming(
 					docRef: document.docRef,
 					generation: document.generation,
 					blockOrdinal: block.ordinal,
-					bodyWitnessMatchKeys: block.hanWitnessTexts.map(buildStableWitnessMatchKey),
+					bodyWitnessMatchKeys: toInt32Array(
+						block.hanWitnessTexts.map(buildStableWitnessMatchKey),
+					),
 					bodyWitnessTexts: [...block.hanWitnessTexts],
-					bodyWitnessStartOffsets: [...block.hanWitnessStartOffsets],
+					bodyWitnessStartOffsets: toUint32Array(block.hanWitnessStartOffsets),
 				});
 				if (bodyEvidenceChunk.length >= chunkSize) {
 					await flushBodyEvidence();
@@ -551,20 +582,22 @@ export async function buildResidentHotBaseArtifactsStreaming(
 				}),
 				docRef: document.docRef,
 				generation: document.generation,
-				identityWitnessMatchKeys: document.identityHanWitnessTexts.map(
-					buildStableWitnessMatchKey,
+				identityWitnessMatchKeys: toInt32Array(
+					document.identityHanWitnessTexts.map(buildStableWitnessMatchKey),
 				),
 				identityWitnessTexts: [...document.identityHanWitnessTexts],
-				identityWitnessSourceMaskByDocEntry: [
-					...document.identityHanWitnessSourceMasks,
-				],
-				routeWitnessMatchKeys: document.routeHanWitnessTexts.map(
-					buildStableWitnessMatchKey,
+				identityWitnessSourceMaskByDocEntry: toUint8Array(
+					document.identityHanWitnessSourceMasks,
+				),
+				routeWitnessMatchKeys: toInt32Array(
+					document.routeHanWitnessTexts.map(buildStableWitnessMatchKey),
 				),
 				routeWitnessTexts: [...document.routeHanWitnessTexts],
-				routeWitnessSourceMaskByDocEntry: [...document.routeHanWitnessSourceMasks],
-				headingWitnessMatchKeys: document.headingHanWitnessTexts.map(
-					buildStableWitnessMatchKey,
+				routeWitnessSourceMaskByDocEntry: toUint8Array(
+					document.routeHanWitnessSourceMasks,
+				),
+				headingWitnessMatchKeys: toInt32Array(
+					document.headingHanWitnessTexts.map(buildStableWitnessMatchKey),
 				),
 				headingWitnessTexts: [...document.headingHanWitnessTexts],
 			});

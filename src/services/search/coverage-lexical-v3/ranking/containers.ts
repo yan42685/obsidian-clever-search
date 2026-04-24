@@ -1172,13 +1172,14 @@ function buildBodyBlockEvidenceFromSource(
 		familySupportEntries.map((entry) => [entry.familyId, entry.supportMask]),
 	);
 	const familySupportMaskByShardLocalFamilySlot = new Map(
-		(
+		Array.from(
 			prehydratedBodyEvidence?.supportEntriesByShardLocalFamilySlot ??
-			familySupportEntries.map((entry) => ({
-				shardLocalFamilySlot: getShardLocalFamilySlot(base, entry.familyId),
-				supportMask: entry.supportMask,
-			}))
-		).map((entry) => [entry.shardLocalFamilySlot, entry.supportMask]),
+				familySupportEntries.map((entry) => ({
+					shardLocalFamilySlot: getShardLocalFamilySlot(base, entry.familyId),
+					supportMask: entry.supportMask,
+				})),
+			(entry) => [entry.shardLocalFamilySlot, entry.supportMask],
+		),
 	);
 	return {
 		exactOccurrences,

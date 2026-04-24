@@ -1145,3 +1145,89 @@ Validation completed for this update:
 - `npm run typecheck:build -- --pretty false` passes on 2026-04-25.
 - targeted resident-base and file-search-engine tests pass with chunked cold
   evidence writes on 2026-04-25.
+
+### Slice-Local Cold Storage Compression Update
+
+Status: Updated on 2026-04-25
+
+The canonical Dexie cold evidence slices now use shard-local, incrementally
+replaceable binary lanes without changing ranking semantics:
+
+- numeric cold evidence payloads are persisted as typed-array lanes rather than
+  JavaScript `number[]` values: `Uint32Array` for family slots and token/start
+  positions, `Int32Array` for stable witness match keys, and `Uint8Array` for
+  source/support masks.
+- rows remain keyed by `docRef + generation` or
+  `docRef + generation + blockOrdinal`, so document/block-level incremental
+  replacement and shard-local merge boundaries are unchanged.
+- real family evidence still stores shard-local family slots, and witness-only
+  evidence still stores stable witness match keys plus row-local texts; no global
+  remapping, global string pool, or cross-row compression layer was introduced.
+- empty evidence rows are skipped at publish time, reducing Dexie overhead for
+  blocks/docs that do not carry exact/support/Han witness payloads.
+- database version `28.6` clears and rebuilds V3 cold evidence tables instead of
+  attempting to read old `number[]` rows.
+
+Validation completed for this update:
+
+- `npm run typecheck:build -- --pretty false` passes on 2026-04-25.
+- targeted store/hydration/build/runtime tests pass on 2026-04-25:
+  `file-snapshot-store.test.ts`, `coverage-lexical-v3/evidence-hydration.test.ts`,
+  `coverage-lexical-v3/resident-base.test.ts`, and
+  `coverage-lexical-v3/file-search-engine.test.ts`.
+
+### Cold Evidence Storage Breakdown Update
+
+Status: Updated on 2026-04-25
+
+The runtime startup report now includes a diagnostic-only V3 cold evidence
+breakdown that preserves the unified-index shard-local merge worldview:
+
+- storage accounting is split by canonical cold slice table:
+  `lexicalBodyEvidence`, `lexicalHanDocEvidence`, and
+  `lexicalHanBodyEvidence`.
+- field accounting reports exact family slots, exact positions, support slots,
+  witness keys, witness texts, masks, and offsets without changing row layout or
+  query semantics.
+- the diagnostic is table/row-local and does not introduce global compaction,
+  global string pooling, or cross-shard identity remapping.
+- the breakdown is intended to guide future shard-local compact work: each
+  candidate optimization must remain replaceable at doc/block slice granularity
+  and keep real-family evidence in shard-local slot space.
+
+Validation completed for this update:
+
+- `npm run typecheck:build -- --pretty false` passes on 2026-04-25.
+- targeted startup/store/build/runtime tests pass on 2026-04-25:
+  `data-manager-lexical-startup-reconcile.test.ts`,
+  `file-snapshot-store.test.ts`, `coverage-lexical-v3/resident-base.test.ts`, and
+  `coverage-lexical-v3/file-search-engine.test.ts`.
+
+### Body Evidence Packed Payload Update
+
+Status: Completed on 2026-04-25
+
+V3 cold body evidence now uses row-local packed binary payloads while preserving
+incremental and shard-local merge boundaries:
+
+- `lexicalBodyEvidence` rows persist one `bodyEvidencePayload` instead of
+  separate exact/support numeric fields.
+- the payload is independently decodable per `docRef + generation + blockOrdinal`
+  row, so block-level replacement remains local and does not require global
+  compact or cross-row dictionary state.
+- unsigned exact/support lanes inside the payload use adaptive row-local width
+  (`u8`, `u16`, or `u32`) for family slots, token positions, support slots, and
+  masks.
+- hydrate decodes the payload back into the existing compare-domain-ready
+  snapshot shape before ranking; query semantics and shard-local identity are
+  unchanged.
+- schema version `28.7` rebuilds V3 cold evidence rows for this packed body
+  evidence format.
+
+Validation completed for this update:
+
+- `npm run typecheck:build -- --pretty false` passes on 2026-04-25.
+- targeted store/build/runtime/startup tests pass on 2026-04-25:
+  `file-snapshot-store.test.ts`, `coverage-lexical-v3/resident-base.test.ts`,
+  `coverage-lexical-v3/file-search-engine.test.ts`, and
+  `data-manager-lexical-startup-reconcile.test.ts`.

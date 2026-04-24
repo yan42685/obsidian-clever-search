@@ -275,9 +275,9 @@ describe("coverage lexical v3 resident base", () => {
 		const bodyEvidence = artifacts.bodyEvidenceRows[0];
 		const hanBodyEvidence = artifacts.hanBodyEvidenceRows[0];
 
-		expect(bodyEvidence?.exactTokenPositions).toEqual([3, 5, 6]);
+		expect(Array.from(bodyEvidence?.exactTokenPositions ?? [])).toEqual([3, 5, 6]);
 		expect(bodyEvidence?.exactShardLocalFamilySlots?.length).toBe(3);
-		expect(hanBodyEvidence?.bodyWitnessStartOffsets).toEqual([0, 3, 9]);
+		expect(Array.from(hanBodyEvidence?.bodyWitnessStartOffsets ?? [])).toEqual([0, 3, 9]);
 		expect(hanBodyEvidence?.bodyWitnessTexts).toEqual([
 			"\u524d\u7f00",
 			"\u751f\u547d\u529b\u6838\u5fc3",
@@ -299,7 +299,7 @@ describe("coverage lexical v3 resident base", () => {
 		]);
 		const bodyEvidence = artifacts.bodyEvidenceRows[0];
 		const supportByText = new Map(
-			(bodyEvidence?.supportShardLocalFamilySlots ?? []).map((slot, index) => [
+			Array.from(bodyEvidence?.supportShardLocalFamilySlots ?? [], (slot, index) => [
 				getShardLocalFamilyText(artifacts.base, slot),
 				bodyEvidence?.familySupportMaskByEntry[index] ?? 0,
 			]),

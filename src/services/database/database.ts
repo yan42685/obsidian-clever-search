@@ -32,6 +32,38 @@ type LexicalIndexedFileRefRow = BaseIndexedFileRef;
 
 type HybridIndexedFileRefRow = HybridIndexedFileRef;
 
+export type LexicalColdEvidenceStorageBreakdown = {
+  tables: {
+    lexicalBodyEvidence: number;
+    lexicalHanDocEvidence: number;
+    lexicalHanBodyEvidence: number;
+  };
+  bodyEvidence: {
+    rowMetadataBytes: number;
+    exactFamilySlotBytes: number;
+    exactPositionBytes: number;
+    supportFamilySlotBytes: number;
+    supportMaskBytes: number;
+  };
+  hanDocEvidence: {
+    rowMetadataBytes: number;
+    witnessMatchKeyBytes: number;
+    witnessTextBytes: number;
+    sourceMaskBytes: number;
+  };
+  hanBodyEvidence: {
+    rowMetadataBytes: number;
+    witnessMatchKeyBytes: number;
+    witnessTextBytes: number;
+    startOffsetBytes: number;
+  };
+  witnessTextDedup: {
+    totalBytes: number;
+    rowLocalUniqueBytes: number;
+    docLocalUniqueBytes: number;
+  };
+};
+
 export type LexicalIndexedMetadataRow = {
   docRef?: DocRef;
   filePath: string;
@@ -68,28 +100,23 @@ export type LexicalBodyEvidenceRow = {
   docRef: DocRef;
   generation: number;
   blockOrdinal: number;
-  exactFamilyIds?: readonly number[];
-  exactShardLocalFamilySlots?: readonly number[];
-  exactTokenPositions: readonly number[];
-  familySupportFamilyIds?: readonly number[];
-  supportShardLocalFamilySlots?: readonly number[];
-  familySupportMaskByEntry: readonly number[];
+  bodyEvidencePayload: Uint8Array;
 };
 
 export type LexicalHanDocEvidenceRow = {
   id: string;
   docRef: DocRef;
   generation: number;
-  identityWitnessStringIds?: readonly number[];
-  identityWitnessMatchKeys?: readonly number[];
+  identityWitnessStringIds?: Uint32Array;
+  identityWitnessMatchKeys?: Int32Array;
   identityWitnessTexts?: readonly string[];
-  identityWitnessSourceMaskByDocEntry: readonly number[];
-  routeWitnessStringIds?: readonly number[];
-  routeWitnessMatchKeys?: readonly number[];
+  identityWitnessSourceMaskByDocEntry: Uint8Array;
+  routeWitnessStringIds?: Uint32Array;
+  routeWitnessMatchKeys?: Int32Array;
   routeWitnessTexts?: readonly string[];
-  routeWitnessSourceMaskByDocEntry: readonly number[];
-  headingWitnessStringIds?: readonly number[];
-  headingWitnessMatchKeys?: readonly number[];
+  routeWitnessSourceMaskByDocEntry: Uint8Array;
+  headingWitnessStringIds?: Uint32Array;
+  headingWitnessMatchKeys?: Int32Array;
   headingWitnessTexts?: readonly string[];
 };
 
@@ -98,10 +125,10 @@ export type LexicalHanBodyEvidenceRow = {
   docRef: DocRef;
   generation: number;
   blockOrdinal: number;
-  bodyWitnessStringIds?: readonly number[];
-  bodyWitnessMatchKeys?: readonly number[];
+  bodyWitnessStringIds?: Uint32Array;
+  bodyWitnessMatchKeys?: Int32Array;
   bodyWitnessTexts?: readonly string[];
-  bodyWitnessStartOffsets: readonly number[];
+  bodyWitnessStartOffsets: Uint32Array;
 };
 
 export type LexicalExactTapeRow = {
@@ -227,6 +254,7 @@ export class Database {
       scaleBytes: number;
       metadataBytes: number;
     };
+    lexicalColdEvidenceBreakdown?: LexicalColdEvidenceStorageBreakdown;
   }> {
     const tableEntries = [
       { name: "pluginSetting", table: this.db.pluginSetting },
@@ -276,13 +304,146 @@ export class Database {
     );
     const hybridVectorBreakdown =
       this.estimateHybridVectorBreakdown(hybridVectorRows);
+    const lexicalColdEvidenceBreakdown = this.estimateLexicalColdEvidenceBreakdown(
+      await this.db.lexicalBodyEvidence.toArray(),
+      await this.db.lexicalHanDocEvidence.toArray(),
+      await this.db.lexicalHanBodyEvidence.toArray(),
+    );
 
     return {
       totalBytes: tables.reduce((sum, item) => sum + item.bytes, 0),
       tables,
       hybridChunkBreakdown,
       hybridVectorBreakdown,
+      lexicalColdEvidenceBreakdown,
     };
+  }
+
+  private estimateLexicalColdEvidenceBreakdown(
+    bodyRows: LexicalBodyEvidenceRow[],
+    hanDocRows: LexicalHanDocEvidenceRow[],
+    hanBodyRows: LexicalHanBodyEvidenceRow[],
+  ): LexicalColdEvidenceStorageBreakdown {
+    const breakdown: LexicalColdEvidenceStorageBreakdown = {
+      tables: {
+        lexicalBodyEvidence: estimateValueBytes(bodyRows),
+        lexicalHanDocEvidence: estimateValueBytes(hanDocRows),
+        lexicalHanBodyEvidence: estimateValueBytes(hanBodyRows),
+      },
+      bodyEvidence: {
+        rowMetadataBytes: 0,
+        exactFamilySlotBytes: 0,
+        exactPositionBytes: 0,
+        supportFamilySlotBytes: 0,
+        supportMaskBytes: 0,
+      },
+      hanDocEvidence: {
+        rowMetadataBytes: 0,
+        witnessMatchKeyBytes: 0,
+        witnessTextBytes: 0,
+        sourceMaskBytes: 0,
+      },
+      hanBodyEvidence: {
+        rowMetadataBytes: 0,
+        witnessMatchKeyBytes: 0,
+        witnessTextBytes: 0,
+        startOffsetBytes: 0,
+      },
+      witnessTextDedup: {
+        totalBytes: 0,
+        rowLocalUniqueBytes: 0,
+        docLocalUniqueBytes: 0,
+      },
+    };
+    const docLocalWitnessTexts = new Map<DocRef, Set<string>>();
+
+    for (const row of bodyRows) {
+      breakdown.bodyEvidence.rowMetadataBytes += estimateLexicalEvidenceRowKeyBytes(row);
+      const bodyPayloadBreakdown = estimatePackedBodyEvidencePayloadBytes(
+        row.bodyEvidencePayload,
+      );
+      breakdown.bodyEvidence.exactFamilySlotBytes +=
+        bodyPayloadBreakdown.exactFamilySlotBytes;
+      breakdown.bodyEvidence.exactPositionBytes +=
+        bodyPayloadBreakdown.exactPositionBytes;
+      breakdown.bodyEvidence.supportFamilySlotBytes +=
+        bodyPayloadBreakdown.supportFamilySlotBytes;
+      breakdown.bodyEvidence.supportMaskBytes += bodyPayloadBreakdown.supportMaskBytes;
+    }
+
+    for (const row of hanDocRows) {
+      breakdown.hanDocEvidence.rowMetadataBytes += estimateLexicalEvidenceRowKeyBytes(row);
+      breakdown.hanDocEvidence.witnessMatchKeyBytes += estimateValueBytes(
+        row.identityWitnessStringIds,
+      );
+      breakdown.hanDocEvidence.witnessMatchKeyBytes += estimateValueBytes(
+        row.identityWitnessMatchKeys,
+      );
+      breakdown.hanDocEvidence.witnessMatchKeyBytes += estimateValueBytes(
+        row.routeWitnessStringIds,
+      );
+      breakdown.hanDocEvidence.witnessMatchKeyBytes += estimateValueBytes(
+        row.routeWitnessMatchKeys,
+      );
+      breakdown.hanDocEvidence.witnessMatchKeyBytes += estimateValueBytes(
+        row.headingWitnessStringIds,
+      );
+      breakdown.hanDocEvidence.witnessMatchKeyBytes += estimateValueBytes(
+        row.headingWitnessMatchKeys,
+      );
+      breakdown.hanDocEvidence.witnessTextBytes += estimateValueBytes(
+        row.identityWitnessTexts,
+      );
+      breakdown.hanDocEvidence.witnessTextBytes += estimateValueBytes(row.routeWitnessTexts);
+      breakdown.hanDocEvidence.witnessTextBytes += estimateValueBytes(
+        row.headingWitnessTexts,
+      );
+      const witnessTexts = [
+        ...(row.identityWitnessTexts ?? []),
+        ...(row.routeWitnessTexts ?? []),
+        ...(row.headingWitnessTexts ?? []),
+      ];
+      breakdown.witnessTextDedup.totalBytes += estimateStringListBytes(witnessTexts);
+      breakdown.witnessTextDedup.rowLocalUniqueBytes += estimateUniqueStringBytes(witnessTexts);
+      addDocLocalWitnessTexts(docLocalWitnessTexts, row.docRef, witnessTexts);
+      breakdown.hanDocEvidence.sourceMaskBytes += estimateValueBytes(
+        row.identityWitnessSourceMaskByDocEntry,
+      );
+      breakdown.hanDocEvidence.sourceMaskBytes += estimateValueBytes(
+        row.routeWitnessSourceMaskByDocEntry,
+      );
+    }
+
+    for (const row of hanBodyRows) {
+      breakdown.hanBodyEvidence.rowMetadataBytes += estimateLexicalEvidenceRowKeyBytes(row);
+      breakdown.hanBodyEvidence.witnessMatchKeyBytes += estimateValueBytes(
+        row.bodyWitnessStringIds,
+      );
+      breakdown.hanBodyEvidence.witnessMatchKeyBytes += estimateValueBytes(
+        row.bodyWitnessMatchKeys,
+      );
+      breakdown.hanBodyEvidence.witnessTextBytes += estimateValueBytes(row.bodyWitnessTexts);
+      breakdown.witnessTextDedup.totalBytes += estimateStringListBytes(
+        row.bodyWitnessTexts ?? [],
+      );
+      breakdown.witnessTextDedup.rowLocalUniqueBytes += estimateUniqueStringBytes(
+        row.bodyWitnessTexts ?? [],
+      );
+      addDocLocalWitnessTexts(
+        docLocalWitnessTexts,
+        row.docRef,
+        row.bodyWitnessTexts ?? [],
+      );
+      breakdown.hanBodyEvidence.startOffsetBytes += estimateValueBytes(
+        row.bodyWitnessStartOffsets,
+      );
+    }
+
+    for (const texts of docLocalWitnessTexts.values()) {
+      breakdown.witnessTextDedup.docLocalUniqueBytes += estimateUniqueStringBytes(texts);
+    }
+
+    return breakdown;
   }
 
   private estimateHybridChunkBreakdown(
@@ -968,7 +1129,7 @@ export class Database {
 export class DexieWrapper extends Dexie {
   // Dexie keeps one decimal place for version() and multiplies by 10 when opening IndexedDB.
   // Use 0.1 increments here so app-level schema bumps stay readable while mapping to IDB integers.
-  private static readonly _dbVersion = 28.5;
+  private static readonly _dbVersion = 28.7;
   private static readonly dbNamePrefix = "clever-search/";
   static readonly docRegistryNextRefKey = DOC_REGISTRY_NEXT_REF_KEY;
   static readonly lexicalQueryEvidenceReadyKey = LEXICAL_QUERY_EVIDENCE_READY_KEY;
@@ -1272,6 +1433,95 @@ function estimateValueBytes(
   }
 
   return textEncoder.encode(String(value)).length;
+}
+
+function estimateLexicalEvidenceRowKeyBytes(row: {
+  id: string;
+  docRef: DocRef;
+  generation: number;
+  blockOrdinal?: number;
+}): number {
+  return (
+    estimateValueBytes(row.id) +
+    estimateValueBytes(row.docRef) +
+    estimateValueBytes(row.generation) +
+    estimateValueBytes(row.blockOrdinal)
+  );
+}
+
+function estimatePackedBodyEvidencePayloadBytes(payload: Uint8Array): {
+  exactFamilySlotBytes: number;
+  exactPositionBytes: number;
+  supportFamilySlotBytes: number;
+  supportMaskBytes: number;
+} {
+  const breakdown = {
+    exactFamilySlotBytes: 0,
+    exactPositionBytes: 0,
+    supportFamilySlotBytes: 0,
+    supportMaskBytes: 0,
+  };
+  if (payload.length < 2 || payload[0] !== 1) {
+    return breakdown;
+  }
+  const laneCount = payload[1] ?? 0;
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  for (let laneIndex = 0; laneIndex < laneCount; laneIndex += 1) {
+    const headerOffset = 2 + laneIndex * 5;
+    const kind = payload[headerOffset] ?? 0;
+    const length = view.getUint32(headerOffset + 1, true);
+    const bytes = length * estimatePackedUnsignedLaneBytesPerElement(kind);
+    if (laneIndex <= 1) {
+      breakdown.exactFamilySlotBytes += bytes;
+    } else if (laneIndex === 2) {
+      breakdown.exactPositionBytes += bytes;
+    } else if (laneIndex <= 4) {
+      breakdown.supportFamilySlotBytes += bytes;
+    } else if (laneIndex === 5) {
+      breakdown.supportMaskBytes += bytes;
+    }
+  }
+  return breakdown;
+}
+
+function estimatePackedUnsignedLaneBytesPerElement(kind: number): 0 | 1 | 2 | 4 {
+  switch (kind) {
+    case 1:
+      return 1;
+    case 2:
+      return 2;
+    case 3:
+      return 4;
+    default:
+      return 0;
+  }
+}
+
+function estimateStringListBytes(values: Iterable<string>): number {
+  let bytes = 0;
+  for (const value of values) {
+    bytes += estimateValueBytes(value);
+  }
+  return bytes;
+}
+
+function estimateUniqueStringBytes(values: Iterable<string>): number {
+  return estimateStringListBytes(new Set(values));
+}
+
+function addDocLocalWitnessTexts(
+  textsByDocRef: Map<DocRef, Set<string>>,
+  docRef: DocRef,
+  values: Iterable<string>,
+): void {
+  let texts = textsByDocRef.get(docRef);
+  if (texts === undefined) {
+    texts = new Set<string>();
+    textsByDocRef.set(docRef, texts);
+  }
+  for (const value of values) {
+    texts.add(value);
+  }
 }
 
 
