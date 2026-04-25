@@ -6,7 +6,7 @@ import {
 	buildFuzzyLookupKeys,
 	FUZZY_RESCUE_MIN_QUERY_LENGTH,
 } from "../layout/fuzzy-rescue";
-import type { ResidentBase, ResidentFuzzyRescueSidecar } from "../layout/types";
+import type { ResidentBase, ResidentFuzzyRescueIndex } from "../layout/types";
 import type { V3QueryAnalysis, V3QueryUnit } from "../query/analysis";
 import {
 	getFamilyIdForShardLocalFamilySlot,
@@ -45,7 +45,7 @@ export function lookupQueryUnitFamilies(
 	base: ResidentBase,
 	queryAnalysis: V3QueryAnalysis,
 	options: V3FamilyLookupOptions = {},
-	fuzzyRescueSidecar: ResidentFuzzyRescueSidecar = base.fuzzyRescue,
+	fuzzyRescueIndex: ResidentFuzzyRescueIndex = base.fuzzyRescue,
 ): V3QueryUnitFamilyMatches[] {
 	const familyFlagsByFamilyId = base.familyLexicon.familyFlagsByFamilyId;
 	const prefixBudgetState = createPrefixLookupBudgetState();
@@ -65,7 +65,7 @@ export function lookupQueryUnitFamilies(
 						queryUnit,
 						queryAnalysis,
 						familyFlagsByFamilyId,
-						fuzzyRescueSidecar,
+						fuzzyRescueIndex,
 						prefixBudgetState,
 						fuzzyBudgetState,
 						allowPrefixMatch,
@@ -79,7 +79,7 @@ function lookupSortedQueryUnitFamilyMatches(
 	queryUnit: V3QueryUnit,
 	queryAnalysis: V3QueryAnalysis,
 	familyFlagsByFamilyId: Uint8Array,
-	fuzzyRescueSidecar: ResidentFuzzyRescueSidecar,
+	fuzzyRescueIndex: ResidentFuzzyRescueIndex,
 	prefixBudgetState: PrefixLookupBudgetState,
 	fuzzyBudgetState: FuzzyLookupBudgetState,
 	allowPrefixMatch: boolean,
@@ -118,7 +118,7 @@ function lookupSortedQueryUnitFamilyMatches(
 		base,
 		queryUnitText,
 		fuzzyBudgetState,
-		fuzzyRescueSidecar,
+		fuzzyRescueIndex,
 	);
 }
 
@@ -214,13 +214,13 @@ function collectBoundedFuzzyMatches(
 	base: ResidentBase,
 	queryUnitText: string,
 	fuzzyBudgetState: FuzzyLookupBudgetState,
-	fuzzyRescueSidecar: ResidentFuzzyRescueSidecar,
+	fuzzyRescueIndex: ResidentFuzzyRescueIndex,
 ): V3QueryFamilyMatch[] {
 	if (fuzzyBudgetState.exhausted) {
 		return [];
 	}
 	const candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey =
-		fuzzyRescueSidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey;
+		fuzzyRescueIndex.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey;
 	if (candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.size === 0) {
 		return [];
 	}

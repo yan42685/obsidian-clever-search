@@ -100,7 +100,7 @@ describe("coverage lexical v3 file search engine request flags", () => {
 		]);
 		const prepareSearch = jest.fn(() => ({ token: "prepared" }));
 		const hydrateRankingEvidenceForCandidates = jest.fn(async () => ({
-			hydratedEvidenceByLiveDocSlot: new Map<number, unknown>(),
+			hydratedEvidenceByCandidateKey: new Map<string, unknown>(),
 		}));
 		const rankPreparedSearch = jest.fn((): CoverageLexicalV3SearchResult => ({
 			recallState: {

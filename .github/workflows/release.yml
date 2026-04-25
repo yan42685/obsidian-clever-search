@@ -5,8 +5,11 @@ on:
     tags:
       - "*"
 
+permissions:
+  contents: write
+
 env:
-  PLUGIN_NAME: clever-search # 确保此处与你的插件 ID 一致
+  PLUGIN_NAME: clever-search # 确保此处与插件 ID 一致
 
 jobs:
   build:
@@ -15,48 +18,69 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with: 
-          fetch-depth: 0 # 必须为 0 才能正确读取 git 历史生成日志
+        with:
+          fetch-depth: 0 # 必须为 0，才能读取完整 tag 历史
+
+      - name: Check latest tag
+        id: latest_tag
+        run: |
+          CURRENT_TAG=${GITHUB_REF#refs/tags/}
+          LATEST_TAG=$(git tag --sort=-v:refname | head -n 1)
+
+          echo "current_tag=$CURRENT_TAG" >> $GITHUB_OUTPUT
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+          if [ "$CURRENT_TAG" = "$LATEST_TAG" ]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "Current tag $CURRENT_TAG is the latest tag. Continuing release."
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "Current tag $CURRENT_TAG is not the latest tag ($LATEST_TAG). Skipping release."
+          fi
 
       - name: Install pnpm
+        if: steps.latest_tag.outputs.should_release == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 8.12.1
           run_install: true
 
       - name: Use Node.js
+        if: steps.latest_tag.outputs.should_release == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20.x"
-          cache: 'pnpm'
+          cache: pnpm
 
       - name: Build and Package
+        if: steps.latest_tag.outputs.should_release == 'true'
         id: build
         run: |
           # 1. 编译项目
           pnpm install
           pnpm run build
-          
-          # 2. 获取当前 Tag 名字 (例如 0.2.20)
+
+          # 2. 获取当前 tag 名称，例如 0.2.20
           TAG_NAME=${GITHUB_REF#refs/tags/}
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          
+
           # 3. 创建打包目录并复制必要文件
           mkdir ${{ env.PLUGIN_NAME }}
           cp dist/main.js ./styles.css ./manifest.json dist/cs-search-worker.js ${{ env.PLUGIN_NAME }}
-          
+
           # 4. 压缩成带版本号的 ZIP 包
           zip -r ${{ env.PLUGIN_NAME }}-$TAG_NAME.zip ${{ env.PLUGIN_NAME }}
-          
-          # 5. 提取日志：先删掉 \r 处理 Windows 换行符，再截取最新版本块
+
+          # 5. 提取最新版本的 changelog 块
           cat CHANGELOG.md | tr -d '\r' | sed -n '/^## \[/,/^## \[/p' | sed '$d' > latest_changelog.md
 
       - name: Create GitHub Release
+        if: steps.latest_tag.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.build.outputs.tag_name }}
           name: Release ${{ steps.build.outputs.tag_name }}
-          body_path: latest_changelog.md # 使用刚才生成的临时日志文件
+          body_path: latest_changelog.md
           draft: false
           prerelease: false
           files: |

@@ -65,6 +65,8 @@ export type V3CandidateHanSurfaceGroupRecall = Readonly<{
 }>;
 
 export type V3CandidateDocRecall = Readonly<{
+	shardId: string;
+	shardGeneration: number;
 	docId: number;
 	liveDocSlot: number;
 	matchedIdentityUnitIndices: readonly number[];

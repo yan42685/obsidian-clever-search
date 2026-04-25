@@ -4,25 +4,16 @@ import type {
 	LexicalHanDocEvidenceRow,
 	DocRegistryRow,
 	LexicalBodyEvidenceRow,
-	LexicalBodyFamilySupportRow,
-	LexicalExactTapeRow,
 	LexicalFuzzyRescueRow,
-	LexicalHanWitnessRow,
 	LexicalIndexedMetadataRow,
 } from "src/services/database/database";
 import type { HybridIndexedFileRef } from "src/services/search/hybrid/hybrid-store";
 import type {
-	ResidentBodyFamilySupportSidecar,
-	ResidentExactTapeSidecar,
-	ResidentFuzzyRescueSidecar,
-	ResidentHanWitnessSidecar,
+	ResidentFuzzyRescueIndex,
 } from "src/services/search/coverage-lexical-v3/layout/types";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import type { Database } from "src/services/database/database";
-import { EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR } from "../coverage-lexical-v3/layout/body-blocks";
-import { EMPTY_RESIDENT_EXACT_TAPE_SIDECAR } from "../coverage-lexical-v3/layout/exact-tapes";
-import { EMPTY_RESIDENT_HAN_WITNESS_SIDECAR } from "../coverage-lexical-v3/layout/han-route";
 
 const textEncoder = new TextEncoder();
 
@@ -54,20 +45,16 @@ export type LexicalBodyEvidencePublishRow = Omit<
 	LexicalBodyEvidenceRow,
 	"bodyEvidencePayload"
 > & {
-	exactFamilyIds?: ArrayLike<number>;
-	exactShardLocalFamilySlots?: ArrayLike<number>;
+	exactShardLocalFamilySlots: ArrayLike<number>;
 	exactTokenPositions: ArrayLike<number>;
-	familySupportFamilyIds?: ArrayLike<number>;
-	supportShardLocalFamilySlots?: ArrayLike<number>;
+	supportShardLocalFamilySlots: ArrayLike<number>;
 	familySupportMaskByEntry: ArrayLike<number>;
 };
 
 type DecodedBodyEvidencePayload = Readonly<{
-	exactFamilyIds?: readonly number[];
-	exactShardLocalFamilySlots?: readonly number[];
+	exactShardLocalFamilySlots: readonly number[];
 	exactTokenPositions: readonly number[];
-	familySupportFamilyIds?: readonly number[];
-	supportShardLocalFamilySlots?: readonly number[];
+	supportShardLocalFamilySlots: readonly number[];
 	familySupportMaskByEntry: readonly number[];
 }>;
 
@@ -78,21 +65,17 @@ const PACKED_LANE_U16 = 2;
 const PACKED_LANE_U32 = 3;
 
 function encodeBodyEvidencePayload(row: LexicalBodyEvidencePublishRow): Uint8Array {
-	const exactFamilyIds = packOptionalUnsignedLane(row.exactFamilyIds);
-	const exactShardLocalFamilySlots = packOptionalUnsignedLane(
+	const exactShardLocalFamilySlots = packRequiredUnsignedLane(
 		row.exactShardLocalFamilySlots,
 	);
 	const exactTokenPositions = packRequiredUnsignedLane(row.exactTokenPositions);
-	const familySupportFamilyIds = packOptionalUnsignedLane(row.familySupportFamilyIds);
-	const supportShardLocalFamilySlots = packOptionalUnsignedLane(
+	const supportShardLocalFamilySlots = packRequiredUnsignedLane(
 		row.supportShardLocalFamilySlots,
 	);
 	const familySupportMaskByEntry = new Uint8Array(row.familySupportMaskByEntry);
 	const lanes = [
-		exactFamilyIds,
 		exactShardLocalFamilySlots,
 		exactTokenPositions,
-		familySupportFamilyIds,
 		supportShardLocalFamilySlots,
 		familySupportMaskByEntry,
 	];
@@ -117,7 +100,9 @@ function encodeBodyEvidencePayload(row: LexicalBodyEvidencePublishRow): Uint8Arr
 function decodeBodyEvidencePayload(payload: Uint8Array): DecodedBodyEvidencePayload {
 	if (payload[0] !== BODY_EVIDENCE_PAYLOAD_VERSION) {
 		return {
+			exactShardLocalFamilySlots: [],
 			exactTokenPositions: [],
+			supportShardLocalFamilySlots: [],
 			familySupportMaskByEntry: [],
 		};
 	}
@@ -137,17 +122,11 @@ function decodeBodyEvidencePayload(payload: Uint8Array): DecodedBodyEvidencePayl
 		return unpackUnsignedLane(payload, byteOffset, kind, length);
 	});
 	return {
-		exactFamilyIds: emptyToUndefined(lanes[0]),
-		exactShardLocalFamilySlots: emptyToUndefined(lanes[1]),
-		exactTokenPositions: lanes[2] ?? [],
-		familySupportFamilyIds: emptyToUndefined(lanes[3]),
-		supportShardLocalFamilySlots: emptyToUndefined(lanes[4]),
-		familySupportMaskByEntry: lanes[5] ?? [],
+		exactShardLocalFamilySlots: lanes[0] ?? [],
+		exactTokenPositions: lanes[1] ?? [],
+		supportShardLocalFamilySlots: lanes[2] ?? [],
+		familySupportMaskByEntry: lanes[3] ?? [],
 	};
-}
-
-function packOptionalUnsignedLane(values?: ArrayLike<number>): PackedUnsignedLane {
-	return values == null ? new Uint8Array() : packRequiredUnsignedLane(values);
 }
 
 function packRequiredUnsignedLane(values: ArrayLike<number>): PackedUnsignedLane {
@@ -196,24 +175,25 @@ function unpackUnsignedLane(
 	kind: number,
 	length: number,
 ): number[] {
+	const view = new DataView(
+		payload.buffer,
+		payload.byteOffset,
+		payload.byteLength,
+	);
 	switch (kind) {
 		case PACKED_LANE_U8:
 			return Array.from(payload.slice(byteOffset, byteOffset + length));
 		case PACKED_LANE_U16:
-			return Array.from(
-				new Uint16Array(payload.buffer, payload.byteOffset + byteOffset, length),
+			return Array.from({ length }, (_, index) =>
+				view.getUint16(byteOffset + index * 2, true),
 			);
 		case PACKED_LANE_U32:
-			return Array.from(
-				new Uint32Array(payload.buffer, payload.byteOffset + byteOffset, length),
+			return Array.from({ length }, (_, index) =>
+				view.getUint32(byteOffset + index * 4, true),
 			);
 		default:
 			return [];
 	}
-}
-
-function emptyToUndefined(values: readonly number[] | undefined): readonly number[] | undefined {
-	return values == null || values.length === 0 ? undefined : values;
 }
 
 type PersistedFileShadowRow = {
@@ -278,16 +258,9 @@ export type IndexedMetadataSnapshot = Readonly<{
 }>;
 
 export type LexicalBodyEvidenceSnapshot = Readonly<{
-	exactFamilyIds?: readonly number[];
-	exactShardLocalFamilySlots?: readonly number[];
+	exactShardLocalFamilySlots: readonly number[];
 	exactTokenPositions: readonly number[];
-	familySupportEntries?: ReadonlyArray<
-		Readonly<{
-			familyId: number;
-			supportMask: number;
-		}>
-	>;
-	supportEntriesByShardLocalFamilySlot?: ReadonlyArray<
+	supportEntriesByShardLocalFamilySlot: ReadonlyArray<
 		Readonly<{
 			shardLocalFamilySlot: number;
 			supportMask: number;
@@ -296,27 +269,25 @@ export type LexicalBodyEvidenceSnapshot = Readonly<{
 }>;
 
 export type LexicalHanDocEvidenceSnapshot = Readonly<{
-	identityWitnessStringIds?: readonly number[];
-	identityWitnessMatchKeys?: readonly number[];
-	identityWitnessTexts?: readonly string[];
+	identityWitnessMatchKeys: readonly number[];
+	identityWitnessTexts: readonly string[];
 	identityWitnessSourceMasks: readonly number[];
-	routeWitnessStringIds?: readonly number[];
-	routeWitnessMatchKeys?: readonly number[];
-	routeWitnessTexts?: readonly string[];
+	routeWitnessMatchKeys: readonly number[];
+	routeWitnessTexts: readonly string[];
 	routeWitnessSourceMasks: readonly number[];
-	headingWitnessStringIds?: readonly number[];
-	headingWitnessMatchKeys?: readonly number[];
-	headingWitnessTexts?: readonly string[];
+	headingWitnessMatchKeys: readonly number[];
+	headingWitnessTexts: readonly string[];
 }>;
 
 export type LexicalHanBodyEvidenceSnapshot = Readonly<{
-	bodyWitnessStringIds?: readonly number[];
-	bodyWitnessMatchKeys?: readonly number[];
-	bodyWitnessTexts?: readonly string[];
+	bodyWitnessMatchKeys: readonly number[];
+	bodyWitnessTexts: readonly string[];
 	bodyWitnessStartOffsets: readonly number[];
 }>;
 
 export type LexicalDocEvidenceLocator = Readonly<{
+	shardId: string;
+	shardGeneration: number;
 	docRef: number;
 	generation: number;
 }>;
@@ -329,19 +300,16 @@ export type LexicalBlockEvidenceLocator = LexicalDocEvidenceLocator &
 export function buildLexicalDocEvidenceRowId(
 	locator: LexicalDocEvidenceLocator,
 ): string {
-	return `${locator.docRef}:${locator.generation}`;
+	return `${locator.shardId}:${locator.shardGeneration}:${locator.docRef}:${locator.generation}`;
 }
 
 export function buildLexicalBlockEvidenceRowId(
 	locator: LexicalBlockEvidenceLocator,
 ): string {
-	return `${locator.docRef}:${locator.generation}:${locator.blockOrdinal}`;
+	return `${locator.shardId}:${locator.shardGeneration}:${locator.docRef}:${locator.generation}:${locator.blockOrdinal}`;
 }
 
 const ACTIVE_LEXICAL_FUZZY_RESCUE_ID = "active";
-const ACTIVE_LEXICAL_BODY_FAMILY_SUPPORT_ID = "active";
-const ACTIVE_LEXICAL_EXACT_TAPE_ID = "active";
-const ACTIVE_LEXICAL_HAN_WITNESS_ID = "active";
 
 export type FileSnapshotRuntimeMemoryEstimate = {
 	capacityBytes: number;
@@ -527,7 +495,7 @@ export class FileSnapshotStore {
 
 	async readLexicalFuzzyRescueForLookupKeys(
 		fuzzyLookupKeys: ReadonlyArray<string>,
-	): Promise<ResidentFuzzyRescueSidecar> {
+	): Promise<ResidentFuzzyRescueIndex> {
 		const fuzzyLookupKeySet = new Set(fuzzyLookupKeys);
 		const row = await this.database.db.lexicalFuzzyRescue.get(
 			ACTIVE_LEXICAL_FUZZY_RESCUE_ID,
@@ -563,20 +531,20 @@ export class FileSnapshotStore {
 		};
 	}
 
-	async readLexicalFuzzyRescue(): Promise<ResidentFuzzyRescueSidecar> {
+	async readLexicalFuzzyRescue(): Promise<ResidentFuzzyRescueIndex> {
 		return this.readLexicalFuzzyRescueForLookupKeys([]);
 	}
 
 	async publishLexicalFuzzyRescue(
-		sidecar: ResidentFuzzyRescueSidecar,
+		fuzzyRescueIndex: ResidentFuzzyRescueIndex,
 	): Promise<void> {
 		const row: LexicalFuzzyRescueRow = {
 			id: ACTIVE_LEXICAL_FUZZY_RESCUE_ID,
-			indexedMetadataFamilyCount: sidecar.indexedMetadataFamilyCount,
-			fuzzyLookupKeyCount: sidecar.fuzzyLookupKeyCount,
-			bytes: sidecar.bytes,
+			indexedMetadataFamilyCount: fuzzyRescueIndex.indexedMetadataFamilyCount,
+			fuzzyLookupKeyCount: fuzzyRescueIndex.fuzzyLookupKeyCount,
+			bytes: fuzzyRescueIndex.bytes,
 			entries: [
-				...sidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.entries(),
+				...fuzzyRescueIndex.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.entries(),
 			].map(([fuzzyLookupKey, shardLocalFamilySlots]) => ({
 					fuzzyLookupKey,
 					shardLocalFamilySlots,
@@ -584,36 +552,6 @@ export class FileSnapshotStore {
 			),
 		};
 		await this.database.db.lexicalFuzzyRescue.put(row);
-	}
-
-	async readLexicalBodyFamilySupport(): Promise<ResidentBodyFamilySupportSidecar> {
-		const row = await this.database.db.lexicalBodyFamilySupport.get(
-			ACTIVE_LEXICAL_BODY_FAMILY_SUPPORT_ID,
-		);
-		if (row == null) {
-			return EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR;
-		}
-		return {
-			familySupportStartByBlockId: row.familySupportStartByBlockId,
-			familySupportFamilyIds: row.familySupportFamilyIds,
-			familySupportMaskByEntry: row.familySupportMaskByEntry,
-			entryCount: row.entryCount,
-			bytes: row.bytes,
-		};
-	}
-
-	async publishLexicalBodyFamilySupport(
-		sidecar: ResidentBodyFamilySupportSidecar,
-	): Promise<void> {
-		const row: LexicalBodyFamilySupportRow = {
-			id: ACTIVE_LEXICAL_BODY_FAMILY_SUPPORT_ID,
-			entryCount: sidecar.entryCount,
-			bytes: sidecar.bytes,
-			familySupportStartByBlockId: sidecar.familySupportStartByBlockId,
-			familySupportFamilyIds: sidecar.familySupportFamilyIds,
-			familySupportMaskByEntry: sidecar.familySupportMaskByEntry,
-		};
-		await this.database.db.lexicalBodyFamilySupport.put(row);
 	}
 
 	async readLexicalBodyEvidenceForBlocks(
@@ -635,17 +573,10 @@ export class FileSnapshotStore {
 			const decoded = decodeBodyEvidencePayload(row.bodyEvidencePayload);
 			const familySupportMasks = decoded.familySupportMaskByEntry;
 			evidenceById.set(uniqueIds[index], {
-				exactFamilyIds: decoded.exactFamilyIds,
 				exactShardLocalFamilySlots: decoded.exactShardLocalFamilySlots,
 				exactTokenPositions: decoded.exactTokenPositions,
-				familySupportEntries: decoded.familySupportFamilyIds?.map(
-					(familyId, supportIndex) => ({
-						familyId,
-						supportMask: familySupportMasks[supportIndex] ?? 0,
-					}),
-				),
 				supportEntriesByShardLocalFamilySlot:
-					decoded.supportShardLocalFamilySlots?.map(
+					decoded.supportShardLocalFamilySlots.map(
 						(shardLocalFamilySlot, supportIndex) => ({
 							shardLocalFamilySlot,
 							supportMask: familySupportMasks[supportIndex] ?? 0,
@@ -665,13 +596,13 @@ export class FileSnapshotStore {
 		const persistedRows = rows
 			.filter(
 				(row) =>
-					hasEntries(row.exactFamilyIds) ||
 					hasEntries(row.exactShardLocalFamilySlots) ||
-					hasEntries(row.familySupportFamilyIds) ||
 					hasEntries(row.supportShardLocalFamilySlots),
 			)
 			.map((row) => ({
 				id: row.id,
+				shardId: row.shardId,
+				shardGeneration: row.shardGeneration,
 				docRef: row.docRef,
 				generation: row.generation,
 				blockOrdinal: row.blockOrdinal,
@@ -700,21 +631,21 @@ export class FileSnapshotStore {
 				continue;
 			}
 			evidenceById.set(uniqueIds[index], {
-				identityWitnessStringIds: toReadonlyNumbers(row.identityWitnessStringIds),
-				identityWitnessMatchKeys: toReadonlyNumbers(row.identityWitnessMatchKeys),
-				identityWitnessTexts: row.identityWitnessTexts,
+				identityWitnessMatchKeys:
+					toReadonlyNumbers(row.identityWitnessMatchKeys) ?? [],
+				identityWitnessTexts: row.identityWitnessTexts ?? [],
 				identityWitnessSourceMasks: Array.from(
 					row.identityWitnessSourceMaskByDocEntry,
 				),
-				routeWitnessStringIds: toReadonlyNumbers(row.routeWitnessStringIds),
-				routeWitnessMatchKeys: toReadonlyNumbers(row.routeWitnessMatchKeys),
-				routeWitnessTexts: row.routeWitnessTexts,
+				routeWitnessMatchKeys:
+					toReadonlyNumbers(row.routeWitnessMatchKeys) ?? [],
+				routeWitnessTexts: row.routeWitnessTexts ?? [],
 				routeWitnessSourceMasks: Array.from(
 					row.routeWitnessSourceMaskByDocEntry,
 				),
-				headingWitnessStringIds: toReadonlyNumbers(row.headingWitnessStringIds),
-				headingWitnessMatchKeys: toReadonlyNumbers(row.headingWitnessMatchKeys),
-				headingWitnessTexts: row.headingWitnessTexts,
+				headingWitnessMatchKeys:
+					toReadonlyNumbers(row.headingWitnessMatchKeys) ?? [],
+				headingWitnessTexts: row.headingWitnessTexts ?? [],
 			});
 		}
 		return evidenceById;
@@ -735,12 +666,10 @@ export class FileSnapshotStore {
 			)
 			.map((row) => ({
 				id: row.id,
+				shardId: row.shardId,
+				shardGeneration: row.shardGeneration,
 				docRef: row.docRef,
 				generation: row.generation,
-				identityWitnessStringIds:
-					row.identityWitnessStringIds == null
-						? undefined
-						: new Uint32Array(row.identityWitnessStringIds),
 				identityWitnessMatchKeys:
 					row.identityWitnessMatchKeys == null
 						? undefined
@@ -752,10 +681,6 @@ export class FileSnapshotStore {
 				identityWitnessSourceMaskByDocEntry: new Uint8Array(
 					row.identityWitnessSourceMaskByDocEntry,
 				),
-				routeWitnessStringIds:
-					row.routeWitnessStringIds == null
-						? undefined
-						: new Uint32Array(row.routeWitnessStringIds),
 				routeWitnessMatchKeys:
 					row.routeWitnessMatchKeys == null
 						? undefined
@@ -765,10 +690,6 @@ export class FileSnapshotStore {
 				routeWitnessSourceMaskByDocEntry: new Uint8Array(
 					row.routeWitnessSourceMaskByDocEntry,
 				),
-				headingWitnessStringIds:
-					row.headingWitnessStringIds == null
-						? undefined
-						: new Uint32Array(row.headingWitnessStringIds),
 				headingWitnessMatchKeys:
 					row.headingWitnessMatchKeys == null
 						? undefined
@@ -801,9 +722,9 @@ export class FileSnapshotStore {
 				continue;
 			}
 			evidenceById.set(uniqueIds[index], {
-				bodyWitnessStringIds: toReadonlyNumbers(row.bodyWitnessStringIds),
-				bodyWitnessMatchKeys: toReadonlyNumbers(row.bodyWitnessMatchKeys),
-				bodyWitnessTexts: row.bodyWitnessTexts,
+				bodyWitnessMatchKeys:
+					toReadonlyNumbers(row.bodyWitnessMatchKeys) ?? [],
+				bodyWitnessTexts: row.bodyWitnessTexts ?? [],
 				bodyWitnessStartOffsets: Array.from(row.bodyWitnessStartOffsets),
 			});
 		}
@@ -820,13 +741,11 @@ export class FileSnapshotStore {
 			.filter((row) => hasEntries(row.bodyWitnessMatchKeys))
 			.map((row) => ({
 				id: row.id,
+				shardId: row.shardId,
+				shardGeneration: row.shardGeneration,
 				docRef: row.docRef,
 				generation: row.generation,
 				blockOrdinal: row.blockOrdinal,
-				bodyWitnessStringIds:
-					row.bodyWitnessStringIds == null
-						? undefined
-						: new Uint32Array(row.bodyWitnessStringIds),
 				bodyWitnessMatchKeys:
 					row.bodyWitnessMatchKeys == null
 						? undefined
@@ -839,112 +758,6 @@ export class FileSnapshotStore {
 			return;
 		}
 		await this.database.db.lexicalHanBodyEvidence.bulkPut(persistedRows);
-	}
-
-	async readLexicalExactTapes(): Promise<ResidentExactTapeSidecar> {
-		const row = await this.database.db.lexicalExactTapes.get(
-			ACTIVE_LEXICAL_EXACT_TAPE_ID,
-		);
-		if (row == null) {
-			return EMPTY_RESIDENT_EXACT_TAPE_SIDECAR;
-		}
-		return {
-			familyIds: row.familyIds,
-			positionEncodingByBlockId: row.positionEncodingByBlockId,
-			positionStartByBlockId: row.positionStartByBlockId,
-			positionDeltaU8Tape: row.positionDeltaU8Tape,
-			positionDeltaU16Tape: row.positionDeltaU16Tape,
-			positionDeltaU32Tape: row.positionDeltaU32Tape,
-			entryCount: row.entryCount,
-			bytes: row.bytes,
-		};
-	}
-
-	async publishLexicalExactTapes(
-		sidecar: ResidentExactTapeSidecar,
-	): Promise<void> {
-		const row: LexicalExactTapeRow = {
-			id: ACTIVE_LEXICAL_EXACT_TAPE_ID,
-			entryCount: sidecar.entryCount,
-			bytes: sidecar.bytes,
-			familyIds: sidecar.familyIds,
-			positionEncodingByBlockId: sidecar.positionEncodingByBlockId,
-			positionStartByBlockId: sidecar.positionStartByBlockId,
-			positionDeltaU8Tape: sidecar.positionDeltaU8Tape,
-			positionDeltaU16Tape: sidecar.positionDeltaU16Tape,
-			positionDeltaU32Tape: sidecar.positionDeltaU32Tape,
-		};
-		await this.database.db.lexicalExactTapes.put(row);
-	}
-
-	async readLexicalHanWitnesses(): Promise<ResidentHanWitnessSidecar> {
-		const row = await this.database.db.lexicalHanWitness.get(
-			ACTIVE_LEXICAL_HAN_WITNESS_ID,
-		);
-		if (row == null) {
-			return EMPTY_RESIDENT_HAN_WITNESS_SIDECAR;
-		}
-		return {
-			identityWitnessStartByDocId: row.identityWitnessStartByDocId,
-			identityWitnessStringIds: row.identityWitnessStringIds,
-			identityWitnessSourceMaskByDocEntry:
-				row.identityWitnessSourceMaskByDocEntry,
-			routeWitnessStartByDocId: row.routeWitnessStartByDocId,
-			routeWitnessStringIds: row.routeWitnessStringIds,
-			routeWitnessSourceMaskByDocEntry:
-				row.routeWitnessSourceMaskByDocEntry,
-			headingWitnessStartByDocId: row.headingWitnessStartByDocId,
-			headingWitnessStringIds: row.headingWitnessStringIds,
-			bodyWitnessOccurrenceStartByBlockId:
-				row.bodyWitnessOccurrenceStartByBlockId,
-			bodyWitnessOccurrenceStringIds: row.bodyWitnessOccurrenceStringIds,
-			bodyWitnessPositionEncodingByBlockId:
-				row.bodyWitnessPositionEncodingByBlockId,
-			bodyWitnessPositionStartByBlockId:
-				row.bodyWitnessPositionStartByBlockId,
-			bodyWitnessPositionDeltaU8Tape: row.bodyWitnessPositionDeltaU8Tape,
-			bodyWitnessPositionDeltaU16Tape: row.bodyWitnessPositionDeltaU16Tape,
-			bodyWitnessPositionDeltaU32Tape: row.bodyWitnessPositionDeltaU32Tape,
-			metadataWitnessEntryCount: row.metadataWitnessEntryCount,
-			bodyWitnessEntryCount: row.bodyWitnessEntryCount,
-			bytes: row.bytes,
-		};
-	}
-
-	async publishLexicalHanWitnesses(
-		sidecar: ResidentHanWitnessSidecar,
-	): Promise<void> {
-		const row: LexicalHanWitnessRow = {
-			id: ACTIVE_LEXICAL_HAN_WITNESS_ID,
-			metadataWitnessEntryCount: sidecar.metadataWitnessEntryCount,
-			bodyWitnessEntryCount: sidecar.bodyWitnessEntryCount,
-			bytes: sidecar.bytes,
-			identityWitnessStartByDocId: sidecar.identityWitnessStartByDocId,
-			identityWitnessStringIds: sidecar.identityWitnessStringIds,
-			identityWitnessSourceMaskByDocEntry:
-				sidecar.identityWitnessSourceMaskByDocEntry,
-			routeWitnessStartByDocId: sidecar.routeWitnessStartByDocId,
-			routeWitnessStringIds: sidecar.routeWitnessStringIds,
-			routeWitnessSourceMaskByDocEntry:
-				sidecar.routeWitnessSourceMaskByDocEntry,
-			headingWitnessStartByDocId: sidecar.headingWitnessStartByDocId,
-			headingWitnessStringIds: sidecar.headingWitnessStringIds,
-			bodyWitnessOccurrenceStartByBlockId:
-				sidecar.bodyWitnessOccurrenceStartByBlockId,
-			bodyWitnessOccurrenceStringIds:
-				sidecar.bodyWitnessOccurrenceStringIds,
-			bodyWitnessPositionEncodingByBlockId:
-				sidecar.bodyWitnessPositionEncodingByBlockId,
-			bodyWitnessPositionStartByBlockId:
-				sidecar.bodyWitnessPositionStartByBlockId,
-			bodyWitnessPositionDeltaU8Tape:
-				sidecar.bodyWitnessPositionDeltaU8Tape,
-			bodyWitnessPositionDeltaU16Tape:
-				sidecar.bodyWitnessPositionDeltaU16Tape,
-			bodyWitnessPositionDeltaU32Tape:
-				sidecar.bodyWitnessPositionDeltaU32Tape,
-		};
-		await this.database.db.lexicalHanWitness.put(row);
 	}
 
 	async notifyHybridIndexedRefsChanged(

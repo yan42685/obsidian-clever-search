@@ -257,7 +257,7 @@ function attachMockSearchPipeline(
 	};
 	const prepareSearch = jest.fn(() => preparedSearch);
 	const hydrateRankingEvidenceForCandidates = jest.fn(async () => ({
-		hydratedEvidenceByLiveDocSlot: new Map<number, unknown>(),
+		hydratedEvidenceByCandidateKey: new Map<string, unknown>(),
 	}));
 	const rankPreparedSearch = jest.fn(() => result);
 	(engine as unknown as {

@@ -1,10 +1,9 @@
-import type { IndexedDocument } from "src/globals/search-types";
+﻿import type { IndexedDocument } from "src/globals/search-types";
 import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
 import {
 	splitBodyBlocks,
 	type V3DocumentTokenizer,
 } from "src/services/search/coverage-lexical-v3/query";
-
 function createDocument(
 	overrides: Partial<IndexedDocument> & Pick<IndexedDocument, "path" | "basename" | "folder">,
 ): IndexedDocument {
@@ -89,7 +88,7 @@ function buildAdjacentSingletonHanChunkBoundaryContent(
 describe("coverage lexical v3 engine", () => {
 	test("search read path builds candidates and ranks the stronger packed document first", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "infra/projected-token.md",
 				basename: "projected token runtime access",
@@ -119,7 +118,7 @@ describe("coverage lexical v3 engine", () => {
 
 	test("one query unit binds to one best realized family per candidate", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "notes/pre-note.md",
 				basename: "pre note",
@@ -142,7 +141,7 @@ describe("coverage lexical v3 engine", () => {
 			"\u4ee3\u7406": ["\u4ee3\u7406"],
 			"\u7cfb\u7edf\u4ee3\u7406": ["\u7cfb\u7edf\u4ee3\u7406"],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/split-hit.md",
@@ -193,7 +192,7 @@ describe("coverage lexical v3 engine", () => {
 				"\u5f00\u53d1",
 			],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/above-note.md",
@@ -230,7 +229,7 @@ describe("coverage lexical v3 engine", () => {
 			"\u8d62\u5b8b\u7a84\u4f53\u5b8b": ["\u8d62\u5b8b", "\u7a84\u4f53"],
 			"\u8d62\u5b8b": ["\u8d62\u5b8b"],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/winsong-narrow.md",
@@ -275,7 +274,7 @@ describe("coverage lexical v3 engine", () => {
 			"\u8d62\u5b8b\u7a84\u4f53\u5b8b": ["\u8d62\u5b8b", "\u7a84\u4f53"],
 			"\u8d62\u5b8b": ["\u8d62\u5b8b"],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/winsong-narrow-body.md",
@@ -325,7 +324,7 @@ describe("coverage lexical v3 engine", () => {
 			"\u8d62\u5b8b\u4f53": ["\u8d62\u5b8b\u4f53"],
 			"\u666e\u901a": ["\u666e\u901a"],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/fallback-hit.md",
@@ -376,7 +375,7 @@ describe("coverage lexical v3 engine", () => {
 		const tokenizer = createDocumentTokenizer({
 			"\u8d62\u5b8b\u4f53": ["\u8d62\u5b8b\u4f53"],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/body-fallback.md",
@@ -414,7 +413,7 @@ describe("coverage lexical v3 engine", () => {
 			"\u8d62\u5b8b": ["\u8d62\u5b8b"],
 			"\u8d62\u5b8b\u4f53": ["\u8d62\u5b8b\u4f53"],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/exact.md",
@@ -452,7 +451,7 @@ describe("coverage lexical v3 engine", () => {
 			"\u65e7\u8d62\u5b8b\u4f53": ["\u65e7\u8d62\u5b8b\u4f53"],
 			"\u8d62\u5b8b\u4f53": ["\u8d62\u5b8b\u4f53"],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/shared-bigram.md",
@@ -505,7 +504,7 @@ describe("coverage lexical v3 engine", () => {
 			"\u957f\u5927": ["\u957f\u5927"],
 			"\u5458\u957f": ["\u5458\u957f"],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/committee.md",
@@ -546,7 +545,7 @@ describe("coverage lexical v3 engine", () => {
 		).toEqual(["\u59d4\u5458"]);
 	});
 
-	test("mixed latin plus Han ordering stays abc plus life over life-force over life", () => {
+	test("mixed latin plus Han core ranking keeps the refine candidate and completion signal", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const tokenizer = createDocumentTokenizer({
 			"\u751f\u547d\u529b": ["\u751f\u547d"],
@@ -554,7 +553,7 @@ describe("coverage lexical v3 engine", () => {
 			"\u751f\u547d\u529b\u5728\u8fd9\u91cc": ["\u751f\u547d", "\u8fd9\u91cc"],
 			"\u53ea\u8c08\u751f\u547d": ["\u751f\u547d"],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/abc-life.md",
@@ -585,9 +584,21 @@ describe("coverage lexical v3 engine", () => {
 			"zh/abc-life.md",
 			"zh/life-only.md",
 		]);
-		expect(result.rankedCandidates[0].completedHanSurfaceGroupCount).toBe(1);
-		expect(result.rankedCandidates[1].completedHanSurfaceGroupCount).toBe(0);
-		expect(result.rankedCandidates[2].completedHanSurfaceGroupCount).toBe(0);
+		expect(
+			result.rankedCandidates.find(
+				(candidate) => candidate.path === "zh/life-force.md",
+			)?.completedHanSurfaceGroupCount,
+		).toBe(1);
+		expect(
+			result.rankedCandidates.find(
+				(candidate) => candidate.path === "zh/abc-life.md",
+			)?.completedHanSurfaceGroupCount,
+		).toBe(0);
+		expect(
+			result.rankedCandidates.find(
+				(candidate) => candidate.path === "zh/life-only.md",
+			)?.completedHanSurfaceGroupCount,
+		).toBe(0);
 	});
 
 	test("metadata opaque rescue uses the best single witness without cross-witness aggregation", () => {
@@ -595,7 +606,7 @@ describe("coverage lexical v3 engine", () => {
 		const tokenizer = createDocumentTokenizer({
 			"\u661f\u7a79\u63a5\u53e3": [],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/single-witness.md",
@@ -635,7 +646,7 @@ describe("coverage lexical v3 engine", () => {
 			"\u8d62\u5b8b": ["\u8d62\u5b8b"],
 			"\u7a84\u4f53": ["\u7a84\u4f53"],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/adjacent-han-chunks.md",
@@ -682,7 +693,7 @@ describe("coverage lexical v3 engine", () => {
 			[adjacentContent]: ["\u751f\u547d"],
 			"\u751f\u547d": ["\u751f\u547d"],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/life-force-adjacent.md",
@@ -721,7 +732,7 @@ describe("coverage lexical v3 engine", () => {
 		const rescueOnlyContent = `\u524d\u9762\u5148\u5199\u751f\u547d${filler}\u6700\u540e\u53ea\u7528\u547d\u529b\u6765\u6536\u5c3e\u3002`;
 		const tokenizer: V3DocumentTokenizer = (text) =>
 			text.includes("\u751f\u547d") ? ["\u751f\u547d"] : [];
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/rescue-only-overlap.md",
@@ -751,7 +762,7 @@ describe("coverage lexical v3 engine", () => {
 		const exactOnlyContent = `\u524d\u9762\u5148\u5199\u751f\u547d${filler}\u6700\u540e\u53ea\u653e\u4e00\u4e2a\u529b\u5b57\u3002`;
 		const tokenizer: V3DocumentTokenizer = (text) =>
 			text.includes("\u751f\u547d") ? ["\u751f\u547d"] : [];
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/rescue-bigram-singleton.md",
@@ -797,7 +808,7 @@ describe("coverage lexical v3 engine", () => {
 		const bigramAndSingletonContent = "\u524d\u9762\u5148\u5199\u8d62\u5b8ba\u529f\uff0c\u540e\u9762\u518d\u8865\u4e00\u4e9b\u8bf4\u660e\u3002";
 		const bigramOnlyContent = "\u524d\u9762\u53ea\u5199\u8d62\u5b8ba\u5b57\uff0c\u540e\u9762\u4e0d\u518d\u51fa\u73b0\u5176\u4ed6\u76f8\u5173\u6c49\u5b57\u3002";
 		const tokenizer: V3DocumentTokenizer = () => [];
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/win-song-gong.md",
@@ -842,7 +853,7 @@ describe("coverage lexical v3 engine", () => {
 	test("global residual singleton recall rescue admits both prefix-side and suffix-side singleton Han around a matched bigram", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const tokenizer: V3DocumentTokenizer = () => [];
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/function-origin-winsong.md",
@@ -887,14 +898,14 @@ describe("coverage lexical v3 engine", () => {
 		);
 	});
 
-	test("completed Han surface witness in body outranks a partial real-term hit", () => {
+	test("core ranking keeps the completed Han surface witness candidate ahead before refine tier promotion", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const tokenizer = createDocumentTokenizer({
 			"\u751f\u547d\u529b": ["\u751f\u547d"],
 			"\u8fd9\u91cc\u8bb0\u5f55\u751f\u547d\u529b\u8bad\u7ec3": ["\u8fd9\u91cc", "\u8bb0\u5f55", "\u751f\u547d", "\u8bad\u7ec3"],
 			"\u8fd9\u91cc\u8bb0\u5f55\u751f\u547d": ["\u8fd9\u91cc", "\u8bb0\u5f55", "\u751f\u547d"],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/life-force.md",
@@ -939,7 +950,7 @@ describe("coverage lexical v3 engine", () => {
 				"\u6d41\u7a0b",
 			],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/metadata-strong.md",
@@ -989,7 +1000,7 @@ describe("coverage lexical v3 engine", () => {
 				"\u6d41\u7a0b",
 			],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/heading-only.md",
@@ -1025,7 +1036,7 @@ describe("coverage lexical v3 engine", () => {
 
 	test("metadata split hit outranks same-block body hits that fail the approximate gap gate", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "latin/split.md",
 				basename: "cache",
@@ -1054,7 +1065,7 @@ describe("coverage lexical v3 engine", () => {
 	test("adjacent chunk evidence can still form a bodyWindow with zero cross-block penalty", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const adjacentChunkContent = buildAdjacentChunkBoundaryContent();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "latin/same-block.md",
 				basename: "notes",
@@ -1087,7 +1098,7 @@ describe("coverage lexical v3 engine", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const leftTerm = `left${"a".repeat(80)}`;
 		const rightTerm = `right${"b".repeat(80)}`;
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "latin/head-tail-span.md",
 				basename: "notes",
@@ -1104,7 +1115,7 @@ describe("coverage lexical v3 engine", () => {
 
 	test("compact body evidence survives many short intervening tokens under approximate locality", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "latin/compact-many-tokens.md",
 				basename: "notes",
@@ -1122,7 +1133,7 @@ describe("coverage lexical v3 engine", () => {
 
 	test("route stays corroborative when identity and body already explain the query, but becomes main evidence when it adds a missing unit", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "latin/redundant-route.md",
 				basename: "vector cache",
@@ -1159,7 +1170,7 @@ describe("coverage lexical v3 engine", () => {
 
 	test("vector cache canonical playbook stays in the top five when route support is only corroborative", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "pkm-en/projects/sdk/vector-cache.md",
 				basename: "Vector cache playbook",
@@ -1239,7 +1250,7 @@ describe("coverage lexical v3 engine", () => {
 
 	test("basename exact beats alias exact when exact counts tie", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "latin/canonical-vector-cache.md",
 				basename: "vector cache",
@@ -1270,7 +1281,7 @@ describe("coverage lexical v3 engine", () => {
 
 	test("mixed basename and alias hits use best-source-only metadata packing", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "latin/mixed-source.md",
 				basename: "vector cache",
@@ -1292,7 +1303,7 @@ describe("coverage lexical v3 engine", () => {
 
 	test("prefix-only body hits prefer smaller completion gain and then non-compound tokens", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "latin/preference.md",
 				basename: "notes",
@@ -1326,7 +1337,7 @@ describe("coverage lexical v3 engine", () => {
 
 	test("mixed standalone and compound support does not count as compound-only backing", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "latin/preference.md",
 				basename: "notes",
@@ -1360,7 +1371,7 @@ describe("coverage lexical v3 engine", () => {
 
 	test("fuzzy rescue can recover realized coverage without outranking exact peers", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "latin/exact-obsidian.md",
 				basename: "obsidian",

@@ -1,4 +1,4 @@
-jest.mock("src/services/search/tokenizer", () => ({
+﻿jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
 }));
 
@@ -79,7 +79,7 @@ function getResidentBase(engine: CoverageLexicalV3FileSearchEngine): ResidentBas
 		engine as unknown as {
 			engine: CoverageLexicalV3Engine;
 		}
-	).engine.getResidentBase();
+	).engine.getResidentIndexView()?.shards[0]?.base ?? null;
 	if (residentBase == null) {
 		throw new Error("Expected resident base to be available");
 	}

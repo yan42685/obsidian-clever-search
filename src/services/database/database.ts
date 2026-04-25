@@ -6,7 +6,6 @@ import type {
   OuterSetting,
 } from "src/globals/plugin-setting";
 import type { BaseIndexedFileRef, DocRef } from "src/globals/search-types";
-import type { ResidentIntegerArray } from "src/services/search/coverage-lexical-v3/layout/integer-arrays";
 import {
   buildIndexRecoveryStateId,
   type IndexRecoveryEngine,
@@ -86,17 +85,10 @@ export type LexicalFuzzyRescueRow = {
   }>;
 };
 
-export type LexicalBodyFamilySupportRow = {
-  id: string;
-  entryCount: number;
-  bytes: number;
-  familySupportStartByBlockId: ResidentIntegerArray;
-  familySupportFamilyIds: ResidentIntegerArray;
-  familySupportMaskByEntry: Uint8Array;
-};
-
 export type LexicalBodyEvidenceRow = {
   id: string;
+  shardId: string;
+  shardGeneration: number;
   docRef: DocRef;
   generation: number;
   blockOrdinal: number;
@@ -105,64 +97,30 @@ export type LexicalBodyEvidenceRow = {
 
 export type LexicalHanDocEvidenceRow = {
   id: string;
+  shardId: string;
+  shardGeneration: number;
   docRef: DocRef;
   generation: number;
-  identityWitnessStringIds?: Uint32Array;
   identityWitnessMatchKeys?: Int32Array;
   identityWitnessTexts?: readonly string[];
   identityWitnessSourceMaskByDocEntry: Uint8Array;
-  routeWitnessStringIds?: Uint32Array;
   routeWitnessMatchKeys?: Int32Array;
   routeWitnessTexts?: readonly string[];
   routeWitnessSourceMaskByDocEntry: Uint8Array;
-  headingWitnessStringIds?: Uint32Array;
   headingWitnessMatchKeys?: Int32Array;
   headingWitnessTexts?: readonly string[];
 };
 
 export type LexicalHanBodyEvidenceRow = {
   id: string;
+  shardId: string;
+  shardGeneration: number;
   docRef: DocRef;
   generation: number;
   blockOrdinal: number;
-  bodyWitnessStringIds?: Uint32Array;
   bodyWitnessMatchKeys?: Int32Array;
   bodyWitnessTexts?: readonly string[];
   bodyWitnessStartOffsets: Uint32Array;
-};
-
-export type LexicalExactTapeRow = {
-  id: string;
-  entryCount: number;
-  bytes: number;
-  familyIds: ResidentIntegerArray;
-  positionEncodingByBlockId: Uint8Array;
-  positionStartByBlockId: ResidentIntegerArray;
-  positionDeltaU8Tape: Uint8Array;
-  positionDeltaU16Tape: Uint16Array;
-  positionDeltaU32Tape: Uint32Array;
-};
-
-export type LexicalHanWitnessRow = {
-  id: string;
-  metadataWitnessEntryCount: number;
-  bodyWitnessEntryCount: number;
-  bytes: number;
-  identityWitnessStartByDocId: ResidentIntegerArray;
-  identityWitnessStringIds: ResidentIntegerArray;
-  identityWitnessSourceMaskByDocEntry: Uint8Array;
-  routeWitnessStartByDocId: ResidentIntegerArray;
-  routeWitnessStringIds: ResidentIntegerArray;
-  routeWitnessSourceMaskByDocEntry: Uint8Array;
-  headingWitnessStartByDocId: ResidentIntegerArray;
-  headingWitnessStringIds: ResidentIntegerArray;
-  bodyWitnessOccurrenceStartByBlockId: ResidentIntegerArray;
-  bodyWitnessOccurrenceStringIds: ResidentIntegerArray;
-  bodyWitnessPositionEncodingByBlockId: Uint8Array;
-  bodyWitnessPositionStartByBlockId: ResidentIntegerArray;
-  bodyWitnessPositionDeltaU8Tape: Uint8Array;
-  bodyWitnessPositionDeltaU16Tape: Uint16Array;
-  bodyWitnessPositionDeltaU32Tape: Uint32Array;
 };
 
 export type DocRegistryRow = {
@@ -186,12 +144,9 @@ const TARGETED_INDEX_RESET_TABLES = [
   "lexicalIndexedFileRefs",
   "lexicalIndexedMetadata",
   "lexicalFuzzyRescue",
-  "lexicalBodyFamilySupport",
   "lexicalBodyEvidence",
   "lexicalHanDocEvidence",
   "lexicalHanBodyEvidence",
-  "lexicalExactTapes",
-  "lexicalHanWitness",
   "docRegistry",
   "indexRecoveryState",
   "indexArtifactState",
@@ -262,12 +217,9 @@ export class Database {
       { name: "lexicalIndexedFileRefs", table: this.db.lexicalIndexedFileRefs },
       { name: "lexicalIndexedMetadata", table: this.db.lexicalIndexedMetadata },
       { name: "lexicalFuzzyRescue", table: this.db.lexicalFuzzyRescue },
-      { name: "lexicalBodyFamilySupport", table: this.db.lexicalBodyFamilySupport },
       { name: "lexicalBodyEvidence", table: this.db.lexicalBodyEvidence },
       { name: "lexicalHanDocEvidence", table: this.db.lexicalHanDocEvidence },
       { name: "lexicalHanBodyEvidence", table: this.db.lexicalHanBodyEvidence },
-      { name: "lexicalExactTapes", table: this.db.lexicalExactTapes },
-      { name: "lexicalHanWitness", table: this.db.lexicalHanWitness },
       { name: "docRegistry", table: this.db.docRegistry },
       { name: "docRegistryMeta", table: this.db.docRegistryMeta },
       { name: "hybridChunks", table: this.db.hybridChunks },
@@ -374,19 +326,10 @@ export class Database {
     for (const row of hanDocRows) {
       breakdown.hanDocEvidence.rowMetadataBytes += estimateLexicalEvidenceRowKeyBytes(row);
       breakdown.hanDocEvidence.witnessMatchKeyBytes += estimateValueBytes(
-        row.identityWitnessStringIds,
-      );
-      breakdown.hanDocEvidence.witnessMatchKeyBytes += estimateValueBytes(
         row.identityWitnessMatchKeys,
       );
       breakdown.hanDocEvidence.witnessMatchKeyBytes += estimateValueBytes(
-        row.routeWitnessStringIds,
-      );
-      breakdown.hanDocEvidence.witnessMatchKeyBytes += estimateValueBytes(
         row.routeWitnessMatchKeys,
-      );
-      breakdown.hanDocEvidence.witnessMatchKeyBytes += estimateValueBytes(
-        row.headingWitnessStringIds,
       );
       breakdown.hanDocEvidence.witnessMatchKeyBytes += estimateValueBytes(
         row.headingWitnessMatchKeys,
@@ -416,9 +359,6 @@ export class Database {
 
     for (const row of hanBodyRows) {
       breakdown.hanBodyEvidence.rowMetadataBytes += estimateLexicalEvidenceRowKeyBytes(row);
-      breakdown.hanBodyEvidence.witnessMatchKeyBytes += estimateValueBytes(
-        row.bodyWitnessStringIds,
-      );
       breakdown.hanBodyEvidence.witnessMatchKeyBytes += estimateValueBytes(
         row.bodyWitnessMatchKeys,
       );
@@ -1129,7 +1069,7 @@ export class Database {
 export class DexieWrapper extends Dexie {
   // Dexie keeps one decimal place for version() and multiplies by 10 when opening IndexedDB.
   // Use 0.1 increments here so app-level schema bumps stay readable while mapping to IDB integers.
-  private static readonly _dbVersion = 28.7;
+  private static readonly _dbVersion = 28.9;
   private static readonly dbNamePrefix = "clever-search/";
   static readonly docRegistryNextRefKey = DOC_REGISTRY_NEXT_REF_KEY;
   static readonly lexicalQueryEvidenceReadyKey = LEXICAL_QUERY_EVIDENCE_READY_KEY;
@@ -1143,12 +1083,9 @@ export class DexieWrapper extends Dexie {
   lexicalIndexedFileRefs!: Dexie.Table<LexicalIndexedFileRefRow, string>;
   lexicalIndexedMetadata!: Dexie.Table<LexicalIndexedMetadataRow, string>;
   lexicalFuzzyRescue!: Dexie.Table<LexicalFuzzyRescueRow, string>;
-  lexicalBodyFamilySupport!: Dexie.Table<LexicalBodyFamilySupportRow, string>;
   lexicalBodyEvidence!: Dexie.Table<LexicalBodyEvidenceRow, string>;
   lexicalHanDocEvidence!: Dexie.Table<LexicalHanDocEvidenceRow, string>;
   lexicalHanBodyEvidence!: Dexie.Table<LexicalHanBodyEvidenceRow, string>;
-  lexicalExactTapes!: Dexie.Table<LexicalExactTapeRow, string>;
-  lexicalHanWitness!: Dexie.Table<LexicalHanWitnessRow, string>;
   docRegistry!: Dexie.Table<DocRegistryRow, number>;
   docRegistryMeta!: Dexie.Table<DocRegistryMetaRow, string>;
 
@@ -1240,7 +1177,8 @@ export class DexieWrapper extends Dexie {
     // primary key in place.
     // Bridge the 28.2 -> 28.4 lexical evidence key migration.
     // Dexie cannot rewrite an existing object store's primary key in place, so
-    // we drop the old evidence tables one version earlier and recreate them at 28.4.
+    // we drop the pre-shard-aware legacy evidence stores one version earlier
+    // and recreate the canonical evidence stores at 28.4.
     this.version(28.3)
       .stores({
         pluginSetting: "++id",
@@ -1317,12 +1255,12 @@ export class DexieWrapper extends Dexie {
         lexicalIndexedFileRefs: "path",
         lexicalIndexedMetadata: "filePath",
         lexicalFuzzyRescue: "id",
-        lexicalBodyFamilySupport: "id",
-        lexicalBodyEvidence: "id, docRef, generation, blockOrdinal, [docRef+generation+blockOrdinal]",
-        lexicalHanDocEvidence: "id, docRef, generation, [docRef+generation]",
-        lexicalHanBodyEvidence: "id, docRef, generation, blockOrdinal, [docRef+generation+blockOrdinal]",
-        lexicalExactTapes: "id",
-        lexicalHanWitness: "id",
+        lexicalBodyEvidence:
+          "id, shardId, shardGeneration, docRef, generation, blockOrdinal, [shardId+shardGeneration+docRef+generation+blockOrdinal]",
+        lexicalHanDocEvidence:
+          "id, shardId, shardGeneration, docRef, generation, [shardId+shardGeneration+docRef+generation]",
+        lexicalHanBodyEvidence:
+          "id, shardId, shardGeneration, docRef, generation, blockOrdinal, [shardId+shardGeneration+docRef+generation+blockOrdinal]",
         docRegistry: "docRef, path, deleted, liveGeneration, updatedAt",
         docRegistryMeta: "key",
         hybridChunks: "++id, filePath",
@@ -1343,9 +1281,6 @@ export class DexieWrapper extends Dexie {
           tx.table("lexicalBodyEvidence").clear(),
           tx.table("lexicalHanDocEvidence").clear(),
           tx.table("lexicalHanBodyEvidence").clear(),
-          tx.table("lexicalBodyFamilySupport").clear(),
-          tx.table("lexicalExactTapes").clear(),
-          tx.table("lexicalHanWitness").clear(),
           tx
             .table("docRegistryMeta")
             .delete(DexieWrapper.lexicalQueryEvidenceReadyKey),
@@ -1471,13 +1406,13 @@ function estimatePackedBodyEvidencePayloadBytes(payload: Uint8Array): {
     const kind = payload[headerOffset] ?? 0;
     const length = view.getUint32(headerOffset + 1, true);
     const bytes = length * estimatePackedUnsignedLaneBytesPerElement(kind);
-    if (laneIndex <= 1) {
+    if (laneIndex === 0) {
       breakdown.exactFamilySlotBytes += bytes;
-    } else if (laneIndex === 2) {
+    } else if (laneIndex === 1) {
       breakdown.exactPositionBytes += bytes;
-    } else if (laneIndex <= 4) {
+    } else if (laneIndex === 2) {
       breakdown.supportFamilySlotBytes += bytes;
-    } else if (laneIndex === 5) {
+    } else if (laneIndex === 3) {
       breakdown.supportMaskBytes += bytes;
     }
   }

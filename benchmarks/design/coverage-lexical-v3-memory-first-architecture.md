@@ -1176,6 +1176,36 @@ Validation completed for this update:
   `coverage-lexical-v3/resident-base.test.ts`, and
   `coverage-lexical-v3/file-search-engine.test.ts`.
 
+### Canonical Cold Evidence Cleanup Update
+
+Status: Updated on 2026-04-25
+
+The V3 cold-evidence path now uses a single canonical identity and storage shape
+across schema, snapshot rows, and ranking hydration:
+
+- database version `28.8` removes legacy whole-sidecar stores
+  `lexicalBodyFamilySupport`, `lexicalExactTapes`, and `lexicalHanWitness`.
+- `lexicalBodyEvidence` rows no longer carry legacy `exactFamilyIds` or
+  `familySupportFamilyIds`; only shard-local exact/support slots plus positions
+  and masks remain.
+- `lexicalHanDocEvidence` and `lexicalHanBodyEvidence` rows no longer carry
+  witness string-id fallback fields; cold Han evidence persists stable witness
+  match keys plus row-local texts only.
+- ranking hydration no longer falls back from cold rows to resident witness
+  string ids or whole-sidecar readers.
+- resident shard-readiness reporting now names body-family posting terms as
+  `shardLocalSlot` semantics, matching the shard-local compare domain already
+  used by recall/ranking.
+
+Validation completed for this cleanup:
+
+- `npm run typecheck:build -- --pretty false` passes on 2026-04-25.
+- targeted runtime/store/hydration tests pass on 2026-04-25:
+  `file-snapshot-store.test.ts`, `coverage-lexical-v3/evidence-hydration.test.ts`,
+  `coverage-lexical-v3/file-search-engine.test.ts`,
+  `coverage-lexical-v3/resident-base.test.ts`, and
+  `data-manager-lexical-startup-reconcile.test.ts`.
+
 ### Cold Evidence Storage Breakdown Update
 
 Status: Updated on 2026-04-25
@@ -1231,3 +1261,82 @@ Validation completed for this update:
   `file-snapshot-store.test.ts`, `coverage-lexical-v3/resident-base.test.ts`,
   `coverage-lexical-v3/file-search-engine.test.ts`, and
   `data-manager-lexical-startup-reconcile.test.ts`.
+
+### 2026-04-25 Update: Resident Index View Boundary
+
+- V3 hot resident ownership now has a multi-shard-native outer shape via `ResidentIndexView` and `ResidentShard`.
+- Runtime still builds one shard (`base-0`) so query semantics stay unchanged, but the engine no longer keeps a parallel global resident-base state.
+- `CoverageLexicalV3Engine` now loads and describes the resident index view as the canonical boundary; callers that need the current hot payload derive it from the active shard.
+- Startup memory reporting now includes resident shard count, total resident bytes, largest shard bytes, and average shard bytes so future multi-shard builder work can reuse the same metrics contract.
+- This does not implement overlay shards, shard fan-out merge, or compact yet; it establishes the snapshot/metrics boundary so binary snapshot work does not bind to a single global base schema.
+
+### 2026-04-25 Update: Shard-Owned Cold Evidence and Layout Cleanup
+
+- Canonical cold evidence is now shard-owned instead of only doc-owned:
+  `LexicalDocEvidenceLocator`, `LexicalBlockEvidenceLocator`, row ids, and the
+  three V3 cold evidence tables all carry `shardId` plus `shardGeneration`.
+- Database version `28.9` rebuilds `lexicalBodyEvidence`,
+  `lexicalHanDocEvidence`, and `lexicalHanBodyEvidence` with shard-aware row
+  indexes:
+  `[shardId+shardGeneration+docRef+generation]` and
+  `[shardId+shardGeneration+docRef+generation+blockOrdinal]`.
+- Runtime remains single-shard for now, but the full candidate/evidence path is
+  multi-shard-shaped: `V3CandidateDocRecall`, shortlist hydration requests, and
+  file-search-engine locator/materializer flow all carry owner
+  `base-0` / generation `1`.
+- The transient hydrated-evidence map is now also shard-aware instead of
+  `liveDocSlot`-only: rank/refine paths address prehydrated evidence by a
+  candidate key composed from `shardId + shardGeneration + liveDocSlot`.
+- Remaining ranking scratch keys now follow the same owner shape: Han refine
+  candidate lookup and opaque-rescue comparison gates no longer use bare
+  `liveDocSlot` as the cross-stage key surface.
+- The remaining whole-sidecar layout compatibility layer is removed from the
+  canonical layout surface: body family support, exact tape, and Han witness
+  helper sidecar builders/setters/empty constants no longer exist as separate
+  layout APIs.
+- `CoverageLexicalV3Engine.buildResidentIndexView(...)` now materializes a
+  shard-owned in-memory cold-evidence snapshot for standalone engine usage, so
+  the production engine path no longer relies on test-only hydration shims to
+  reach canonical body/Han evidence assembly.
+- The production `engine.ts` ranking flow now again applies the
+  `c0d42bf4` opaque-rescue second-pass gate semantics directly instead of only
+  inside tests.
+- Internal hot resident naming is also tightened to match the shard-native
+  worldview: resident body support lanes now use
+  `familySupportShardLocalFamilySlots`, resident Han witness lanes use
+  `*WitnessTextIds`, and startup diagnostics report
+  `familyLexiconIdentitySlots`.
+
+Validation completed for this update:
+
+- `npm run typecheck:build -- --pretty false` passes on 2026-04-25.
+- targeted startup/store/hydration/runtime tests pass on 2026-04-25:
+  `file-snapshot-store.test.ts`, `coverage-lexical-v3/evidence-hydration.test.ts`,
+  `coverage-lexical-v3/file-search-engine.test.ts`,
+  `coverage-lexical-v3/resident-base.test.ts`,
+  `coverage-lexical-v3/engine.test.ts`, and
+  `data-manager-lexical-startup-reconcile.test.ts`.
+- Hot resident arenas still keep the recall-hot data they truly own, but that
+  data is no longer wrapped or described as a parallel whole-sidecar
+  compatibility abstraction.
+- The last obvious fuzzy fallback naming residue is also removed from the hot
+  boundary: `ResidentFuzzyRescueSidecar` / `fuzzyRescueSidecar` are now
+  `ResidentFuzzyRescueIndex` / `fuzzyRescueIndex`, matching that this data is a
+  resident hot lookup structure rather than a cold compatibility wrapper.
+
+Validation completed for this update:
+
+- `npm run typecheck:build -- --pretty false` passes on 2026-04-25.
+- targeted runtime/store/hydration/startup tests pass on 2026-04-25:
+- additional shard-aware key cleanup validation passes on 2026-04-25:
+  `coverage-lexical-v3/file-search-engine-metadata-highlights.test.ts` and
+  `coverage-lexical-v3/file-search-engine-request-flags.test.ts`.
+- targeted runtime/store/hydration/startup tests pass on 2026-04-25:
+  `file-snapshot-store.test.ts`, `coverage-lexical-v3/evidence-hydration.test.ts`,
+  `coverage-lexical-v3/file-search-engine.test.ts`,
+  `coverage-lexical-v3/resident-base.test.ts`, and
+  `data-manager-lexical-startup-reconcile.test.ts`.
+- `coverage-lexical-v3/engine.test.ts` still has uncovered behavior drift on
+  2026-04-25 after shard-aware cold-row ownership was restored in test-only
+  mocks; the remaining failures cluster around Han rescue / singleton-completion
+  semantics and are no longer explained by missing cold evidence ownership.

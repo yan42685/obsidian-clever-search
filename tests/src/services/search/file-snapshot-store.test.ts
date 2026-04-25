@@ -61,6 +61,11 @@ import {
   type LexicalDocEvidenceLocator,
 } from "src/services/search/shared/file-snapshot-store";
 
+const DEFAULT_TEST_SHARD_OWNER = {
+  shardId: "base-0",
+  shardGeneration: 1,
+} as const;
+
 type SnapshotRow = {
   docRef?: number;
   filePath: string;
@@ -93,7 +98,7 @@ type LexicalBodyFamilySupportRow = {
   entryCount: number;
   bytes: number;
   familySupportStartByBlockId: Uint8Array | Uint16Array | Uint32Array;
-  familySupportFamilyIds: Uint8Array | Uint16Array | Uint32Array;
+  familySupportShardLocalFamilySlots: Uint8Array | Uint16Array | Uint32Array;
   familySupportMaskByEntry: Uint8Array;
 };
 
@@ -109,11 +114,11 @@ type LexicalHanDocEvidenceRow = {
   id: string;
   docRef: number;
   generation: number;
-  identityWitnessStringIds: readonly number[];
+  identityWitnessTextIds: readonly number[];
   identityWitnessSourceMaskByDocEntry: readonly number[];
-  routeWitnessStringIds: readonly number[];
+  routeWitnessTextIds: readonly number[];
   routeWitnessSourceMaskByDocEntry: readonly number[];
-  headingWitnessStringIds: readonly number[];
+  headingWitnessTextIds: readonly number[];
 };
 
 type LexicalHanBodyEvidenceRow = {
@@ -143,15 +148,15 @@ type LexicalHanWitnessRow = {
   bodyWitnessEntryCount: number;
   bytes: number;
   identityWitnessStartByDocId: Uint8Array | Uint16Array | Uint32Array;
-  identityWitnessStringIds: Uint8Array | Uint16Array | Uint32Array;
+  identityWitnessTextIds: Uint8Array | Uint16Array | Uint32Array;
   identityWitnessSourceMaskByDocEntry: Uint8Array;
   routeWitnessStartByDocId: Uint8Array | Uint16Array | Uint32Array;
-  routeWitnessStringIds: Uint8Array | Uint16Array | Uint32Array;
+  routeWitnessTextIds: Uint8Array | Uint16Array | Uint32Array;
   routeWitnessSourceMaskByDocEntry: Uint8Array;
   headingWitnessStartByDocId: Uint8Array | Uint16Array | Uint32Array;
-  headingWitnessStringIds: Uint8Array | Uint16Array | Uint32Array;
+  headingWitnessTextIds: Uint8Array | Uint16Array | Uint32Array;
   bodyWitnessOccurrenceStartByBlockId: Uint8Array | Uint16Array | Uint32Array;
-  bodyWitnessOccurrenceStringIds: Uint8Array | Uint16Array | Uint32Array;
+  bodyWitnessOccurrenceTextIds: Uint8Array | Uint16Array | Uint32Array;
   bodyWitnessPositionEncodingByBlockId: Uint8Array;
   bodyWitnessPositionStartByBlockId: Uint8Array | Uint16Array | Uint32Array;
   bodyWitnessPositionDeltaU8Tape: Uint8Array;
@@ -715,7 +720,7 @@ describe("FileSnapshotStore", () => {
     expect(nextIndexedRef?.docRef).toBe(indexedRef?.docRef);
   });
 
-  test("publishes and reloads lexical fuzzy rescue sidecars", async () => {
+test("publishes and reloads lexical fuzzy rescue payloads", async () => {
     const { store, database } = createStoreHarness();
 
     await store.publishLexicalFuzzyRescue({
@@ -738,99 +743,63 @@ describe("FileSnapshotStore", () => {
       }),
     );
 
-    const sidecar = await store.readLexicalFuzzyRescueForLookupKeys(["obsidan"]);
-    expect(sidecar.indexedMetadataFamilyCount).toBe(3);
-    expect(sidecar.fuzzyLookupKeyCount).toBe(1);
+  const payload = await store.readLexicalFuzzyRescueForLookupKeys(["obsidan"]);
+  expect(payload.indexedMetadataFamilyCount).toBe(3);
+  expect(payload.fuzzyLookupKeyCount).toBe(1);
     expect(
-      sidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get("obsidan"),
+    payload.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.get("obsidan"),
     ).toEqual(
       Uint32Array.from([3, 7]),
     );
-    expect(
-      sidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.has("runtim"),
-    ).toBe(false);
-  });
-
-  test("publishes and reloads lexical body family support sidecars", async () => {
-    const { store, database } = createStoreHarness();
-
-    await store.publishLexicalBodyFamilySupport({
-      familySupportStartByBlockId: Uint8Array.from([0, 2, 3]),
-      familySupportFamilyIds: Uint16Array.from([4, 9, 12]),
-      familySupportMaskByEntry: Uint8Array.from([1, 3, 2]),
-      entryCount: 3,
-      bytes: 11,
-    });
-
-    const storedRow = await database.db.lexicalBodyFamilySupport.get("active");
-    expect(storedRow).toEqual(
-      expect.objectContaining({
-        id: "active",
-        entryCount: 3,
-        bytes: 11,
-      }),
-    );
-    expect(storedRow?.familySupportStartByBlockId).toEqual(
-      Uint8Array.from([0, 2, 3]),
-    );
-    expect(storedRow?.familySupportFamilyIds).toEqual(
-      Uint16Array.from([4, 9, 12]),
-    );
-    expect(storedRow?.familySupportMaskByEntry).toEqual(
-      Uint8Array.from([1, 3, 2]),
-    );
-
-    const sidecar = await store.readLexicalBodyFamilySupport();
-    expect(sidecar.entryCount).toBe(3);
-    expect(sidecar.bytes).toBe(11);
-    expect(sidecar.familySupportStartByBlockId).toEqual(
-      Uint8Array.from([0, 2, 3]),
-    );
-    expect(sidecar.familySupportFamilyIds).toEqual(
-      Uint16Array.from([4, 9, 12]),
-    );
-    expect(sidecar.familySupportMaskByEntry).toEqual(
-      Uint8Array.from([1, 3, 2]),
-    );
+  expect(
+    payload.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.has("runtim"),
+  ).toBe(false);
   });
 
   test("publishes and reloads lexical body evidence for shortlisted blocks", async () => {
     const { store, database } = createStoreHarness();
     const firstLocator: LexicalBlockEvidenceLocator = {
+      ...DEFAULT_TEST_SHARD_OWNER,
       docRef: 41,
       generation: 7,
       blockOrdinal: 0,
     };
     const secondLocator: LexicalBlockEvidenceLocator = {
+      ...DEFAULT_TEST_SHARD_OWNER,
       docRef: 41,
       generation: 7,
       blockOrdinal: 1,
     };
     const missingLocator: LexicalBlockEvidenceLocator = {
+      ...DEFAULT_TEST_SHARD_OWNER,
       docRef: 99,
       generation: 7,
       blockOrdinal: 0,
     };
 
-    await store.publishLexicalBodyEvidence([
-      {
-        id: buildLexicalBlockEvidenceRowId(firstLocator),
-        docRef: firstLocator.docRef,
-        generation: firstLocator.generation,
-        blockOrdinal: firstLocator.blockOrdinal,
-        exactFamilyIds: [4, 9],
-        exactTokenPositions: [1, 7],
-        familySupportFamilyIds: [4, 9],
-        familySupportMaskByEntry: [1, 3],
-      },
+	    await store.publishLexicalBodyEvidence([
+	      {
+	        id: buildLexicalBlockEvidenceRowId(firstLocator),
+	        shardId: firstLocator.shardId,
+	        shardGeneration: firstLocator.shardGeneration,
+	        docRef: firstLocator.docRef,
+	        generation: firstLocator.generation,
+	        blockOrdinal: firstLocator.blockOrdinal,
+	        exactShardLocalFamilySlots: [260, 513],
+	        exactTokenPositions: [1, 513],
+	        supportShardLocalFamilySlots: [260, 513],
+	        familySupportMaskByEntry: [1, 3],
+	      },
       {
         id: buildLexicalBlockEvidenceRowId(secondLocator),
+        shardId: secondLocator.shardId,
+        shardGeneration: secondLocator.shardGeneration,
         docRef: secondLocator.docRef,
         generation: secondLocator.generation,
         blockOrdinal: secondLocator.blockOrdinal,
-        exactFamilyIds: [11],
+        exactShardLocalFamilySlots: [11],
         exactTokenPositions: [2],
-        familySupportFamilyIds: [11],
+        supportShardLocalFamilySlots: [11],
         familySupportMaskByEntry: [2],
       },
     ]);
@@ -840,6 +809,8 @@ describe("FileSnapshotStore", () => {
 			buildLexicalBlockEvidenceRowId(firstLocator),
 		);
 		expect(storedBodyRow?.bodyEvidencePayload).toBeInstanceOf(Uint8Array);
+		expect(storedBodyRow?.shardId).toBe("base-0");
+		expect(storedBodyRow?.shardGeneration).toBe(1);
 		expect(
 			"exactFamilyIds" in (storedBodyRow as Record<string, unknown>),
 		).toBe(false);
@@ -850,18 +821,20 @@ describe("FileSnapshotStore", () => {
       missingLocator,
     ]);
 
-    expect(evidenceByRowId.get(buildLexicalBlockEvidenceRowId(firstLocator))).toEqual({
-      exactFamilyIds: [4, 9],
-      exactTokenPositions: [1, 7],
-      familySupportEntries: [
-        { familyId: 4, supportMask: 1 },
-        { familyId: 9, supportMask: 3 },
-      ],
-    });
+	    expect(evidenceByRowId.get(buildLexicalBlockEvidenceRowId(firstLocator))).toEqual({
+	      exactShardLocalFamilySlots: [260, 513],
+	      exactTokenPositions: [1, 513],
+	      supportEntriesByShardLocalFamilySlot: [
+	        { shardLocalFamilySlot: 260, supportMask: 1 },
+	        { shardLocalFamilySlot: 513, supportMask: 3 },
+	      ],
+	    });
     expect(evidenceByRowId.get(buildLexicalBlockEvidenceRowId(secondLocator))).toEqual({
-      exactFamilyIds: [11],
+      exactShardLocalFamilySlots: [11],
       exactTokenPositions: [2],
-      familySupportEntries: [{ familyId: 11, supportMask: 2 }],
+      supportEntriesByShardLocalFamilySlot: [
+        { shardLocalFamilySlot: 11, supportMask: 2 },
+      ],
     });
     expect(evidenceByRowId.has(buildLexicalBlockEvidenceRowId(missingLocator))).toBe(false);
   });
@@ -869,10 +842,12 @@ describe("FileSnapshotStore", () => {
   test("publishes and reloads lexical Han doc evidence", async () => {
     const { store, database } = createStoreHarness();
     const firstLocator: LexicalDocEvidenceLocator = {
+      ...DEFAULT_TEST_SHARD_OWNER,
       docRef: 17,
       generation: 5,
     };
     const missingLocator: LexicalDocEvidenceLocator = {
+      ...DEFAULT_TEST_SHARD_OWNER,
       docRef: 18,
       generation: 5,
     };
@@ -880,6 +855,8 @@ describe("FileSnapshotStore", () => {
     await store.publishLexicalHanDocEvidence([
       {
         id: buildLexicalDocEvidenceRowId(firstLocator),
+        shardId: firstLocator.shardId,
+        shardGeneration: firstLocator.shardGeneration,
         docRef: firstLocator.docRef,
         generation: firstLocator.generation,
         identityWitnessMatchKeys: new Int32Array([-1500000003, -1500000005]),
@@ -916,11 +893,13 @@ describe("FileSnapshotStore", () => {
   test("publishes and reloads lexical Han body evidence for shortlisted blocks", async () => {
     const { store, database } = createStoreHarness();
     const firstLocator: LexicalBlockEvidenceLocator = {
+      ...DEFAULT_TEST_SHARD_OWNER,
       docRef: 23,
       generation: 9,
       blockOrdinal: 2,
     };
     const missingLocator: LexicalBlockEvidenceLocator = {
+      ...DEFAULT_TEST_SHARD_OWNER,
       docRef: 24,
       generation: 9,
       blockOrdinal: 0,
@@ -929,6 +908,8 @@ describe("FileSnapshotStore", () => {
     await store.publishLexicalHanBodyEvidence([
       {
         id: buildLexicalBlockEvidenceRowId(firstLocator),
+        shardId: firstLocator.shardId,
+        shardGeneration: firstLocator.shardGeneration,
         docRef: firstLocator.docRef,
         generation: firstLocator.generation,
         blockOrdinal: firstLocator.blockOrdinal,
@@ -951,115 +932,6 @@ describe("FileSnapshotStore", () => {
       bodyWitnessStartOffsets: [0, 6],
     });
     expect(evidenceByRowId.has(buildLexicalBlockEvidenceRowId(missingLocator))).toBe(false);
-  });
-
-  test("publishes and reloads lexical exact tape sidecars", async () => {
-    const { store, database } = createStoreHarness();
-
-    await store.publishLexicalExactTapes({
-      familyIds: Uint16Array.from([2, 7, 11]),
-      positionEncodingByBlockId: Uint8Array.from([0, 1]),
-      positionStartByBlockId: Uint8Array.from([0, 2]),
-      positionDeltaU8Tape: Uint8Array.from([3, 4]),
-      positionDeltaU16Tape: Uint16Array.from([1200]),
-      positionDeltaU32Tape: Uint32Array.from([70000]),
-      entryCount: 3,
-      bytes: 19,
-    });
-
-    const storedRow = await database.db.lexicalExactTapes.get("active");
-    expect(storedRow).toEqual(
-      expect.objectContaining({
-        id: "active",
-        entryCount: 3,
-        bytes: 19,
-      }),
-    );
-    expect(storedRow?.familyIds).toEqual(Uint16Array.from([2, 7, 11]));
-    expect(storedRow?.positionEncodingByBlockId).toEqual(Uint8Array.from([0, 1]));
-    expect(storedRow?.positionStartByBlockId).toEqual(Uint8Array.from([0, 2]));
-    expect(storedRow?.positionDeltaU8Tape).toEqual(Uint8Array.from([3, 4]));
-    expect(storedRow?.positionDeltaU16Tape).toEqual(Uint16Array.from([1200]));
-    expect(storedRow?.positionDeltaU32Tape).toEqual(Uint32Array.from([70000]));
-
-    const sidecar = await store.readLexicalExactTapes();
-    expect(sidecar.entryCount).toBe(3);
-    expect(sidecar.bytes).toBe(19);
-    expect(sidecar.familyIds).toEqual(Uint16Array.from([2, 7, 11]));
-    expect(sidecar.positionEncodingByBlockId).toEqual(Uint8Array.from([0, 1]));
-    expect(sidecar.positionStartByBlockId).toEqual(Uint8Array.from([0, 2]));
-    expect(sidecar.positionDeltaU8Tape).toEqual(Uint8Array.from([3, 4]));
-    expect(sidecar.positionDeltaU16Tape).toEqual(Uint16Array.from([1200]));
-    expect(sidecar.positionDeltaU32Tape).toEqual(Uint32Array.from([70000]));
-  });
-
-  test("publishes and reloads lexical han witness sidecars", async () => {
-    const { store, database } = createStoreHarness();
-
-    await store.publishLexicalHanWitnesses({
-      identityWitnessStartByDocId: Uint8Array.from([0, 2]),
-      identityWitnessStringIds: Uint16Array.from([3, 5]),
-      identityWitnessSourceMaskByDocEntry: Uint8Array.from([1, 2]),
-      routeWitnessStartByDocId: Uint8Array.from([0, 1]),
-      routeWitnessStringIds: Uint16Array.from([7]),
-      routeWitnessSourceMaskByDocEntry: Uint8Array.from([4]),
-      headingWitnessStartByDocId: Uint8Array.from([0, 1]),
-      headingWitnessStringIds: Uint16Array.from([9]),
-      bodyWitnessOccurrenceStartByBlockId: Uint8Array.from([0, 2]),
-      bodyWitnessOccurrenceStringIds: Uint16Array.from([11, 13]),
-      bodyWitnessPositionEncodingByBlockId: Uint8Array.from([0]),
-      bodyWitnessPositionStartByBlockId: Uint8Array.from([0]),
-      bodyWitnessPositionDeltaU8Tape: Uint8Array.from([2, 4]),
-      bodyWitnessPositionDeltaU16Tape: Uint16Array.from([1200]),
-      bodyWitnessPositionDeltaU32Tape: Uint32Array.from([70000]),
-      metadataWitnessEntryCount: 4,
-      bodyWitnessEntryCount: 2,
-      bytes: 33,
-    });
-
-    const storedRow = await database.db.lexicalHanWitness.get("active");
-    expect(storedRow).toEqual(
-      expect.objectContaining({
-        id: "active",
-        metadataWitnessEntryCount: 4,
-        bodyWitnessEntryCount: 2,
-        bytes: 33,
-      }),
-    );
-
-    const sidecar = await store.readLexicalHanWitnesses();
-    expect(sidecar.metadataWitnessEntryCount).toBe(4);
-    expect(sidecar.bodyWitnessEntryCount).toBe(2);
-    expect(sidecar.bytes).toBe(33);
-    expect(sidecar.identityWitnessStartByDocId).toEqual(Uint8Array.from([0, 2]));
-    expect(sidecar.identityWitnessStringIds).toEqual(Uint16Array.from([3, 5]));
-    expect(sidecar.identityWitnessSourceMaskByDocEntry).toEqual(
-      Uint8Array.from([1, 2]),
-    );
-    expect(sidecar.routeWitnessStartByDocId).toEqual(Uint8Array.from([0, 1]));
-    expect(sidecar.routeWitnessStringIds).toEqual(Uint16Array.from([7]));
-    expect(sidecar.routeWitnessSourceMaskByDocEntry).toEqual(
-      Uint8Array.from([4]),
-    );
-    expect(sidecar.headingWitnessStartByDocId).toEqual(Uint8Array.from([0, 1]));
-    expect(sidecar.headingWitnessStringIds).toEqual(Uint16Array.from([9]));
-    expect(sidecar.bodyWitnessOccurrenceStartByBlockId).toEqual(
-      Uint8Array.from([0, 2]),
-    );
-    expect(sidecar.bodyWitnessOccurrenceStringIds).toEqual(
-      Uint16Array.from([11, 13]),
-    );
-    expect(sidecar.bodyWitnessPositionEncodingByBlockId).toEqual(
-      Uint8Array.from([0]),
-    );
-    expect(sidecar.bodyWitnessPositionStartByBlockId).toEqual(
-      Uint8Array.from([0]),
-    );
-    expect(sidecar.bodyWitnessPositionDeltaU8Tape).toEqual(Uint8Array.from([2, 4]));
-    expect(sidecar.bodyWitnessPositionDeltaU16Tape).toEqual(Uint16Array.from([1200]));
-    expect(sidecar.bodyWitnessPositionDeltaU32Tape).toEqual(
-      Uint32Array.from([70000]),
-    );
   });
 
   test("getRuntimeMemoryEstimate reports resident breakdown and slot reuse", async () => {

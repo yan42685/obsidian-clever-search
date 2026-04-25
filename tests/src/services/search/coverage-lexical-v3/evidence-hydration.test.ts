@@ -1,24 +1,31 @@
 import type { IndexedDocument } from "src/globals/search-types";
-import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
-import { readResidentBodyFamilySupportSidecar } from "src/services/search/coverage-lexical-v3/layout/body-blocks";
-import { buildResidentExactTapeSidecar } from "src/services/search/coverage-lexical-v3/layout/exact-tapes";
 import {
-	buildResidentHanWitnessSidecar,
-	createEmptyResidentHanWitnessSidecar,
-	setResidentHanWitnessSidecar,
-} from "src/services/search/coverage-lexical-v3/layout/han-route";
+	buildResidentBase,
+	buildStableWitnessMatchKey,
+	DEFAULT_RESIDENT_SHARD_GENERATION,
+	DEFAULT_RESIDENT_SHARD_ID,
+} from "src/services/search/coverage-lexical-v3/build";
 import { analyzeQuery } from "src/services/search/coverage-lexical-v3/query";
 import {
+	getBodyBlockExactFamilyIds,
+	getBodyBlockExactTokenPositions,
+	getBodyBlockFamilySupportEntries,
+	getBodyBlockHanWitnessOccurrences,
+	getBodyBlockHanWitnessTexts,
 	getLiveDocHeadingHanWitnessStringIds,
+	getLiveDocHeadingHanWitnessTexts,
 	getLiveDocIdentityHanWitnessSourceMasks,
 	getLiveDocIdentityHanWitnessStringIds,
+	getLiveDocIdentityHanWitnessTexts,
 	getLiveDocRouteHanWitnessSourceMasks,
 	getLiveDocRouteHanWitnessStringIds,
+	getLiveDocRouteHanWitnessTexts,
 	lookupQueryUnitFamilies,
 	recallCandidateDocs,
 } from "src/services/search/coverage-lexical-v3/recall";
 import {
 	buildPackingProfile,
+	buildCandidateHydrationKey,
 	hydrateCandidateEvidence,
 } from "src/services/search/coverage-lexical-v3/ranking";
 
@@ -75,10 +82,10 @@ describe("coverage lexical v3 evidence hydration", () => {
 		expect(hydratedProfile).toEqual(baselineProfile);
 	});
 
-	it("builds the same packing profile when hydrated from exact/body/han sidecars", () => {
+	it("builds the same packing profile when hydrated from canonical cold evidence shapes", () => {
 		const document = createDocument({
-			path: "notes/han-sidecar-evidence.md",
-			basename: "han sidecar evidence",
+				path: "notes/han-cold-evidence.md",
+				basename: "han cold evidence",
 			folder: "notes",
 			content: "缓存恢复步骤\n\n缓存恢复检查 alpha beta",
 		});
@@ -98,6 +105,81 @@ describe("coverage lexical v3 evidence hydration", () => {
 			candidateRecall!,
 			unitFamilyMatches,
 		);
+		const blockId = candidateRecall!.shortlistedBodyBlockIds[0] ?? 0;
+		const bodyEvidenceByBlockId = new Map([
+			[
+				blockId,
+				{
+					exactShardLocalFamilySlots: getBodyBlockExactFamilyIds(base, blockId),
+					exactTokenPositions: getBodyBlockExactTokenPositions(base, blockId),
+					supportEntriesByShardLocalFamilySlot: getBodyBlockFamilySupportEntries(
+						base,
+						blockId,
+					).map((entry) => ({
+						shardLocalFamilySlot: entry.familyId,
+						supportMask: entry.supportMask,
+					})),
+				},
+			] as const,
+		]);
+		const bodyHanEvidenceByBlockId = new Map([
+			[
+				blockId,
+				{
+					bodyWitnessMatchKeys: getBodyBlockHanWitnessOccurrences(base, blockId).map(
+						(occurrence) => buildStableWitnessMatchKey(
+							getBodyBlockHanWitnessTexts(base, blockId).find(
+								(text, index) =>
+									(getBodyBlockHanWitnessOccurrences(base, blockId)[index]?.stringId ??
+										-1) === occurrence.stringId,
+							) ?? "",
+						),
+					),
+					bodyWitnessTexts: getBodyBlockHanWitnessTexts(base, blockId),
+					bodyWitnessStartOffsets: getBodyBlockHanWitnessOccurrences(
+						base,
+						blockId,
+					).map((occurrence) => occurrence.start),
+				},
+			] as const,
+		]);
+		const liveDocSlot = candidateRecall!.liveDocSlot;
+		const docHanEvidenceByCandidateKey = new Map([
+			[
+				buildCandidateHydrationKey(candidateRecall!),
+				{
+					identityWitnessMatchKeys: getLiveDocIdentityHanWitnessTexts(
+						base,
+						liveDocSlot,
+					).map(buildStableWitnessMatchKey),
+					identityWitnessTexts: getLiveDocIdentityHanWitnessTexts(
+						base,
+						liveDocSlot,
+					),
+					identityWitnessSourceMasks: getLiveDocIdentityHanWitnessSourceMasks(
+						base,
+						liveDocSlot,
+					),
+					routeWitnessMatchKeys: getLiveDocRouteHanWitnessTexts(
+						base,
+						liveDocSlot,
+					).map(buildStableWitnessMatchKey),
+					routeWitnessTexts: getLiveDocRouteHanWitnessTexts(base, liveDocSlot),
+					routeWitnessSourceMasks: getLiveDocRouteHanWitnessSourceMasks(
+						base,
+						liveDocSlot,
+					),
+					headingWitnessMatchKeys: getLiveDocHeadingHanWitnessTexts(
+						base,
+						liveDocSlot,
+					).map(buildStableWitnessMatchKey),
+					headingWitnessTexts: getLiveDocHeadingHanWitnessTexts(
+						base,
+						liveDocSlot,
+					),
+				},
+			] as const,
+		]);
 		const hydratedProfile = buildPackingProfile(
 			base,
 			queryAnalysis,
@@ -105,11 +187,9 @@ describe("coverage lexical v3 evidence hydration", () => {
 			unitFamilyMatches,
 			{
 				hydratedEvidence: hydrateCandidateEvidence(base, candidateRecall!, {
-					exactTapeSidecar: buildResidentExactTapeSidecar(base.exactTapes),
-					bodyFamilySupportSidecar: readResidentBodyFamilySupportSidecar(
-						base.bodyBlocks,
-					),
-					hanWitnessSidecar: buildResidentHanWitnessSidecar(base.hanRoute),
+					bodyEvidenceByBlockId,
+					docHanEvidenceByCandidateKey,
+					bodyHanEvidenceByBlockId,
 				}),
 			},
 		);
@@ -141,35 +221,65 @@ describe("coverage lexical v3 evidence hydration", () => {
 			unitFamilyMatches,
 		);
 		const liveDocSlot = candidateRecall!.liveDocSlot;
-		const docHanEvidenceByLiveDocSlot = new Map([
+		const docHanEvidenceByCandidateKey = new Map([
 			[
-				liveDocSlot,
+				buildCandidateHydrationKey({
+					shardId: DEFAULT_RESIDENT_SHARD_ID,
+					shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
+					liveDocSlot,
+				}),
 				{
-					identityWitnessStringIds: getLiveDocIdentityHanWitnessStringIds(
+					identityWitnessMatchKeys: getLiveDocIdentityHanWitnessTexts(
 						base,
 						liveDocSlot,
-					),
+					).map(buildStableWitnessMatchKey),
+					identityWitnessTexts: getLiveDocIdentityHanWitnessTexts(base, liveDocSlot),
 					identityWitnessSourceMasks: getLiveDocIdentityHanWitnessSourceMasks(
 						base,
 						liveDocSlot,
 					),
-					routeWitnessStringIds: getLiveDocRouteHanWitnessStringIds(
+					routeWitnessMatchKeys: getLiveDocRouteHanWitnessTexts(
 						base,
 						liveDocSlot,
-					),
+					).map(buildStableWitnessMatchKey),
+					routeWitnessTexts: getLiveDocRouteHanWitnessTexts(base, liveDocSlot),
 					routeWitnessSourceMasks: getLiveDocRouteHanWitnessSourceMasks(
 						base,
 						liveDocSlot,
 					),
-					headingWitnessStringIds: getLiveDocHeadingHanWitnessStringIds(
+					headingWitnessMatchKeys: getLiveDocHeadingHanWitnessTexts(
 						base,
 						liveDocSlot,
-					),
+					).map(buildStableWitnessMatchKey),
+					headingWitnessTexts: getLiveDocHeadingHanWitnessTexts(base, liveDocSlot),
 				},
 			] as const,
 		]);
 
-		setResidentHanWitnessSidecar(base.hanRoute, createEmptyResidentHanWitnessSidecar());
+		const mutableHanRoute = base.hanRoute as {
+			identityWitnessStartByDocId: Uint8Array;
+			identityWitnessStartByLiveDocSlot: Uint8Array;
+			identityWitnessTextIds: Uint8Array;
+			identityWitnessSourceMaskByDocEntry: Uint8Array;
+			routeWitnessStartByDocId: Uint8Array;
+			routeWitnessStartByLiveDocSlot: Uint8Array;
+			routeWitnessTextIds: Uint8Array;
+			routeWitnessSourceMaskByDocEntry: Uint8Array;
+			headingWitnessStartByDocId: Uint8Array;
+			headingWitnessStartByLiveDocSlot: Uint8Array;
+			headingWitnessTextIds: Uint8Array;
+		};
+		mutableHanRoute.identityWitnessStartByDocId = new Uint8Array();
+		mutableHanRoute.identityWitnessStartByLiveDocSlot = new Uint8Array();
+		mutableHanRoute.identityWitnessTextIds = new Uint8Array();
+		mutableHanRoute.identityWitnessSourceMaskByDocEntry = new Uint8Array();
+		mutableHanRoute.routeWitnessStartByDocId = new Uint8Array();
+		mutableHanRoute.routeWitnessStartByLiveDocSlot = new Uint8Array();
+		mutableHanRoute.routeWitnessTextIds = new Uint8Array();
+		mutableHanRoute.routeWitnessSourceMaskByDocEntry = new Uint8Array();
+		mutableHanRoute.headingWitnessStartByDocId = new Uint8Array();
+		mutableHanRoute.headingWitnessStartByLiveDocSlot = new Uint8Array();
+		mutableHanRoute.headingWitnessTextIds = new Uint8Array();
 
 		const hydratedProfile = buildPackingProfile(
 			base,
@@ -178,7 +288,7 @@ describe("coverage lexical v3 evidence hydration", () => {
 			unitFamilyMatches,
 			{
 				hydratedEvidence: hydrateCandidateEvidence(base, candidateRecall!, {
-					docHanEvidenceByLiveDocSlot,
+					docHanEvidenceByCandidateKey,
 				}),
 			},
 		);

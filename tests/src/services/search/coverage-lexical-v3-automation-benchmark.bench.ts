@@ -174,11 +174,11 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 				id: string;
 				docRef: number;
 				generation: number;
-				identityWitnessStringIds: number[];
+		identityWitnessTextIds: number[];
 				identityWitnessSourceMasks: number[];
-				routeWitnessStringIds: number[];
+		routeWitnessTextIds: number[];
 				routeWitnessSourceMasks: number[];
-				headingWitnessStringIds: number[];
+		headingWitnessTextIds: number[];
 			}
 		>();
 		private static lexicalHanBodyEvidence = new Map<
@@ -346,8 +346,8 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 			return Promise.resolve(result);
 		}
 
-		publishLexicalFuzzyRescue(sidecar: unknown): Promise<void> {
-			MockFileSnapshotStore.lexicalFuzzyRescue = sidecar;
+		publishLexicalFuzzyRescue(payload: unknown): Promise<void> {
+			MockFileSnapshotStore.lexicalFuzzyRescue = payload;
 			MockFileSnapshotStore.recomputeBenchmarkPersistedLexicalBytes();
 			return Promise.resolve();
 		}
@@ -355,7 +355,7 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 		readLexicalFuzzyRescueForLookupKeys(
 			fuzzyLookupKeys: ReadonlyArray<string>,
 		): Promise<unknown> {
-			const sidecar = MockFileSnapshotStore.lexicalFuzzyRescue as
+			const payload = MockFileSnapshotStore.lexicalFuzzyRescue as
 				| {
 						candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey?: ReadonlyMap<
 							string,
@@ -364,14 +364,14 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 						fuzzyLookupKeyCount?: number;
 				  }
 				| null;
-			if (sidecar == null) {
+			if (payload == null) {
 				return Promise.resolve(null);
 			}
 			const candidates =
-				sidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey ??
+				payload.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey ??
 				new Map<string, unknown>();
 			return Promise.resolve({
-				...sidecar,
+				...payload,
 				candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: new Map(
 					fuzzyLookupKeys.flatMap((fuzzyLookupKey) => {
 						const familyIds = candidates.get(fuzzyLookupKey);
@@ -392,7 +392,7 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 				blockOrdinal: number;
 				exactFamilyIds: readonly number[];
 				exactTokenPositions: readonly number[];
-				familySupportFamilyIds: readonly number[];
+				familySupportShardLocalFamilySlots: readonly number[];
 				familySupportMaskByEntry: readonly number[];
 			}>,
 		): Promise<void> {
@@ -405,8 +405,8 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 					blockOrdinal: row.blockOrdinal,
 					exactFamilyIds: [...row.exactFamilyIds],
 					exactTokenPositions: [...row.exactTokenPositions],
-					familySupportEntries: row.familySupportFamilyIds.map((familyId, index) => ({
-						familyId,
+					familySupportEntries: row.familySupportShardLocalFamilySlots.map((shardLocalFamilySlot, index) => ({
+						familyId: shardLocalFamilySlot,
 						supportMask: row.familySupportMaskByEntry[index] ?? 0,
 					})),
 				});
@@ -461,11 +461,11 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 				id: string;
 				docRef: number;
 				generation: number;
-				identityWitnessStringIds: readonly number[];
+				identityWitnessTextIds: readonly number[];
 				identityWitnessSourceMaskByDocEntry: readonly number[];
-				routeWitnessStringIds: readonly number[];
+				routeWitnessTextIds: readonly number[];
 				routeWitnessSourceMaskByDocEntry: readonly number[];
-				headingWitnessStringIds: readonly number[];
+				headingWitnessTextIds: readonly number[];
 			}>,
 		): Promise<void> {
 			MockFileSnapshotStore.lexicalHanDocEvidence.clear();
@@ -474,11 +474,11 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 					id: row.id,
 					docRef: row.docRef,
 					generation: row.generation,
-					identityWitnessStringIds: [...row.identityWitnessStringIds],
+					identityWitnessTextIds: [...row.identityWitnessTextIds],
 					identityWitnessSourceMasks: [...row.identityWitnessSourceMaskByDocEntry],
-					routeWitnessStringIds: [...row.routeWitnessStringIds],
+					routeWitnessTextIds: [...row.routeWitnessTextIds],
 					routeWitnessSourceMasks: [...row.routeWitnessSourceMaskByDocEntry],
-					headingWitnessStringIds: [...row.headingWitnessStringIds],
+					headingWitnessTextIds: [...row.headingWitnessTextIds],
 				});
 			}
 			MockFileSnapshotStore.recomputeBenchmarkPersistedLexicalBytes();
@@ -494,31 +494,31 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 			ReadonlyMap<
 				string,
 				{
-					identityWitnessStringIds: readonly number[];
+					identityWitnessTextIds: readonly number[];
 					identityWitnessSourceMasks: readonly number[];
-					routeWitnessStringIds: readonly number[];
+					routeWitnessTextIds: readonly number[];
 					routeWitnessSourceMasks: readonly number[];
-					headingWitnessStringIds: readonly number[];
+					headingWitnessTextIds: readonly number[];
 				}
 			>
 		> {
 			const out = new Map<string, {
-				identityWitnessStringIds: readonly number[];
+				identityWitnessTextIds: readonly number[];
 				identityWitnessSourceMasks: readonly number[];
-				routeWitnessStringIds: readonly number[];
+				routeWitnessTextIds: readonly number[];
 				routeWitnessSourceMasks: readonly number[];
-				headingWitnessStringIds: readonly number[];
+				headingWitnessTextIds: readonly number[];
 			}>();
 			for (const locator of locators) {
 				const rowId = mockBuildBenchmarkLexicalDocEvidenceRowId(locator);
 				const snapshot = MockFileSnapshotStore.lexicalHanDocEvidence.get(rowId);
 				if (snapshot != null) {
 					out.set(rowId, {
-						identityWitnessStringIds: snapshot.identityWitnessStringIds,
+					identityWitnessTextIds: snapshot.identityWitnessTextIds,
 						identityWitnessSourceMasks: snapshot.identityWitnessSourceMasks,
-						routeWitnessStringIds: snapshot.routeWitnessStringIds,
+					routeWitnessTextIds: snapshot.routeWitnessTextIds,
 						routeWitnessSourceMasks: snapshot.routeWitnessSourceMasks,
-						headingWitnessStringIds: snapshot.headingWitnessStringIds,
+					headingWitnessTextIds: snapshot.headingWitnessTextIds,
 					});
 				}
 			}

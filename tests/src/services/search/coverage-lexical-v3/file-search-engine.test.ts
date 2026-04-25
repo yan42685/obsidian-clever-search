@@ -6,10 +6,7 @@ import type { IndexedDocument } from "src/globals/search-types";
 import { OuterSetting } from "src/globals/plugin-setting";
 import { CoverageLexicalV3FileSearchEngine } from "src/services/search/coverage-lexical-v3/file-search-engine";
 import type { CoverageLexicalV3SearchResult } from "src/services/search/coverage-lexical-v3/engine";
-import { EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR } from "src/services/search/coverage-lexical-v3/layout/body-blocks";
-import { EMPTY_RESIDENT_EXACT_TAPE_SIDECAR } from "src/services/search/coverage-lexical-v3/layout/exact-tapes";
-import { EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR } from "src/services/search/coverage-lexical-v3/layout/fuzzy-rescue";
-import { EMPTY_RESIDENT_HAN_WITNESS_SIDECAR } from "src/services/search/coverage-lexical-v3/layout/han-route";
+import { EMPTY_RESIDENT_FUZZY_RESCUE_INDEX } from "src/services/search/coverage-lexical-v3/layout/fuzzy-rescue";
 import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
 import { buildBlockPositionLane } from "src/services/search/coverage-lexical-v3/layout/position-lanes";
 import { buildStableWitnessMatchKey } from "src/services/search/coverage-lexical-v3/build";
@@ -241,11 +238,9 @@ function createPersistedBodyEvidenceMap(
 			docRef: number;
 			generation: number;
 			blockOrdinal: number;
-			exactFamilyIds?: readonly number[];
-			exactShardLocalFamilySlots?: readonly number[];
+			exactShardLocalFamilySlots: readonly number[];
 			exactTokenPositions: readonly number[];
-			familySupportFamilyIds?: readonly number[];
-			supportShardLocalFamilySlots?: readonly number[];
+			supportShardLocalFamilySlots: readonly number[];
 			familySupportMaskByEntry: readonly number[];
 		}
 	>,
@@ -261,21 +256,16 @@ function createPersistedBodyEvidenceMap(
 			return [
 				row.id,
 				{
-					exactFamilyIds: row.exactFamilyIds,
 					exactShardLocalFamilySlots: row.exactShardLocalFamilySlots,
 					exactTokenPositions: row.exactTokenPositions,
-					familySupportEntries: (row.familySupportFamilyIds ?? []).map(
-						(familyId, index) => ({
-							familyId,
+					supportEntriesByShardLocalFamilySlot:
+						Array.from(
+							row.supportShardLocalFamilySlots,
+							(shardLocalFamilySlot, index) => ({
+							shardLocalFamilySlot,
 							supportMask: row.familySupportMaskByEntry[index] ?? 0,
-						}),
-					),
-					supportEntriesByShardLocalFamilySlot: (
-						row.supportShardLocalFamilySlots ?? []
-					).map((shardLocalFamilySlot, index) => ({
-						shardLocalFamilySlot,
-						supportMask: row.familySupportMaskByEntry[index] ?? 0,
-					})),
+							}),
+						),
 				},
 			] as const;
 		}),
@@ -290,17 +280,14 @@ function createPersistedHanDocEvidenceMap(
 			id: string;
 			docRef: number;
 			generation: number;
-			identityWitnessStringIds?: readonly number[];
-			identityWitnessMatchKeys?: readonly number[];
-			identityWitnessTexts?: readonly string[];
+			identityWitnessMatchKeys: readonly number[];
+			identityWitnessTexts: readonly string[];
 			identityWitnessSourceMaskByDocEntry: readonly number[];
-			routeWitnessStringIds?: readonly number[];
-			routeWitnessMatchKeys?: readonly number[];
-			routeWitnessTexts?: readonly string[];
+			routeWitnessMatchKeys: readonly number[];
+			routeWitnessTexts: readonly string[];
 			routeWitnessSourceMaskByDocEntry: readonly number[];
-			headingWitnessStringIds?: readonly number[];
-			headingWitnessMatchKeys?: readonly number[];
-			headingWitnessTexts?: readonly string[];
+			headingWitnessMatchKeys: readonly number[];
+			headingWitnessTexts: readonly string[];
 		}
 	>,
 ) {
@@ -315,16 +302,13 @@ function createPersistedHanDocEvidenceMap(
 			return [
 				row.id,
 				{
-					identityWitnessStringIds: row.identityWitnessStringIds,
 					identityWitnessMatchKeys: row.identityWitnessMatchKeys,
 					identityWitnessTexts: row.identityWitnessTexts,
 					identityWitnessSourceMasks:
 						row.identityWitnessSourceMaskByDocEntry,
-					routeWitnessStringIds: row.routeWitnessStringIds,
 					routeWitnessMatchKeys: row.routeWitnessMatchKeys,
 					routeWitnessTexts: row.routeWitnessTexts,
 					routeWitnessSourceMasks: row.routeWitnessSourceMaskByDocEntry,
-					headingWitnessStringIds: row.headingWitnessStringIds,
 					headingWitnessMatchKeys: row.headingWitnessMatchKeys,
 					headingWitnessTexts: row.headingWitnessTexts,
 				},
@@ -342,9 +326,8 @@ function createPersistedHanBodyEvidenceMap(
 			docRef: number;
 			generation: number;
 			blockOrdinal: number;
-			bodyWitnessStringIds?: readonly number[];
-			bodyWitnessMatchKeys?: readonly number[];
-			bodyWitnessTexts?: readonly string[];
+			bodyWitnessMatchKeys: readonly number[];
+			bodyWitnessTexts: readonly string[];
 			bodyWitnessStartOffsets: readonly number[];
 		}
 	>,
@@ -360,7 +343,6 @@ function createPersistedHanBodyEvidenceMap(
 			return [
 				row.id,
 				{
-					bodyWitnessStringIds: row.bodyWitnessStringIds,
 					bodyWitnessMatchKeys: row.bodyWitnessMatchKeys,
 					bodyWitnessTexts: row.bodyWitnessTexts,
 					bodyWitnessStartOffsets: row.bodyWitnessStartOffsets,
@@ -631,7 +613,7 @@ function createResidentBase(): ResidentBase {
 			exactTapeStartByBlockId: new Uint32Array([0, 0, 0]),
 			exactTapeCountByBlockId: new Uint32Array([0, 0, 0]),
 			familySupportStartByBlockId: new Uint32Array([0, 0, 0, 0]),
-			familySupportFamilyIds: new Uint32Array(),
+			familySupportShardLocalFamilySlots: new Uint32Array(),
 			familySupportMaskByEntry: new Uint8Array(),
 		},
 		exactTapes: {
@@ -653,17 +635,17 @@ function createResidentBase(): ResidentBase {
 			bodyCharAdaptivePostings: createEmptyAdaptivePostingField(),
 			identityWitnessStartByDocId: new Uint32Array(),
 			identityWitnessStartByLiveDocSlot: new Uint32Array(),
-			identityWitnessStringIds: new Uint32Array(),
+			identityWitnessTextIds: new Uint32Array(),
 			identityWitnessSourceMaskByDocEntry: new Uint8Array(),
 			routeWitnessStartByDocId: new Uint32Array(),
 			routeWitnessStartByLiveDocSlot: new Uint32Array(),
-			routeWitnessStringIds: new Uint32Array(),
+			routeWitnessTextIds: new Uint32Array(),
 			routeWitnessSourceMaskByDocEntry: new Uint8Array(),
 			headingWitnessStartByDocId: new Uint32Array(),
 			headingWitnessStartByLiveDocSlot: new Uint32Array(),
-			headingWitnessStringIds: new Uint32Array(),
+			headingWitnessTextIds: new Uint32Array(),
 			bodyWitnessOccurrenceStartByBlockId: new Uint32Array(),
-			bodyWitnessOccurrenceStringIds: new Uint32Array(),
+			bodyWitnessOccurrenceTextIds: new Uint32Array(),
 			bodyWitnessPositionEncodingByBlockId: new Uint8Array(),
 			bodyWitnessPositionStartByBlockId: new Uint32Array(),
 			bodyWitnessPositionDeltaU8Tape: new Uint8Array(),
@@ -671,7 +653,7 @@ function createResidentBase(): ResidentBase {
 			bodyWitnessPositionDeltaU32Tape: new Uint32Array(),
 		},
 		metrics: createZeroResidentMetrics(),
-		fuzzyRescue: EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+		fuzzyRescue: EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 	};
 }
 
@@ -747,7 +729,7 @@ function createResidentBaseForBlockCounts(
 			familySupportStartByBlockId: new Uint32Array(
 				Array.from({ length: blockStart + 1 }, () => 0),
 			),
-			familySupportFamilyIds: new Uint32Array(),
+			familySupportShardLocalFamilySlots: new Uint32Array(),
 			familySupportMaskByEntry: new Uint8Array(),
 		},
 	};
@@ -760,12 +742,12 @@ function withBodyWitnessTexts(
 	const uniqueStrings = new Map<string, number>([["", 0]]);
 	const orderedStrings = [""];
 	const bodyWitnessOccurrenceStartByBlockId: number[] = [];
-	const bodyWitnessOccurrenceStringIds: number[] = [];
+	const bodyWitnessOccurrenceTextIds: number[] = [];
 	const bodyWitnessStartOffsetsByBlock = bodyWitnessTextsByBlock.map((texts) =>
 		texts.map((_, index) => index),
 	);
 	for (let blockId = 0; blockId < base.bodyBlocks.blockCount; blockId += 1) {
-		bodyWitnessOccurrenceStartByBlockId.push(bodyWitnessOccurrenceStringIds.length);
+		bodyWitnessOccurrenceStartByBlockId.push(bodyWitnessOccurrenceTextIds.length);
 		for (const text of bodyWitnessTextsByBlock[blockId] ?? []) {
 			let stringId = uniqueStrings.get(text);
 			if (stringId == null) {
@@ -773,10 +755,10 @@ function withBodyWitnessTexts(
 				uniqueStrings.set(text, stringId);
 				orderedStrings.push(text);
 			}
-			bodyWitnessOccurrenceStringIds.push(stringId);
+			bodyWitnessOccurrenceTextIds.push(stringId);
 		}
 	}
-	bodyWitnessOccurrenceStartByBlockId.push(bodyWitnessOccurrenceStringIds.length);
+	bodyWitnessOccurrenceStartByBlockId.push(bodyWitnessOccurrenceTextIds.length);
 	const positionLane = buildBlockPositionLane(
 		Array.from({ length: base.bodyBlocks.blockCount }, (_, blockId) =>
 			bodyWitnessStartOffsetsByBlock[blockId] ?? [],
@@ -801,7 +783,7 @@ function withBodyWitnessTexts(
 		hanRoute: {
 			...base.hanRoute,
 			bodyWitnessOccurrenceStartByBlockId: new Uint32Array(bodyWitnessOccurrenceStartByBlockId),
-			bodyWitnessOccurrenceStringIds: new Uint32Array(bodyWitnessOccurrenceStringIds),
+			bodyWitnessOccurrenceTextIds: new Uint32Array(bodyWitnessOccurrenceTextIds),
 			bodyWitnessPositionEncodingByBlockId: positionLane.positionEncodingByBlockId,
 			bodyWitnessPositionStartByBlockId: positionLane.positionStartByBlockId,
 			bodyWitnessPositionDeltaU8Tape: positionLane.positionDeltaU8Tape,
@@ -827,7 +809,7 @@ async function runHanRefine(
 				search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
 				prepareSearch: (...args: unknown[]) => unknown;
 				rankPreparedSearch: (...args: unknown[]) => CoverageLexicalV3SearchResult;
-				getResidentBase: () => ResidentBase;
+				getResidentIndexView: () => { shards: [{ base: ResidentBase }] };
 			};
 			getFileSnapshotStore: () => {
 				readIndexedTexts: typeof readIndexedTexts;
@@ -849,7 +831,7 @@ async function runHanRefine(
 	return await (engine as unknown as {
 		refineHanSurfaceCompletion: (
 			searchResult: CoverageLexicalV3SearchResult,
-			hydratedEvidenceByLiveDocSlot: ReadonlyMap<number, unknown>,
+			hydratedEvidenceByCandidateKey: ReadonlyMap<string, unknown>,
 		) => Promise<readonly EvidencePackingProfile[]>;
 	}).refineHanSurfaceCompletion(
 		result,
@@ -889,7 +871,7 @@ function createResidentBodyHanEvidenceByBlockId(
 			const end =
 				residentBase.hanRoute.bodyWitnessOccurrenceStartByBlockId[blockId + 1] ?? start;
 			const stringIds = Array.from(
-				residentBase.hanRoute.bodyWitnessOccurrenceStringIds.slice(start, end),
+		residentBase.hanRoute.bodyWitnessOccurrenceTextIds.slice(start, end),
 			);
 			const texts = stringIds.map((stringId) =>
 				readTestResidentString(residentBase, stringId),
@@ -974,7 +956,7 @@ function createMockSearchRuntime(
 		) =>
 			preparedSearch.__result ??
 			searchMock(preparedSearch.queryText, preparedSearch.queryTerms),
-		getResidentBase: () => residentBase,
+		getResidentIndexView: () => ({ shards: [{ base: residentBase }] }),
 	};
 }
 
@@ -1098,7 +1080,7 @@ describe("coverage lexical v3 file search engine", () => {
 				readCurrentTexts: jest.fn(async () => new Map<string, string>()),
 				publishLexicalFuzzyRescue: jest.fn(async () => undefined),
 				readLexicalFuzzyRescue: jest.fn(
-					async () => EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+					async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 				),
 				publishLexicalExactTapes: jest.fn(async () => undefined),
 				readLexicalExactTapes: jest.fn(
@@ -1266,7 +1248,7 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(matchedFiles[0]?.path).toBe("infra/projected-token.md");
 	});
 
-	test("offloads fuzzy rescue sidecar and reloads matching fuzzy lookup keys for fuzzy search", async () => {
+test("offloads fuzzy rescue payload and reloads matching fuzzy lookup keys for fuzzy search", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let persistedFuzzyRescue: {
 			candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: ReadonlyMap<
@@ -1324,9 +1306,9 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(
 			(
 				engine as unknown as {
-					engine: { getFuzzyRescueSidecar: () => { fuzzyLookupKeyCount: number } };
+					engine: { getFuzzyRescueIndex: () => { fuzzyLookupKeyCount: number } };
 				}
-			).engine.getFuzzyRescueSidecar().fuzzyLookupKeyCount,
+			).engine.getFuzzyRescueIndex().fuzzyLookupKeyCount,
 		).toBe(0);
 
 		const matchedFiles = await engine.searchFiles({
@@ -1341,13 +1323,13 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(
 			(
 				engine as unknown as {
-					engine: { getFuzzyRescueSidecar: () => { fuzzyLookupKeyCount: number } };
+					engine: { getFuzzyRescueIndex: () => { fuzzyLookupKeyCount: number } };
 				}
-			).engine.getFuzzyRescueSidecar().fuzzyLookupKeyCount,
+			).engine.getFuzzyRescueIndex().fuzzyLookupKeyCount,
 		).toBe(0);
 	});
 
-	test("does not publish or read whole body family support sidecar during search rebuilds", async () => {
+	test("does not publish or read legacy whole body family support rows during search rebuilds", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let persistedBodyFamilySupport: { entryCount: number } | null = null;
 		const snapshotStore = {
@@ -1356,14 +1338,14 @@ describe("coverage lexical v3 file search engine", () => {
 			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
 			publishLexicalFuzzyRescue: jest.fn(async () => undefined),
 			readLexicalFuzzyRescue: jest.fn(
-				async () => EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			),
 			publishLexicalBodyFamilySupport: jest.fn(async (sidecar) => {
 				persistedBodyFamilySupport = sidecar;
 			}),
 			readLexicalBodyFamilySupport: jest.fn(async () => {
 				if (persistedBodyFamilySupport == null) {
-					throw new Error("missing body family support sidecar");
+					throw new Error("missing legacy body family support rows");
 				}
 				return persistedBodyFamilySupport;
 			}),
@@ -1397,7 +1379,7 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(matchedFiles[0]?.path).toBe("infra/projected-token.md");
 	});
 
-	test("does not publish or read whole exact tape sidecar during search rebuilds", async () => {
+	test("does not publish or read legacy whole exact tape rows during search rebuilds", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let persistedExactTapes: { entryCount: number } | null = null;
 		const snapshotStore = {
@@ -1406,14 +1388,14 @@ describe("coverage lexical v3 file search engine", () => {
 			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
 			publishLexicalFuzzyRescue: jest.fn(async () => undefined),
 			readLexicalFuzzyRescue: jest.fn(
-				async () => EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			),
 			publishLexicalExactTapes: jest.fn(async (sidecar) => {
 				persistedExactTapes = sidecar;
 			}),
 			readLexicalExactTapes: jest.fn(async () => {
 				if (persistedExactTapes == null) {
-					throw new Error("missing exact tape sidecar");
+					throw new Error("missing legacy exact tape rows");
 				}
 				return persistedExactTapes;
 			}),
@@ -1451,7 +1433,7 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(matchedFiles[0]?.path).toBe("infra/projected-token.md");
 	});
 
-	test("skips body sidecar reads when ranking does not shortlist body blocks", async () => {
+test("skips body cold-evidence reads when ranking does not shortlist body blocks", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		const snapshotStore = {
 			readIndexedTexts: jest.fn(async () => new Map<string, string>()),
@@ -1459,7 +1441,7 @@ describe("coverage lexical v3 file search engine", () => {
 			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
 			publishLexicalFuzzyRescue: jest.fn(async () => undefined),
 			readLexicalFuzzyRescue: jest.fn(
-				async () => EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			),
 			publishLexicalExactTapes: jest.fn(async () => undefined),
 			readLexicalExactTapes: jest.fn(
@@ -1502,7 +1484,7 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(snapshotStore.readLexicalHanWitnesses).not.toHaveBeenCalled();
 	});
 
-	test("does not read whole exact/body/han sidecars for non-Han ranking queries", async () => {
+	test("does not read legacy whole exact/body/han rows for non-Han ranking queries", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let persistedBodyEvidence = new Map<
 			string,
@@ -1511,9 +1493,9 @@ describe("coverage lexical v3 file search engine", () => {
 				docRef: number;
 				generation: number;
 				blockOrdinal: number;
-				exactFamilyIds: readonly number[];
+				exactShardLocalFamilySlots: readonly number[];
 				exactTokenPositions: readonly number[];
-				familySupportFamilyIds: readonly number[];
+				supportShardLocalFamilySlots: readonly number[];
 				familySupportMaskByEntry: readonly number[];
 			}
 		>();
@@ -1523,7 +1505,7 @@ describe("coverage lexical v3 file search engine", () => {
 			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
 			publishLexicalFuzzyRescue: jest.fn(async () => undefined),
 			readLexicalFuzzyRescue: jest.fn(
-				async () => EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			),
 			publishLexicalExactTapes: jest.fn(async () => undefined),
 			readLexicalExactTapes: jest.fn(async () => EMPTY_RESIDENT_EXACT_TAPE_SIDECAR),
@@ -1538,9 +1520,9 @@ describe("coverage lexical v3 file search engine", () => {
 						docRef: number;
 						generation: number;
 						blockOrdinal: number;
-						exactFamilyIds: readonly number[];
+						exactShardLocalFamilySlots: readonly number[];
 						exactTokenPositions: readonly number[];
-						familySupportFamilyIds: readonly number[];
+						supportShardLocalFamilySlots: readonly number[];
 						familySupportMaskByEntry: readonly number[];
 					}>,
 				) => {
@@ -1596,9 +1578,9 @@ describe("coverage lexical v3 file search engine", () => {
 				docRef: number;
 				generation: number;
 				blockOrdinal: number;
-				exactFamilyIds: readonly number[];
+				exactShardLocalFamilySlots: readonly number[];
 				exactTokenPositions: readonly number[];
-				familySupportFamilyIds: readonly number[];
+				supportShardLocalFamilySlots: readonly number[];
 				familySupportMaskByEntry: readonly number[];
 			}
 		>();
@@ -1608,7 +1590,7 @@ describe("coverage lexical v3 file search engine", () => {
 			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
 			publishLexicalFuzzyRescue: jest.fn(async () => undefined),
 			readLexicalFuzzyRescue: jest.fn(
-				async () => EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			),
 			publishLexicalBodyEvidence: jest.fn(
 				async (
@@ -1617,9 +1599,9 @@ describe("coverage lexical v3 file search engine", () => {
 						docRef: number;
 						generation: number;
 						blockOrdinal: number;
-						exactFamilyIds: readonly number[];
+						exactShardLocalFamilySlots: readonly number[];
 						exactTokenPositions: readonly number[];
-						familySupportFamilyIds: readonly number[];
+						supportShardLocalFamilySlots: readonly number[];
 						familySupportMaskByEntry: readonly number[];
 					}>,
 				) => {
@@ -1634,11 +1616,11 @@ describe("coverage lexical v3 file search engine", () => {
 			),
 			publishLexicalExactTapes: jest.fn(async () => undefined),
 			readLexicalExactTapes: jest.fn(async () => {
-				throw new Error("exact tape sidecar should not be read");
+				throw new Error("legacy exact tape rows should not be read");
 			}),
 			publishLexicalBodyFamilySupport: jest.fn(async () => undefined),
 			readLexicalBodyFamilySupport: jest.fn(async () => {
-				throw new Error("body family support sidecar should not be read");
+				throw new Error("legacy body family support rows should not be read");
 			}),
 			publishLexicalHanWitnesses: jest.fn(async () => undefined),
 			readLexicalHanWitnesses: jest.fn(
@@ -1676,7 +1658,95 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(snapshotStore.readLexicalHanWitnesses).not.toHaveBeenCalled();
 	});
 
-	test("hydrates Han ranking evidence from doc/block rows without loading full Han sidecar", async () => {
+	test("hydrates body evidence for shortlist plus same-doc adjacent blocks", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		let persistedBodyEvidence = new Map<
+			string,
+			{
+				id: string;
+				docRef: number;
+				generation: number;
+				blockOrdinal: number;
+				exactShardLocalFamilySlots: readonly number[];
+				exactTokenPositions: readonly number[];
+				supportShardLocalFamilySlots: readonly number[];
+				familySupportMaskByEntry: readonly number[];
+			}
+		>();
+		const snapshotStore = {
+			readIndexedTexts: jest.fn(async () => new Map<string, string>()),
+			readIndexedMetadata: jest.fn(async () => new Map()),
+			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
+			publishLexicalFuzzyRescue: jest.fn(async () => undefined),
+			readLexicalFuzzyRescue: jest.fn(
+				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
+			),
+			publishLexicalBodyEvidence: jest.fn(
+				async (
+					rows: ReadonlyArray<{
+						id: string;
+						docRef: number;
+						generation: number;
+						blockOrdinal: number;
+						exactShardLocalFamilySlots: readonly number[];
+						exactTokenPositions: readonly number[];
+						supportShardLocalFamilySlots: readonly number[];
+						familySupportMaskByEntry: readonly number[];
+					}>,
+				) => {
+					persistedBodyEvidence = new Map(rows.map((row) => [row.id, row]));
+				},
+			),
+			readLexicalBodyEvidenceForBlocks: jest.fn(
+				async (locators: readonly LexicalBlockEvidenceLocator[]) =>
+					createPersistedBodyEvidenceMap(locators, persistedBodyEvidence),
+			),
+			publishLexicalExactTapes: jest.fn(async () => undefined),
+			readLexicalExactTapes: jest.fn(async () => {
+				throw new Error("legacy exact tape rows should not be read");
+			}),
+			publishLexicalBodyFamilySupport: jest.fn(async () => undefined),
+			readLexicalBodyFamilySupport: jest.fn(async () => {
+				throw new Error("legacy body family support rows should not be read");
+			}),
+			publishLexicalHanWitnesses: jest.fn(async () => undefined),
+			readLexicalHanWitnesses: jest.fn(
+				async () => EMPTY_RESIDENT_HAN_WITNESS_SIDECAR,
+			),
+		};
+		(
+			engine as unknown as {
+				getFileSnapshotStore: () => typeof snapshotStore;
+			}
+		).getFileSnapshotStore = () => snapshotStore;
+
+		await engine.reIndexAll([
+			createDocument({
+				docRef: 103,
+				path: "infra/adjacent-body.md",
+				basename: "adjacent body",
+				folder: "infra/kubernetes",
+				content: `projected token ${"filler ".repeat(420)}`,
+			}),
+		]);
+
+		await engine.searchFiles({
+			queryText: "projected token",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			maxItemResults: 5,
+		});
+
+		expect(snapshotStore.readLexicalBodyEvidenceForBlocks).toHaveBeenCalledTimes(1);
+		const requestedLocators =
+			snapshotStore.readLexicalBodyEvidenceForBlocks.mock.calls[0]?.[0] ?? [];
+		expect(requestedLocators).toHaveLength(2);
+		expect(
+			requestedLocators.map((locator: LexicalBlockEvidenceLocator) => locator.blockOrdinal),
+		).toEqual([0, 1]);
+	});
+
+test("hydrates Han ranking evidence from doc/block rows without loading full Han payload", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let persistedHanDocEvidence = new Map<
 			string,
@@ -1684,11 +1754,11 @@ describe("coverage lexical v3 file search engine", () => {
 				id: string;
 				docRef: number;
 				generation: number;
-				identityWitnessStringIds: readonly number[];
+		identityWitnessTextIds: readonly number[];
 				identityWitnessSourceMaskByDocEntry: readonly number[];
-				routeWitnessStringIds: readonly number[];
+		routeWitnessTextIds: readonly number[];
 				routeWitnessSourceMaskByDocEntry: readonly number[];
-				headingWitnessStringIds: readonly number[];
+		headingWitnessTextIds: readonly number[];
 			}
 		>();
 		let persistedHanBodyEvidence = new Map<
@@ -1708,7 +1778,7 @@ describe("coverage lexical v3 file search engine", () => {
 			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
 			publishLexicalFuzzyRescue: jest.fn(async () => undefined),
 			readLexicalFuzzyRescue: jest.fn(
-				async () => EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			),
 			publishLexicalBodyEvidence: jest.fn(async () => undefined),
 			readLexicalBodyEvidenceForBlocks: jest.fn(async () => new Map()),
@@ -1718,11 +1788,11 @@ describe("coverage lexical v3 file search engine", () => {
 						id: string;
 						docRef: number;
 						generation: number;
-						identityWitnessStringIds: readonly number[];
+		identityWitnessTextIds: readonly number[];
 						identityWitnessSourceMaskByDocEntry: readonly number[];
-						routeWitnessStringIds: readonly number[];
+		routeWitnessTextIds: readonly number[];
 						routeWitnessSourceMaskByDocEntry: readonly number[];
-						headingWitnessStringIds: readonly number[];
+		headingWitnessTextIds: readonly number[];
 					}>,
 				) => {
 					persistedHanDocEvidence = new Map(
@@ -1768,7 +1838,7 @@ describe("coverage lexical v3 file search engine", () => {
 			),
 			publishLexicalHanWitnesses: jest.fn(async () => undefined),
 			readLexicalHanWitnesses: jest.fn(async () => {
-				throw new Error("full Han witness sidecar should not be read");
+				throw new Error("legacy whole Han witness rows should not be read");
 			}),
 		};
 		(
@@ -1811,12 +1881,12 @@ describe("coverage lexical v3 file search engine", () => {
 				hydrateRankingEvidenceForCandidates: (
 					preparedSearch: unknown,
 				) => Promise<{
-					hydratedEvidenceByLiveDocSlot: ReadonlyMap<number, unknown>;
+					hydratedEvidenceByCandidateKey: ReadonlyMap<string, unknown>;
 				}>;
 			}
 		).hydrateRankingEvidenceForCandidates(preparedSearch);
 
-		expect(hydrationResult.hydratedEvidenceByLiveDocSlot.size).toBeGreaterThan(0);
+		expect(hydrationResult.hydratedEvidenceByCandidateKey.size).toBeGreaterThan(0);
 		expect(snapshotStore.publishLexicalHanDocEvidence).toHaveBeenCalledTimes(1);
 		expect(snapshotStore.readLexicalHanDocEvidenceForDocs).toHaveBeenCalledTimes(1);
 		expect(snapshotStore.publishLexicalHanBodyEvidence).toHaveBeenCalledTimes(1);
@@ -1824,7 +1894,7 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(snapshotStore.readLexicalHanWitnesses).not.toHaveBeenCalled();
 	});
 
-	test("does not publish or read whole han witness sidecar during search rebuilds", async () => {
+	test("does not publish or read legacy whole Han witness rows during search rebuilds", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let persistedHanWitness: { bodyWitnessEntryCount: number } | null = null;
 		const snapshotStore = {
@@ -1833,7 +1903,7 @@ describe("coverage lexical v3 file search engine", () => {
 			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
 			publishLexicalFuzzyRescue: jest.fn(async () => undefined),
 			readLexicalFuzzyRescue: jest.fn(
-				async () => EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			),
 			publishLexicalExactTapes: jest.fn(async () => undefined),
 			readLexicalExactTapes: jest.fn(
@@ -1848,7 +1918,7 @@ describe("coverage lexical v3 file search engine", () => {
 			}),
 			readLexicalHanWitnesses: jest.fn(async () => {
 				if (persistedHanWitness == null) {
-					throw new Error("missing han witness sidecar");
+					throw new Error("missing legacy Han witness rows");
 				}
 				return persistedHanWitness;
 			}),
@@ -1946,7 +2016,7 @@ describe("coverage lexical v3 file search engine", () => {
 			engine as unknown as {
 				engine: {
 					search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
-					getResidentBase: () => ResidentBase;
+					getResidentIndexView: () => { shards: [{ base: ResidentBase }] };
 				};
 				getFileSnapshotStore: () => {
 					readIndexedTexts: typeof readIndexedTexts;
@@ -2048,7 +2118,7 @@ describe("coverage lexical v3 file search engine", () => {
 			engine as unknown as {
 				engine: {
 					search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
-					getResidentBase: () => ResidentBase;
+					getResidentIndexView: () => { shards: [{ base: ResidentBase }] };
 				};
 				getFileSnapshotStore: () => {
 					readIndexedTexts: typeof readIndexedTexts;
@@ -2138,7 +2208,7 @@ describe("coverage lexical v3 file search engine", () => {
 			engine as unknown as {
 				engine: {
 					search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
-					getResidentBase: () => ResidentBase;
+					getResidentIndexView: () => { shards: [{ base: ResidentBase }] };
 				};
 				getFileSnapshotStore: () => {
 					readIndexedTexts: typeof readIndexedTexts;
@@ -2234,7 +2304,7 @@ describe("coverage lexical v3 file search engine", () => {
 			engine as unknown as {
 				engine: {
 					search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
-					getResidentBase: () => ResidentBase;
+					getResidentIndexView: () => { shards: [{ base: ResidentBase }] };
 				};
 				getFileSnapshotStore: () => {
 					readIndexedTexts: typeof readIndexedTexts;
@@ -2338,11 +2408,11 @@ describe("coverage lexical v3 file search engine", () => {
 		(engine as unknown as {
 				engine: {
 					search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
-					getResidentBase: () => ResidentBase | null;
+					getResidentIndexView: () => { shards: [{ base: ResidentBase }] } | null;
 				};
 		}).engine = {
 			...createMockSearchRuntime(search, createResidentBaseForBlockCounts([1])),
-			getResidentBase: () => null,
+			getResidentIndexView: () => null,
 		};
 
 		const matchedFiles = await engine.searchFiles({
@@ -2419,11 +2489,11 @@ describe("coverage lexical v3 file search engine", () => {
 		(engine as unknown as {
 				engine: {
 					search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
-					getResidentBase: () => ResidentBase | null;
+					getResidentIndexView: () => { shards: [{ base: ResidentBase }] } | null;
 				};
 		}).engine = {
 			...createMockSearchRuntime(search, createResidentBaseForBlockCounts([1])),
-			getResidentBase: () => null,
+			getResidentIndexView: () => null,
 		};
 
 		const visible = await engine.searchFiles({
@@ -2502,11 +2572,11 @@ describe("coverage lexical v3 file search engine", () => {
 		(engine as unknown as {
 				engine: {
 					search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
-					getResidentBase: () => ResidentBase | null;
+					getResidentIndexView: () => { shards: [{ base: ResidentBase }] } | null;
 				};
 		}).engine = {
 			...createMockSearchRuntime(search, createResidentBaseForBlockCounts([1])),
-			getResidentBase: () => null,
+			getResidentIndexView: () => null,
 		};
 
 		const visible = await engine.searchFiles({
@@ -2544,7 +2614,7 @@ describe("coverage lexical v3 file search engine", () => {
 			engine as unknown as {
 				engine: {
 					search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
-					getResidentBase: () => ResidentBase;
+					getResidentIndexView: () => { shards: [{ base: ResidentBase }] };
 				};
 				getFileSnapshotStore: () => {
 					readIndexedTexts: typeof readIndexedTexts;
@@ -2596,7 +2666,7 @@ describe("coverage lexical v3 file search engine", () => {
 			engine as unknown as {
 				engine: {
 					search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
-					getResidentBase: () => ResidentBase;
+					getResidentIndexView: () => { shards: [{ base: ResidentBase }] };
 				};
 				getFileSnapshotStore: () => {
 					readIndexedTexts: typeof readIndexedTexts;

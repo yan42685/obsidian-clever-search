@@ -3,15 +3,10 @@ import type {
 	LexicalHanBodyEvidenceRow,
 	LexicalHanDocEvidenceRow,
 } from "src/services/database/database";
-import {
-	buildBodyBlockArena,
-	EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
-} from "../layout/body-blocks";
+import { buildBodyBlockArena } from "../layout/body-blocks";
 import { buildBodyFamilyPostingField } from "../layout/body-family-posting";
 import { buildDocTable } from "../layout/doc-table";
-import {
-	createEmptyResidentExactTapeSidecar,
-} from "../layout/exact-tapes";
+import { createEmptyResidentExactTapeArena } from "../layout/exact-tapes";
 import {
 	buildFamilyLexicon,
 	FAMILY_SOURCE_MASK_BODY,
@@ -20,15 +15,16 @@ import {
 	FAMILY_SOURCE_MASK_ROUTE,
 } from "../layout/family-lexicon";
 import {
-	buildResidentFuzzyRescueSidecar,
-	EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+	buildResidentFuzzyRescueIndex,
+	EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 } from "../layout/fuzzy-rescue";
 import { buildHanRouteArena } from "../layout/han-route";
 import { buildIntegerArray } from "../layout/integer-arrays";
 import { buildMetadataContainerArena } from "../layout/metadata-containers";
 import type {
 	ResidentBase,
-	ResidentFuzzyRescueSidecar,
+	ResidentIndexView,
+	ResidentFuzzyRescueIndex,
 } from "../layout/types";
 import {
 	IDENTITY_METADATA_SOURCE_ALIAS,
@@ -88,6 +84,9 @@ const STRING_SOURCE_ROUTE_WITNESS = 1 << 3;
 const STRING_SOURCE_HEADING_WITNESS = 1 << 4;
 const STRING_SOURCE_BODY_WITNESS = 1 << 5;
 
+export const DEFAULT_RESIDENT_SHARD_ID = "base-0";
+export const DEFAULT_RESIDENT_SHARD_GENERATION = 1;
+
 type PreparedDocument = Readonly<{
 	docRef: number;
 	path: string;
@@ -131,7 +130,7 @@ type PreparedBodyBlock = Readonly<{
 
 export type ResidentHotBaseArtifacts = Readonly<{
 	base: ResidentBase;
-	fuzzyRescueSidecar: ResidentFuzzyRescueSidecar;
+	fuzzyRescueIndex: ResidentFuzzyRescueIndex;
 	bodyEvidenceRows: readonly LexicalBodyEvidencePublishRow[];
 	hanDocEvidenceRows: readonly LexicalHanDocEvidenceRow[];
 	hanBodyEvidenceRows: readonly LexicalHanBodyEvidenceRow[];
@@ -139,7 +138,7 @@ export type ResidentHotBaseArtifacts = Readonly<{
 
 export type ResidentHotBaseStreamingArtifacts = Readonly<{
 	base: ResidentBase;
-	fuzzyRescueSidecar: ResidentFuzzyRescueSidecar;
+	fuzzyRescueIndex: ResidentFuzzyRescueIndex;
 	coldEvidenceFlushCount: number;
 	maxColdEvidenceChunkSize: number;
 }>;
@@ -159,7 +158,28 @@ export function buildResidentBase(
 	const artifacts = buildResidentHotBaseArtifacts(documents, tokenizeDocumentText);
 	return {
 		...artifacts.base,
-		fuzzyRescue: artifacts.fuzzyRescueSidecar,
+		fuzzyRescue: artifacts.fuzzyRescueIndex,
+	};
+}
+
+export function buildResidentIndexView(
+	documents: readonly IndexedDocument[],
+	tokenizeDocumentText?: V3DocumentTokenizer,
+): ResidentIndexView {
+	const base = buildResidentBase(documents, tokenizeDocumentText);
+	return residentIndexViewFromBase(base);
+}
+
+export function residentIndexViewFromBase(base: ResidentBase): ResidentIndexView {
+	return {
+		version: 1,
+		shards: [
+			{
+				shardId: DEFAULT_RESIDENT_SHARD_ID,
+				generation: DEFAULT_RESIDENT_SHARD_GENERATION,
+				base,
+			},
+		],
 	};
 }
 
@@ -188,7 +208,7 @@ export function buildResidentHotBaseArtifacts(
 			};
 		}),
 	);
-	const fuzzyRescue = buildResidentFuzzyRescueSidecar({
+	const fuzzyRescue = buildResidentFuzzyRescueIndex({
 		familyTexts,
 		familyFlagsByFamilyId: familyLexicon.familyFlagsByFamilyId,
 		shardLocalFamilySlotByFamilyId:
@@ -250,10 +270,14 @@ export function buildResidentHotBaseArtifacts(
 				);
 				bodyEvidenceRows.push({
 					id: buildLexicalBlockEvidenceRowId({
+						shardId: DEFAULT_RESIDENT_SHARD_ID,
+						shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
 						docRef: document.docRef,
 						generation: document.generation,
 						blockOrdinal: block.ordinal,
 					}),
+					shardId: DEFAULT_RESIDENT_SHARD_ID,
+					shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
 					docRef: document.docRef,
 					generation: document.generation,
 					blockOrdinal: block.ordinal,
@@ -272,10 +296,14 @@ export function buildResidentHotBaseArtifacts(
 				});
 				hanBodyEvidenceRows.push({
 					id: buildLexicalBlockEvidenceRowId({
+						shardId: DEFAULT_RESIDENT_SHARD_ID,
+						shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
 						docRef: document.docRef,
 						generation: document.generation,
 						blockOrdinal: block.ordinal,
 					}),
+					shardId: DEFAULT_RESIDENT_SHARD_ID,
+					shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
 					docRef: document.docRef,
 					generation: document.generation,
 					blockOrdinal: block.ordinal,
@@ -290,7 +318,7 @@ export function buildResidentHotBaseArtifacts(
 		bodyBlockCountByDocId.push(blockInputs.length - bodyBlockStartByDocId.at(-1)!);
 	}
 	const bodyFamilyPosting = buildBodyFamilyPostingField({
-		familyIdsByBlock: blockInputs.map((block) => block.summaryFamilyIds),
+		shardLocalFamilySlotsByBlock: blockInputs.map((block) => block.summaryFamilyIds),
 	});
 	const bodyBlocks = buildBodyBlockArena(
 		blockInputs.map((block) => ({
@@ -299,10 +327,9 @@ export function buildResidentHotBaseArtifacts(
 			ordinal: block.ordinal,
 			exactTapeStart: 0,
 			exactTapeCount: 0,
-			familySupportFamilyIds: [],
+			familySupportShardLocalFamilySlots: [],
 			familySupportMasks: [],
 		})),
-		EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
 	);
 	const docTable = buildDocTable(
 		preparedDocuments.map((document, docId) => ({
@@ -332,21 +359,25 @@ export function buildResidentHotBaseArtifacts(
 		]),
 		metadataDocIdsByChar: buildMetadataPostingsByChar(preparedDocuments),
 		bodyPostingsByCharId: buildBodyPostingsByChar(preparedDocuments),
-		identityWitnessStringIdsByDoc: preparedDocuments.map(() => []),
+		identityWitnessTextIdsByDoc: preparedDocuments.map(() => []),
 		identityWitnessSourceMasksByDoc: preparedDocuments.map(() => []),
-		routeWitnessStringIdsByDoc: preparedDocuments.map(() => []),
+		routeWitnessTextIdsByDoc: preparedDocuments.map(() => []),
 		routeWitnessSourceMasksByDoc: preparedDocuments.map(() => []),
-		headingWitnessStringIdsByDoc: preparedDocuments.map(() => []),
-		bodyWitnessOccurrenceStringIdsByBlock: blockInputs.map(() => []),
+		headingWitnessTextIdsByDoc: preparedDocuments.map(() => []),
+		bodyWitnessOccurrenceTextIdsByBlock: blockInputs.map(() => []),
 		bodyWitnessOccurrenceStartOffsetsByBlock: blockInputs.map(() => []),
 	});
 	const hanDocEvidenceRows = preparedDocuments
 		.filter((document) => document.docRef > 0)
 		.map<LexicalHanDocEvidenceRow>((document) => ({
 			id: buildLexicalDocEvidenceRowId({
+				shardId: DEFAULT_RESIDENT_SHARD_ID,
+				shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
 				docRef: document.docRef,
 				generation: document.generation,
 			}),
+			shardId: DEFAULT_RESIDENT_SHARD_ID,
+			shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
 			docRef: document.docRef,
 			generation: document.generation,
 			identityWitnessMatchKeys: toInt32Array(
@@ -368,7 +399,7 @@ export function buildResidentHotBaseArtifacts(
 		}));
 	const stringArenaSourceBreakdown = stringArenaBuilder.describeSourceUtf8Bytes();
 	const stringArena = stringArenaBuilder.build();
-	const emptyExactTapes = createEmptyResidentExactTapeSidecar();
+	const emptyExactTapes = createEmptyResidentExactTapeArena();
 	const metrics = buildResidentBaseMetrics({
 		stringArena,
 		stringArenaSourceBreakdown,
@@ -379,7 +410,7 @@ export function buildResidentHotBaseArtifacts(
 		bodyBlocks,
 		exactTapes: emptyExactTapes,
 		hanRoute,
-		auxiliaryBytes: EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR.bytes,
+		auxiliaryBytes: EMPTY_RESIDENT_FUZZY_RESCUE_INDEX.bytes,
 		indexedSurfaceUtf8Bytes: computeIndexedSurfaceUtf8Bytes(documents),
 		rawMarkdownUtf8Bytes: computeRawMarkdownUtf8Bytes(documents),
 	});
@@ -394,10 +425,10 @@ export function buildResidentHotBaseArtifacts(
 			bodyBlocks,
 			exactTapes: emptyExactTapes,
 			hanRoute,
-			fuzzyRescue: EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+			fuzzyRescue: EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			metrics,
 		},
-		fuzzyRescueSidecar: fuzzyRescue,
+		fuzzyRescueIndex: fuzzyRescue,
 		bodyEvidenceRows,
 		hanDocEvidenceRows,
 		hanBodyEvidenceRows,
@@ -435,7 +466,7 @@ export async function buildResidentHotBaseArtifactsStreaming(
 			};
 		}),
 	);
-	const fuzzyRescue = buildResidentFuzzyRescueSidecar({
+	const fuzzyRescue = buildResidentFuzzyRescueIndex({
 		familyTexts,
 		familyFlagsByFamilyId: familyLexicon.familyFlagsByFamilyId,
 		shardLocalFamilySlotByFamilyId:
@@ -530,10 +561,14 @@ export async function buildResidentHotBaseArtifactsStreaming(
 				);
 				bodyEvidenceChunk.push({
 					id: buildLexicalBlockEvidenceRowId({
+						shardId: DEFAULT_RESIDENT_SHARD_ID,
+						shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
 						docRef: document.docRef,
 						generation: document.generation,
 						blockOrdinal: block.ordinal,
 					}),
+					shardId: DEFAULT_RESIDENT_SHARD_ID,
+					shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
 					docRef: document.docRef,
 					generation: document.generation,
 					blockOrdinal: block.ordinal,
@@ -552,10 +587,14 @@ export async function buildResidentHotBaseArtifactsStreaming(
 				});
 				hanBodyEvidenceChunk.push({
 					id: buildLexicalBlockEvidenceRowId({
+						shardId: DEFAULT_RESIDENT_SHARD_ID,
+						shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
 						docRef: document.docRef,
 						generation: document.generation,
 						blockOrdinal: block.ordinal,
 					}),
+					shardId: DEFAULT_RESIDENT_SHARD_ID,
+					shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
 					docRef: document.docRef,
 					generation: document.generation,
 					blockOrdinal: block.ordinal,
@@ -577,9 +616,13 @@ export async function buildResidentHotBaseArtifactsStreaming(
 		if (document.docRef > 0) {
 			hanDocEvidenceChunk.push({
 				id: buildLexicalDocEvidenceRowId({
+					shardId: DEFAULT_RESIDENT_SHARD_ID,
+					shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
 					docRef: document.docRef,
 					generation: document.generation,
 				}),
+				shardId: DEFAULT_RESIDENT_SHARD_ID,
+				shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
 				docRef: document.docRef,
 				generation: document.generation,
 				identityWitnessMatchKeys: toInt32Array(
@@ -610,7 +653,7 @@ export async function buildResidentHotBaseArtifactsStreaming(
 	await flushHanBodyEvidence();
 	await flushHanDocEvidence();
 	const bodyFamilyPosting = buildBodyFamilyPostingField({
-		familyIdsByBlock: blockInputs.map((block) => block.summaryFamilyIds),
+		shardLocalFamilySlotsByBlock: blockInputs.map((block) => block.summaryFamilyIds),
 	});
 	const bodyBlocks = buildBodyBlockArena(
 		blockInputs.map((block) => ({
@@ -619,10 +662,9 @@ export async function buildResidentHotBaseArtifactsStreaming(
 			ordinal: block.ordinal,
 			exactTapeStart: 0,
 			exactTapeCount: 0,
-			familySupportFamilyIds: [],
+				familySupportShardLocalFamilySlots: [],
 			familySupportMasks: [],
 		})),
-		EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
 	);
 	const docTable = buildDocTable(
 		preparedDocuments.map((document, docId) => ({
@@ -652,17 +694,17 @@ export async function buildResidentHotBaseArtifactsStreaming(
 		]),
 		metadataDocIdsByChar: buildMetadataPostingsByChar(preparedDocuments),
 		bodyPostingsByCharId: buildBodyPostingsByChar(preparedDocuments),
-		identityWitnessStringIdsByDoc: preparedDocuments.map(() => []),
+		identityWitnessTextIdsByDoc: preparedDocuments.map(() => []),
 		identityWitnessSourceMasksByDoc: preparedDocuments.map(() => []),
-		routeWitnessStringIdsByDoc: preparedDocuments.map(() => []),
+		routeWitnessTextIdsByDoc: preparedDocuments.map(() => []),
 		routeWitnessSourceMasksByDoc: preparedDocuments.map(() => []),
-		headingWitnessStringIdsByDoc: preparedDocuments.map(() => []),
-		bodyWitnessOccurrenceStringIdsByBlock: blockInputs.map(() => []),
+		headingWitnessTextIdsByDoc: preparedDocuments.map(() => []),
+		bodyWitnessOccurrenceTextIdsByBlock: blockInputs.map(() => []),
 		bodyWitnessOccurrenceStartOffsetsByBlock: blockInputs.map(() => []),
 	});
 	const stringArenaSourceBreakdown = stringArenaBuilder.describeSourceUtf8Bytes();
 	const stringArena = stringArenaBuilder.build();
-	const emptyExactTapes = createEmptyResidentExactTapeSidecar();
+	const emptyExactTapes = createEmptyResidentExactTapeArena();
 	const metrics = buildResidentBaseMetrics({
 		stringArena,
 		stringArenaSourceBreakdown,
@@ -673,7 +715,7 @@ export async function buildResidentHotBaseArtifactsStreaming(
 		bodyBlocks,
 		exactTapes: emptyExactTapes,
 		hanRoute,
-		auxiliaryBytes: EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR.bytes,
+		auxiliaryBytes: EMPTY_RESIDENT_FUZZY_RESCUE_INDEX.bytes,
 		indexedSurfaceUtf8Bytes: computeIndexedSurfaceUtf8Bytes(documents),
 		rawMarkdownUtf8Bytes: computeRawMarkdownUtf8Bytes(documents),
 	});
@@ -688,10 +730,10 @@ export async function buildResidentHotBaseArtifactsStreaming(
 			bodyBlocks,
 			exactTapes: emptyExactTapes,
 			hanRoute,
-			fuzzyRescue: EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+			fuzzyRescue: EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			metrics,
 		},
-		fuzzyRescueSidecar: fuzzyRescue,
+		fuzzyRescueIndex: fuzzyRescue,
 		coldEvidenceFlushCount,
 		maxColdEvidenceChunkSize,
 	};
@@ -926,7 +968,7 @@ function buildResidentHanRoute(
 	documents: readonly PreparedDocument[],
 	stringArenaBuilder: StringArenaBuilder,
 ) {
-	const identityWitnessStringIdsByDoc = documents.map((document) =>
+	const identityWitnessTextIdsByDoc = documents.map((document) =>
 		mapStringsToStringIds(
 			document.identityHanWitnessTexts,
 			stringArenaBuilder,
@@ -936,7 +978,7 @@ function buildResidentHanRoute(
 	const identityWitnessSourceMasksByDoc = documents.map(
 		(document) => document.identityHanWitnessSourceMasks,
 	);
-	const routeWitnessStringIdsByDoc = documents.map((document) =>
+	const routeWitnessTextIdsByDoc = documents.map((document) =>
 		mapStringsToStringIds(
 			document.routeHanWitnessTexts,
 			stringArenaBuilder,
@@ -946,7 +988,7 @@ function buildResidentHanRoute(
 	const routeWitnessSourceMasksByDoc = documents.map(
 		(document) => document.routeHanWitnessSourceMasks,
 	);
-	const headingWitnessStringIdsByDoc = documents.map((document) =>
+	const headingWitnessTextIdsByDoc = documents.map((document) =>
 		mapStringsToStringIds(
 			document.headingHanWitnessTexts,
 			stringArenaBuilder,
@@ -1007,12 +1049,12 @@ function buildResidentHanRoute(
 			metadataCharIds: [],
 			metadataDocIdsByChar: [],
 			bodyPostingsByCharId: new Map(),
-			identityWitnessStringIdsByDoc,
+			identityWitnessTextIdsByDoc,
 			identityWitnessSourceMasksByDoc,
-			routeWitnessStringIdsByDoc,
+			routeWitnessTextIdsByDoc,
 			routeWitnessSourceMasksByDoc,
-			headingWitnessStringIdsByDoc,
-			bodyWitnessOccurrenceStringIdsByBlock: bodyWitnessStringIdsByBlock,
+			headingWitnessTextIdsByDoc,
+			bodyWitnessOccurrenceTextIdsByBlock: bodyWitnessStringIdsByBlock,
 			bodyWitnessOccurrenceStartOffsetsByBlock: bodyWitnessStartOffsetsByBlock,
 		});
 	}
@@ -1058,12 +1100,12 @@ function buildResidentHanRoute(
 			metadataCharIds,
 			metadataDocIdsByChar,
 			bodyPostingsByCharId,
-			identityWitnessStringIdsByDoc,
+		identityWitnessTextIdsByDoc,
 			identityWitnessSourceMasksByDoc,
-			routeWitnessStringIdsByDoc,
+		routeWitnessTextIdsByDoc,
 			routeWitnessSourceMasksByDoc,
-			headingWitnessStringIdsByDoc,
-			bodyWitnessOccurrenceStringIdsByBlock: bodyWitnessStringIdsByBlock,
+		headingWitnessTextIdsByDoc,
+		bodyWitnessOccurrenceTextIdsByBlock: bodyWitnessStringIdsByBlock,
 			bodyWitnessOccurrenceStartOffsetsByBlock: bodyWitnessStartOffsetsByBlock,
 		});
 }

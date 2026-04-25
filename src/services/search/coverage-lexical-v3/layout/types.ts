@@ -82,28 +82,14 @@ export type ResidentBodyBlockArena = Readonly<{
 	exactTapeStartByBlockId: ResidentIntegerArray;
 	exactTapeCountByBlockId: ResidentIntegerArray;
 	familySupportStartByBlockId: ResidentIntegerArray;
-	familySupportFamilyIds: ResidentIntegerArray;
+	familySupportShardLocalFamilySlots: ResidentIntegerArray;
 	familySupportMaskByEntry: Uint8Array;
-}>;
-
-export type ResidentBodyFamilySupportSidecar = Readonly<{
-	familySupportStartByBlockId: ResidentIntegerArray;
-	familySupportFamilyIds: ResidentIntegerArray;
-	familySupportMaskByEntry: Uint8Array;
-	entryCount: number;
-	bytes: number;
 }>;
 
 export type ResidentExactTapeArena = Readonly<{
 	familyIds: ResidentIntegerArray;
 }> &
 	ResidentBlockPositionLane;
-
-export type ResidentExactTapeSidecar = ResidentExactTapeArena &
-	Readonly<{
-		entryCount: number;
-		bytes: number;
-	}>;
 
 export type ResidentAdaptivePostingField = Readonly<{
 	singletonTermIds: ResidentIntegerArray;
@@ -119,37 +105,13 @@ export type ResidentAdaptivePostingField = Readonly<{
 	postingTape: Uint8Array;
 }>;
 
-export type ResidentFuzzyRescueSidecar = Readonly<{
+export type ResidentFuzzyRescueIndex = Readonly<{
 	candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: ReadonlyMap<
 		string,
 		Uint32Array
 	>;
 	indexedMetadataFamilyCount: number;
 	fuzzyLookupKeyCount: number;
-	bytes: number;
-}>;
-
-export type ResidentHanWitnessSidecar = Readonly<{
-	identityWitnessStartByDocId: ResidentIntegerArray;
-	identityWitnessStartByLiveDocSlot?: ResidentIntegerArray;
-	identityWitnessStringIds: ResidentIntegerArray;
-	identityWitnessSourceMaskByDocEntry: Uint8Array;
-	routeWitnessStartByDocId: ResidentIntegerArray;
-	routeWitnessStartByLiveDocSlot?: ResidentIntegerArray;
-	routeWitnessStringIds: ResidentIntegerArray;
-	routeWitnessSourceMaskByDocEntry: Uint8Array;
-	headingWitnessStartByDocId: ResidentIntegerArray;
-	headingWitnessStartByLiveDocSlot?: ResidentIntegerArray;
-	headingWitnessStringIds: ResidentIntegerArray;
-	bodyWitnessOccurrenceStartByBlockId: ResidentIntegerArray;
-	bodyWitnessOccurrenceStringIds: ResidentIntegerArray;
-	bodyWitnessPositionEncodingByBlockId: Uint8Array;
-	bodyWitnessPositionStartByBlockId: ResidentIntegerArray;
-	bodyWitnessPositionDeltaU8Tape: Uint8Array;
-	bodyWitnessPositionDeltaU16Tape: Uint16Array;
-	bodyWitnessPositionDeltaU32Tape: Uint32Array;
-	metadataWitnessEntryCount: number;
-	bodyWitnessEntryCount: number;
 	bytes: number;
 }>;
 
@@ -164,17 +126,17 @@ export type ResidentHanRouteArena = Readonly<{
 	bodyCharAdaptivePostings: ResidentAdaptivePostingField;
 	identityWitnessStartByDocId: ResidentIntegerArray;
 	identityWitnessStartByLiveDocSlot?: ResidentIntegerArray;
-	identityWitnessStringIds: ResidentIntegerArray;
+	identityWitnessTextIds: ResidentIntegerArray;
 	identityWitnessSourceMaskByDocEntry: Uint8Array;
 	routeWitnessStartByDocId: ResidentIntegerArray;
 	routeWitnessStartByLiveDocSlot?: ResidentIntegerArray;
-	routeWitnessStringIds: ResidentIntegerArray;
+	routeWitnessTextIds: ResidentIntegerArray;
 	routeWitnessSourceMaskByDocEntry: Uint8Array;
 	headingWitnessStartByDocId: ResidentIntegerArray;
 	headingWitnessStartByLiveDocSlot?: ResidentIntegerArray;
-	headingWitnessStringIds: ResidentIntegerArray;
+	headingWitnessTextIds: ResidentIntegerArray;
 	bodyWitnessOccurrenceStartByBlockId: ResidentIntegerArray;
-	bodyWitnessOccurrenceStringIds: ResidentIntegerArray;
+	bodyWitnessOccurrenceTextIds: ResidentIntegerArray;
 }> &
 	{
 		bodyWitnessPositionEncodingByBlockId: Uint8Array;
@@ -271,10 +233,78 @@ export type ResidentBaseSummary = Readonly<{
 	exactTapeValueCount: number;
 	buckets: readonly ResidentByteBreakdownEntry[];
 	sectionEncodings: readonly ResidentSectionEncodingDescriptor[];
+	shardReadiness: ResidentShardReadinessSummary;
 	indexedSurfaceUtf8Bytes: number;
 	rawMarkdownUtf8Bytes: number;
 	"residentBytes / indexedSurfaceUtf8Bytes": number;
 	"residentBytes / rawMarkdownUtf8Bytes": number;
+}>;
+
+export type ResidentShard = Readonly<{
+	shardId: string;
+	generation: number;
+	base: ResidentBase;
+}>;
+
+export type ResidentIndexView = Readonly<{
+	version: 1;
+	shards: readonly ResidentShard[];
+}>;
+
+export type ResidentIndexViewSummary = Readonly<{
+	shardCount: number;
+	documentCount: number;
+	familyCount: number;
+	blockCount: number;
+	residentBytes: number;
+	largestShardBytes: number;
+	averageShardBytes: number;
+	shards: readonly ResidentShardSummary[];
+}>;
+
+export type ResidentShardSummary = Readonly<{
+	shardId: string;
+	generation: number;
+	documentCount: number;
+	familyCount: number;
+	blockCount: number;
+	residentBytes: number;
+	shardReadiness: ResidentShardReadinessSummary;
+}>;
+
+export type ResidentShardReadinessSummary = Readonly<{
+	familyLexiconIdentitySlots: boolean;
+	familyPostingUsesShardLocalSlots: boolean;
+	docTableDuplicatedLiveSlotBytes: number;
+	hanBigramPosting: ResidentAdaptivePostingReadinessSummary;
+	familyPosting: ResidentAdaptivePostingReadinessSummary;
+}>;
+
+export type ResidentAdaptivePostingReadinessSummary = Readonly<{
+	termCount: number;
+	valueCount: number;
+	singletonCount: number;
+	pairCount: number;
+	smallCount: number;
+	deltaCount: number;
+	maxTermId: number;
+	maxValueId: number;
+	termLaneBytes: number;
+	valueLaneBytes: number;
+	termLaneWidth: string;
+	valueLaneWidth: string;
+	termGapCompression: ResidentTermGapCompressionSummary;
+}>;
+
+export type ResidentTermGapCompressionSummary = Readonly<{
+	rawBytes: number;
+	estimatedBytes: number;
+	estimatedSavingsBytes: number;
+	maxGap: number;
+	p95Gap: number;
+	u8Count: number;
+	u16Count: number;
+	u32Count: number;
 }>;
 
 export type ResidentBase = Readonly<{
@@ -287,6 +317,6 @@ export type ResidentBase = Readonly<{
 	bodyBlocks: ResidentBodyBlockArena;
 	exactTapes: ResidentExactTapeArena;
 	hanRoute: ResidentHanRouteArena;
-	fuzzyRescue: ResidentFuzzyRescueSidecar;
+	fuzzyRescue: ResidentFuzzyRescueIndex;
 	metrics: ResidentBaseMetrics;
 }>;

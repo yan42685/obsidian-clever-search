@@ -20,6 +20,8 @@ import {
 } from "../layout/metadata-containers";
 import type {
 	ResidentBase,
+	ResidentAdaptivePostingField,
+	ResidentAdaptivePostingReadinessSummary,
 	ResidentBaseMetrics,
 	ResidentBaseSummary,
 	ResidentBodyBlockArena,
@@ -27,6 +29,8 @@ import type {
 	ResidentExactTapeArena,
 	ResidentFamilyLexicon,
 	ResidentHanRouteArena,
+	ResidentIndexView,
+	ResidentIndexViewSummary,
 	ResidentMetadataContainerArena,
 	ResidentStringArena,
 } from "../layout/types";
@@ -146,7 +150,7 @@ export function buildResidentBaseMetrics(
 		input.bodyBlocks.docIdByBlockId.byteLength +
 		input.bodyBlocks.liveDocSlotByBlockId.byteLength +
 		input.bodyBlocks.blockOrdinalByBlockId.byteLength +
-		input.bodyBlocks.familySupportFamilyIds.byteLength +
+		input.bodyBlocks.familySupportShardLocalFamilySlots.byteLength +
 		input.bodyBlocks.familySupportMaskByEntry.byteLength +
 		input.exactTapes.familyIds.byteLength +
 		input.exactTapes.positionDeltaU8Tape.byteLength +
@@ -174,10 +178,10 @@ export function buildResidentBaseMetrics(
 		input.hanRoute.bodyCharAdaptivePostings.smallValueIds.byteLength +
 		input.hanRoute.bodyCharAdaptivePostings.deltaTermIds.byteLength +
 		input.hanRoute.bodyCharAdaptivePostings.postingTape.byteLength +
-		input.hanRoute.identityWitnessStringIds.byteLength +
-		input.hanRoute.routeWitnessStringIds.byteLength +
-		input.hanRoute.headingWitnessStringIds.byteLength +
-		input.hanRoute.bodyWitnessOccurrenceStringIds.byteLength +
+		input.hanRoute.identityWitnessTextIds.byteLength +
+		input.hanRoute.routeWitnessTextIds.byteLength +
+		input.hanRoute.headingWitnessTextIds.byteLength +
+		input.hanRoute.bodyWitnessOccurrenceTextIds.byteLength +
 		input.hanRoute.bodyWitnessPositionDeltaU8Tape.byteLength +
 		input.hanRoute.bodyWitnessPositionDeltaU16Tape.byteLength +
 		input.hanRoute.bodyWitnessPositionDeltaU32Tape.byteLength;
@@ -488,8 +492,8 @@ export function describeResidentBase(base: ResidentBase): ResidentBaseSummary {
 				sentinelStartsEncodingFlag(),
 			),
 			describeIntegerSection(
-				"hanRoute.bodyWitnessOccurrenceStringIds",
-				base.hanRoute.bodyWitnessOccurrenceStringIds,
+				"hanRoute.bodyWitnessOccurrenceTextIds",
+				base.hanRoute.bodyWitnessOccurrenceTextIds,
 			),
 			describeIntegerSection(
 				"hanRoute.bodyWitnessPositionStartByBlockId",
@@ -508,12 +512,45 @@ export function describeResidentBase(base: ResidentBase): ResidentBaseSummary {
 				base.hanRoute.bodyWitnessPositionDeltaU32Tape,
 			),
 		],
+		shardReadiness: buildShardReadinessSummary(base),
 		indexedSurfaceUtf8Bytes: metrics.indexedSurfaceUtf8Bytes,
 		rawMarkdownUtf8Bytes: metrics.rawMarkdownUtf8Bytes,
 		"residentBytes / indexedSurfaceUtf8Bytes":
 			metrics["residentBytes / indexedSurfaceUtf8Bytes"],
 		"residentBytes / rawMarkdownUtf8Bytes":
 			metrics["residentBytes / rawMarkdownUtf8Bytes"],
+	};
+}
+
+export function describeResidentIndexView(
+	indexView: ResidentIndexView,
+): ResidentIndexViewSummary {
+	const shards = indexView.shards.map((shard) => {
+		const summary = describeResidentBase(shard.base);
+		return {
+			shardId: shard.shardId,
+			generation: shard.generation,
+			documentCount: summary.documentCount,
+			familyCount: summary.familyCount,
+			blockCount: summary.blockCount,
+			residentBytes: shard.base.metrics.residentBytes,
+			shardReadiness: summary.shardReadiness,
+		};
+	});
+	const residentBytes = shards.reduce((sum, shard) => sum + shard.residentBytes, 0);
+	const largestShardBytes = shards.reduce(
+		(maxBytes, shard) => Math.max(maxBytes, shard.residentBytes),
+		0,
+	);
+	return {
+		shardCount: shards.length,
+		documentCount: shards.reduce((sum, shard) => sum + shard.documentCount, 0),
+		familyCount: shards.reduce((sum, shard) => sum + shard.familyCount, 0),
+		blockCount: shards.reduce((sum, shard) => sum + shard.blockCount, 0),
+		residentBytes,
+		largestShardBytes,
+		averageShardBytes: safeDivide(residentBytes, shards.length),
+		shards,
 	};
 }
 
@@ -546,4 +583,190 @@ function buildBucketShare(
 		bytes,
 		share: safeDivide(bytes, total),
 	};
+}
+
+function buildShardReadinessSummary(base: ResidentBase): ResidentBaseSummary["shardReadiness"] {
+	return {
+		familyLexiconIdentitySlots: isIdentityMapping(
+			base.familyLexicon.shardLocalFamilySlotByFamilyId,
+		),
+		familyPostingUsesShardLocalSlots: true,
+		docTableDuplicatedLiveSlotBytes: estimateDocTableLiveSlotDuplicateBytes(
+			base.docTable,
+		),
+		hanBigramPosting: describeAdaptivePostingReadiness(
+			base.hanRoute.bodyAdaptivePostings,
+		),
+		familyPosting: describeAdaptivePostingReadiness(base.bodyFamilyPosting),
+	};
+}
+
+function describeAdaptivePostingReadiness(
+	field: ResidentAdaptivePostingField,
+): ResidentAdaptivePostingReadinessSummary {
+	const termArrays = [
+		field.singletonTermIds,
+		field.pairTermIds,
+		field.smallTermIds,
+		field.deltaTermIds,
+	];
+	const valueArrays = [
+		field.singletonValueIds,
+		field.pairFirstValueIds,
+		field.pairSecondValueIds,
+		field.smallValueIds,
+	];
+	const valueLaneBytes = valueArrays.reduce((sum, values) => sum + values.byteLength, 0) +
+		field.postingTape.byteLength;
+	return {
+		termCount: termArrays.reduce((sum, values) => sum + values.length, 0),
+		valueCount:
+			field.singletonValueIds.length +
+			field.pairFirstValueIds.length +
+			field.pairSecondValueIds.length +
+			field.smallValueIds.length +
+			estimateDeltaPostingTapeValueCount(field.postingTape),
+		singletonCount: field.singletonTermIds.length,
+		pairCount: field.pairTermIds.length,
+		smallCount: field.smallTermIds.length,
+		deltaCount: field.deltaTermIds.length,
+		maxTermId: maxOfIntegerArrays(termArrays),
+		maxValueId: Math.max(maxOfIntegerArrays(valueArrays), estimateMaxDeltaPostingValue(field.postingTape)),
+		termLaneBytes: termArrays.reduce((sum, values) => sum + values.byteLength, 0),
+		valueLaneBytes,
+		termLaneWidth: describeLaneWidths(termArrays),
+		valueLaneWidth: describeLaneWidths(valueArrays),
+		termGapCompression: estimateTermGapCompression(termArrays),
+	};
+}
+
+function estimateTermGapCompression(
+	arrays: readonly (Uint8Array | Uint16Array | Uint32Array)[],
+): ResidentAdaptivePostingReadinessSummary["termGapCompression"] {
+	let rawBytes = 0;
+	let estimatedBytes = 0;
+	let maxGap = 0;
+	let u8Count = 0;
+	let u16Count = 0;
+	let u32Count = 0;
+	const gaps: number[] = [];
+	for (const values of arrays) {
+		rawBytes += values.byteLength;
+		let previous = 0;
+		for (let index = 0; index < values.length; index += 1) {
+			const value = values[index] ?? 0;
+			const gap = index === 0 ? value : Math.max(0, value - previous);
+			previous = value;
+			gaps.push(gap);
+			if (gap > maxGap) {
+				maxGap = gap;
+			}
+			if (gap <= 0xff) {
+				u8Count += 1;
+				estimatedBytes += 1;
+				continue;
+			}
+			if (gap <= 0xffff) {
+				u16Count += 1;
+				estimatedBytes += 2;
+				continue;
+			}
+			u32Count += 1;
+			estimatedBytes += 4;
+		}
+	}
+	gaps.sort((left, right) => left - right);
+	const p95Index = gaps.length === 0 ? -1 : Math.min(gaps.length - 1, Math.floor(gaps.length * 0.95));
+	return {
+		rawBytes,
+		estimatedBytes,
+		estimatedSavingsBytes: Math.max(0, rawBytes - estimatedBytes),
+		maxGap,
+		p95Gap: p95Index < 0 ? 0 : gaps[p95Index] ?? 0,
+		u8Count,
+		u16Count,
+		u32Count,
+	};
+}
+
+function estimateDocTableLiveSlotDuplicateBytes(docTable: ResidentDocTable): number {
+	return (
+		docTable.docRefsByLiveDocSlot.byteLength +
+		docTable.pathStringIdsByLiveDocSlot.byteLength +
+		docTable.generationByLiveDocSlot.byteLength +
+		docTable.identityStartByLiveDocSlot.byteLength +
+		docTable.identityCountByLiveDocSlot.byteLength +
+		docTable.routeStartByLiveDocSlot.byteLength +
+		docTable.routeCountByLiveDocSlot.byteLength +
+		docTable.headingStartByLiveDocSlot.byteLength +
+		docTable.headingCountByLiveDocSlot.byteLength +
+		docTable.bodyBlockStartByLiveDocSlot.byteLength +
+		docTable.bodyBlockCountByLiveDocSlot.byteLength
+	);
+}
+
+function isIdentityMapping(values: Uint8Array | Uint16Array | Uint32Array): boolean {
+	for (let index = 0; index < values.length; index += 1) {
+		if ((values[index] ?? -1) !== index) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function maxOfIntegerArrays(
+	arrays: readonly (Uint8Array | Uint16Array | Uint32Array)[],
+): number {
+	let maxValue = 0;
+	for (const values of arrays) {
+		for (const value of values) {
+			if (value > maxValue) {
+				maxValue = value;
+			}
+		}
+	}
+	return maxValue;
+}
+
+function describeLaneWidths(
+	arrays: readonly (Uint8Array | Uint16Array | Uint32Array)[],
+): string {
+	const counts = new Map<string, number>();
+	for (const values of arrays) {
+		const key = values instanceof Uint8Array ? "u8" : values instanceof Uint16Array ? "u16" : "u32";
+		counts.set(key, (counts.get(key) ?? 0) + values.length);
+	}
+	return Array.from(counts.entries())
+		.filter(([, count]) => count > 0)
+		.map(([kind, count]) => `${kind}:${count}`)
+		.join(",") || "empty";
+}
+
+function estimateDeltaPostingTapeValueCount(tape: Uint8Array): number {
+	let count = 0;
+	for (let index = 0; index < tape.length; index += 1) {
+		if ((tape[index] ?? 0) < 0x80) {
+			count += 1;
+		}
+	}
+	return count;
+}
+
+function estimateMaxDeltaPostingValue(tape: Uint8Array): number {
+	let maxValue = 0;
+	let current = 0;
+	let shift = 0;
+	for (const byte of tape) {
+		current |= (byte & 0x7f) << shift;
+		if (byte < 0x80) {
+			if (current > maxValue) {
+				maxValue = current;
+			}
+			current = 0;
+			shift = 0;
+			continue;
+		}
+		shift += 7;
+	}
+	return maxValue;
 }

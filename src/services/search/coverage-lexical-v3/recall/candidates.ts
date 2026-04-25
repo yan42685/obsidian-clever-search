@@ -1,4 +1,8 @@
 import type { ResidentBase } from "../layout/types";
+import {
+	DEFAULT_RESIDENT_SHARD_GENERATION,
+	DEFAULT_RESIDENT_SHARD_ID,
+} from "../build/builder";
 import { isStrongHanGate } from "../prefix-fanout-guard";
 import { encodeHanBigramId, encodeHanCharId, isSingletonHanStopChar } from "../query";
 import { collectCandidateResidualSingletonHanTarget } from "../singleton-han";
@@ -122,6 +126,8 @@ export function recallCandidateDocs(
 				}))
 				.sort((left, right) => left.blockId - right.blockId);
 			return {
+				shardId: DEFAULT_RESIDENT_SHARD_ID,
+				shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
 				docId: bucket.docId,
 				liveDocSlot: bucket.liveDocSlot,
 				matchedIdentityUnitIndices: [...bucket.identity].sort((left, right) => left - right),

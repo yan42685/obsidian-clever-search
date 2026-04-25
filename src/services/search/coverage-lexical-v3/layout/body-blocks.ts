@@ -1,8 +1,5 @@
 import { buildIntegerArray } from "./integer-arrays";
-import type {
-	ResidentBodyBlockArena,
-	ResidentBodyFamilySupportSidecar,
-} from "./types";
+import type { ResidentBodyBlockArena } from "./types";
 
 type BodyBlockBuildInput = Readonly<{
 	docId: number;
@@ -10,54 +7,47 @@ type BodyBlockBuildInput = Readonly<{
 	ordinal: number;
 	exactTapeStart: number;
 	exactTapeCount: number;
-	familySupportFamilyIds: readonly number[];
+	familySupportShardLocalFamilySlots: readonly number[];
 	familySupportMasks: readonly number[];
 }>;
 
-export const EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR: ResidentBodyFamilySupportSidecar =
-	{
-		familySupportStartByBlockId: buildIntegerArray([0]),
-		familySupportFamilyIds: buildIntegerArray([]),
-		familySupportMaskByEntry: new Uint8Array(),
-		entryCount: 0,
-		bytes: 0,
-	};
-
-export function buildResidentBodyFamilySupportSidecar(
+function buildFamilySupportArrays(
 	blocks: readonly Pick<
 		BodyBlockBuildInput,
-		"familySupportFamilyIds" | "familySupportMasks"
+		"familySupportShardLocalFamilySlots" | "familySupportMasks"
 	>[],
-): ResidentBodyFamilySupportSidecar {
+): Readonly<{
+	familySupportStartByBlockId: ReturnType<typeof buildIntegerArray>;
+	familySupportShardLocalFamilySlots: ReturnType<typeof buildIntegerArray>;
+	familySupportMaskByEntry: Uint8Array;
+}> {
 	const familySupportStarts: number[] = [0];
-	const familySupportFamilyIds: number[] = [];
+	const familySupportShardLocalFamilySlots: number[] = [];
 	const familySupportMasks: number[] = [];
 	for (const block of blocks) {
-		familySupportFamilyIds.push(...block.familySupportFamilyIds);
+		familySupportShardLocalFamilySlots.push(
+			...block.familySupportShardLocalFamilySlots,
+		);
 		familySupportMasks.push(...block.familySupportMasks);
-		familySupportStarts.push(familySupportFamilyIds.length);
+		familySupportStarts.push(familySupportShardLocalFamilySlots.length);
 	}
 	const familySupportStartByBlockId = buildIntegerArray(familySupportStarts);
-	const familySupportFamilyIdsArray = buildIntegerArray(familySupportFamilyIds);
+	const familySupportShardLocalFamilySlotsArray = buildIntegerArray(
+		familySupportShardLocalFamilySlots,
+	);
 	const familySupportMaskByEntry = Uint8Array.from(familySupportMasks);
 	return {
 		familySupportStartByBlockId,
-		familySupportFamilyIds: familySupportFamilyIdsArray,
+		familySupportShardLocalFamilySlots:
+			familySupportShardLocalFamilySlotsArray,
 		familySupportMaskByEntry,
-		entryCount: familySupportFamilyIdsArray.length,
-		bytes:
-			familySupportStartByBlockId.byteLength +
-			familySupportFamilyIdsArray.byteLength +
-			familySupportMaskByEntry.byteLength,
 	};
 }
 
 export function buildBodyBlockArena(
 	blocks: readonly BodyBlockBuildInput[],
-	familySupportSidecar: ResidentBodyFamilySupportSidecar = buildResidentBodyFamilySupportSidecar(
-		blocks,
-	),
 ): ResidentBodyBlockArena {
+	const familySupport = buildFamilySupportArrays(blocks);
 	return {
 		blockCount: blocks.length,
 		docIdByBlockId: buildIntegerArray(blocks.map((block) => block.docId)),
@@ -71,40 +61,10 @@ export function buildBodyBlockArena(
 		exactTapeCountByBlockId: buildIntegerArray(
 			blocks.map((block) => block.exactTapeCount),
 		),
-		familySupportStartByBlockId:
-			familySupportSidecar.familySupportStartByBlockId,
-		familySupportFamilyIds: familySupportSidecar.familySupportFamilyIds,
-		familySupportMaskByEntry: familySupportSidecar.familySupportMaskByEntry,
-	};
-}
-
-export function setResidentBodyFamilySupportSidecar(
-	arena: ResidentBodyBlockArena,
-	sidecar: ResidentBodyFamilySupportSidecar,
-): void {
-	const mutableArena = arena as {
-		familySupportStartByBlockId: ResidentBodyFamilySupportSidecar["familySupportStartByBlockId"];
-		familySupportFamilyIds: ResidentBodyFamilySupportSidecar["familySupportFamilyIds"];
-		familySupportMaskByEntry: ResidentBodyFamilySupportSidecar["familySupportMaskByEntry"];
-	};
-	mutableArena.familySupportStartByBlockId =
-		sidecar.familySupportStartByBlockId;
-	mutableArena.familySupportFamilyIds = sidecar.familySupportFamilyIds;
-	mutableArena.familySupportMaskByEntry = sidecar.familySupportMaskByEntry;
-}
-
-export function readResidentBodyFamilySupportSidecar(
-	arena: ResidentBodyBlockArena,
-): ResidentBodyFamilySupportSidecar {
-	return {
-		familySupportStartByBlockId: arena.familySupportStartByBlockId,
-		familySupportFamilyIds: arena.familySupportFamilyIds,
-		familySupportMaskByEntry: arena.familySupportMaskByEntry,
-		entryCount: arena.familySupportFamilyIds.length,
-		bytes:
-			arena.familySupportStartByBlockId.byteLength +
-			arena.familySupportFamilyIds.byteLength +
-			arena.familySupportMaskByEntry.byteLength,
+		familySupportStartByBlockId: familySupport.familySupportStartByBlockId,
+		familySupportShardLocalFamilySlots:
+			familySupport.familySupportShardLocalFamilySlots,
+		familySupportMaskByEntry: familySupport.familySupportMaskByEntry,
 	};
 }
 
@@ -118,7 +78,7 @@ export function estimateBodyBlockBytes(
 		arena.exactTapeStartByBlockId.byteLength +
 		arena.exactTapeCountByBlockId.byteLength +
 		arena.familySupportStartByBlockId.byteLength +
-		arena.familySupportFamilyIds.byteLength +
+		arena.familySupportShardLocalFamilySlots.byteLength +
 		arena.familySupportMaskByEntry.byteLength
 	);
 }

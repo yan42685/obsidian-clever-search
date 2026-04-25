@@ -8,7 +8,7 @@ import {
 import type { ResidentBodyFamilyPostingField } from "./types";
 
 type BodyFamilyPostingBuildInput = Readonly<{
-	familyIdsByBlock: readonly (readonly number[])[];
+	shardLocalFamilySlotsByBlock: readonly (readonly number[])[];
 }>;
 
 const BODY_FAMILY_POSTING_CODEC_PROFILE: AdaptivePostingCodecProfile = {
@@ -19,22 +19,22 @@ const BODY_FAMILY_POSTING_CODEC_PROFILE: AdaptivePostingCodecProfile = {
 export function buildBodyFamilyPostingField(
 	input: BodyFamilyPostingBuildInput,
 ): ResidentBodyFamilyPostingField {
-	const blocksByFamilyId = new Map<number, number[]>();
-	for (let blockId = 0; blockId < input.familyIdsByBlock.length; blockId += 1) {
-		for (const familyId of input.familyIdsByBlock[blockId] ?? []) {
-			let blockIds = blocksByFamilyId.get(familyId);
+	const blocksByShardLocalFamilySlot = new Map<number, number[]>();
+	for (let blockId = 0; blockId < input.shardLocalFamilySlotsByBlock.length; blockId += 1) {
+		for (const shardLocalFamilySlot of input.shardLocalFamilySlotsByBlock[blockId] ?? []) {
+			let blockIds = blocksByShardLocalFamilySlot.get(shardLocalFamilySlot);
 			if (blockIds == null) {
 				blockIds = [];
-				blocksByFamilyId.set(familyId, blockIds);
+				blocksByShardLocalFamilySlot.set(shardLocalFamilySlot, blockIds);
 			}
 			blockIds.push(blockId);
 		}
 	}
-	if (blocksByFamilyId.size === 0) {
+	if (blocksByShardLocalFamilySlot.size === 0) {
 		return createEmptyAdaptivePostingField();
 	}
 	return buildAdaptivePostingField(
-		blocksByFamilyId,
+		blocksByShardLocalFamilySlot,
 		BODY_FAMILY_POSTING_CODEC_PROFILE,
 	);
 }
@@ -92,9 +92,9 @@ export function describeBodyFamilyPostingByteBreakdown(
 	};
 }
 
-export function collectBodyFamilyPostingBlockIdsForFamily(
+export function collectBodyFamilyPostingBlockIdsForShardLocalFamilySlot(
 	arena: ResidentBodyFamilyPostingField,
-	familyId: number,
+	shardLocalFamilySlot: number,
 ): number[] {
-	return decodeAdaptivePosting(arena, familyId);
+	return decodeAdaptivePosting(arena, shardLocalFamilySlot);
 }
