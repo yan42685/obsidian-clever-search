@@ -3,24 +3,24 @@ import {
 	getFamilySourceMask,
 	isFamilyPrefixExpandable,
 } from "./family-lexicon";
-import type { ResidentFuzzyRescueSidecar } from "./types";
+import type { ResidentFuzzyRescueIndex } from "./types";
 
 const textEncoder = new TextEncoder();
 
 export const FUZZY_RESCUE_MIN_QUERY_LENGTH = 6;
 
-export const EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR: ResidentFuzzyRescueSidecar = {
+export const EMPTY_RESIDENT_FUZZY_RESCUE_INDEX: ResidentFuzzyRescueIndex = {
 	candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: new Map(),
 	indexedMetadataFamilyCount: 0,
 	fuzzyLookupKeyCount: 0,
 	bytes: 0,
 };
 
-export function buildResidentFuzzyRescueSidecar(params: Readonly<{
+export function buildResidentFuzzyRescueIndex(params: Readonly<{
 	familyTexts: readonly string[];
 	familyFlagsByFamilyId: Uint8Array;
 	shardLocalFamilySlotByFamilyId: ArrayLike<number>;
-}>): ResidentFuzzyRescueSidecar {
+}>): ResidentFuzzyRescueIndex {
 	const candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey = new Map<
 		string,
 		number[]

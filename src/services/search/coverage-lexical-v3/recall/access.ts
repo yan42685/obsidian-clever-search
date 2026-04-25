@@ -6,7 +6,7 @@ import {
 	sliceSentinelBucket,
 } from "../layout/integer-arrays";
 import { decodeBlockPositionLane } from "../layout/position-lanes";
-import { collectBodyFamilyPostingBlockIdsForFamily } from "../layout/body-family-posting";
+import { collectBodyFamilyPostingBlockIdsForShardLocalFamilySlot as collectBodyFamilyPostingBlockIdsFromField } from "../layout/body-family-posting";
 import type { ResidentBase } from "../layout/types";
 import {
 	decodeBodyHanCharPosting,
@@ -303,11 +303,11 @@ export function getLiveDocBodyBlockIds(
 
 export function collectBodyFamilyPostingBlockIds(
 	base: ResidentBase,
-	familyId: number,
+	shardLocalFamilySlot: number,
 ): number[] {
-	return collectBodyFamilyPostingBlockIdsForFamily(
+	return collectBodyFamilyPostingBlockIdsFromField(
 		base.bodyFamilyPosting,
-		familyId,
+		shardLocalFamilySlot,
 	);
 }
 
@@ -315,10 +315,7 @@ export function collectBodyFamilyPostingBlockIdsForShardLocalFamilySlot(
 	base: ResidentBase,
 	shardLocalFamilySlot: number,
 ): number[] {
-	return collectBodyFamilyPostingBlockIds(
-		base,
-		getFamilyIdForShardLocalFamilySlot(base, shardLocalFamilySlot),
-	);
+	return collectBodyFamilyPostingBlockIds(base, shardLocalFamilySlot);
 }
 
 export function getBodyBlockExactFamilyIds(
@@ -348,7 +345,7 @@ export function getBodyBlockFamilySupportEntries(
 	const start = base.bodyBlocks.familySupportStartByBlockId[blockId] ?? 0;
 	const end = base.bodyBlocks.familySupportStartByBlockId[blockId + 1] ?? start;
 	const familyIds = sliceResidentIntegerArray(
-		base.bodyBlocks.familySupportFamilyIds,
+		base.bodyBlocks.familySupportShardLocalFamilySlots,
 		start,
 		end,
 	);
@@ -377,7 +374,7 @@ export function getDocIdentityHanWitnessStringIds(
 ): number[] {
 	return sliceSentinelBucket(
 		base.hanRoute.identityWitnessStartByDocId,
-		base.hanRoute.identityWitnessStringIds,
+		base.hanRoute.identityWitnessTextIds,
 		docId,
 	);
 }
@@ -389,7 +386,7 @@ export function getLiveDocIdentityHanWitnessStringIds(
 	return sliceSentinelBucket(
 		base.hanRoute.identityWitnessStartByLiveDocSlot ??
 			base.hanRoute.identityWitnessStartByDocId,
-		base.hanRoute.identityWitnessStringIds,
+		base.hanRoute.identityWitnessTextIds,
 		liveDocSlot,
 	);
 }
@@ -439,7 +436,7 @@ export function getDocRouteHanWitnessStringIds(
 ): number[] {
 	return sliceSentinelBucket(
 		base.hanRoute.routeWitnessStartByDocId,
-		base.hanRoute.routeWitnessStringIds,
+		base.hanRoute.routeWitnessTextIds,
 		docId,
 	);
 }
@@ -451,7 +448,7 @@ export function getLiveDocRouteHanWitnessStringIds(
 	return sliceSentinelBucket(
 		base.hanRoute.routeWitnessStartByLiveDocSlot ??
 			base.hanRoute.routeWitnessStartByDocId,
-		base.hanRoute.routeWitnessStringIds,
+		base.hanRoute.routeWitnessTextIds,
 		liveDocSlot,
 	);
 }
@@ -501,7 +498,7 @@ export function getDocHeadingHanWitnessStringIds(
 ): number[] {
 	return sliceSentinelBucket(
 		base.hanRoute.headingWitnessStartByDocId,
-		base.hanRoute.headingWitnessStringIds,
+		base.hanRoute.headingWitnessTextIds,
 		docId,
 	);
 }
@@ -513,7 +510,7 @@ export function getLiveDocHeadingHanWitnessStringIds(
 	return sliceSentinelBucket(
 		base.hanRoute.headingWitnessStartByLiveDocSlot ??
 			base.hanRoute.headingWitnessStartByDocId,
-		base.hanRoute.headingWitnessStringIds,
+		base.hanRoute.headingWitnessTextIds,
 		liveDocSlot,
 	);
 }
@@ -542,7 +539,7 @@ export function getBodyBlockHanWitnessStringIds(
 ): number[] {
 	return sliceSentinelBucket(
 		base.hanRoute.bodyWitnessOccurrenceStartByBlockId,
-		base.hanRoute.bodyWitnessOccurrenceStringIds,
+		base.hanRoute.bodyWitnessOccurrenceTextIds,
 		blockId,
 	);
 }

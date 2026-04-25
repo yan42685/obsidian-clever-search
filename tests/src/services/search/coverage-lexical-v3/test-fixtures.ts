@@ -1,6 +1,6 @@
 ﻿import type { ResidentBase, ResidentBaseMetrics } from "src/services/search/coverage-lexical-v3/layout/types";
 import { createEmptyAdaptivePostingField } from "src/services/search/coverage-lexical-v3/layout/adaptive-postings";
-import { EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR } from "src/services/search/coverage-lexical-v3/layout/fuzzy-rescue";
+import { EMPTY_RESIDENT_FUZZY_RESCUE_INDEX } from "src/services/search/coverage-lexical-v3/layout/fuzzy-rescue";
 import { analyzeQuery, type V3QueryAnalysis } from "src/services/search/coverage-lexical-v3/query/analysis";
 import type {
 	V3CandidateBodyBlockRecall,
@@ -106,7 +106,7 @@ export function createMinimalResidentBaseForBlockCounts(
 			exactTapeStartByBlockId: new Uint32Array(Array.from({ length: blockStart }, () => 0)),
 			exactTapeCountByBlockId: new Uint32Array(Array.from({ length: blockStart }, () => 0)),
 			familySupportStartByBlockId: new Uint32Array(Array.from({ length: blockStart }, () => 0)),
-			familySupportFamilyIds: new Uint32Array(),
+			familySupportShardLocalFamilySlots: new Uint32Array(),
 			familySupportMaskByEntry: new Uint8Array(),
 		},
 		exactTapes: {
@@ -128,24 +128,24 @@ export function createMinimalResidentBaseForBlockCounts(
 			bodyCharAdaptivePostings: createEmptyAdaptivePostingField(),
 			identityWitnessStartByDocId: new Uint32Array(),
 			identityWitnessStartByLiveDocSlot: new Uint32Array(),
-			identityWitnessStringIds: new Uint32Array(),
+			identityWitnessTextIds: new Uint32Array(),
 			identityWitnessSourceMaskByDocEntry: new Uint8Array(),
 			routeWitnessStartByDocId: new Uint32Array(),
 			routeWitnessStartByLiveDocSlot: new Uint32Array(),
-			routeWitnessStringIds: new Uint32Array(),
+			routeWitnessTextIds: new Uint32Array(),
 			routeWitnessSourceMaskByDocEntry: new Uint8Array(),
 			headingWitnessStartByDocId: new Uint32Array(),
 			headingWitnessStartByLiveDocSlot: new Uint32Array(),
-			headingWitnessStringIds: new Uint32Array(),
+			headingWitnessTextIds: new Uint32Array(),
 			bodyWitnessOccurrenceStartByBlockId: new Uint32Array(),
-			bodyWitnessOccurrenceStringIds: new Uint32Array(),
+			bodyWitnessOccurrenceTextIds: new Uint32Array(),
 			bodyWitnessPositionEncodingByBlockId: new Uint8Array(),
 			bodyWitnessPositionStartByBlockId: new Uint32Array(),
 			bodyWitnessPositionDeltaU8Tape: new Uint8Array(),
 			bodyWitnessPositionDeltaU16Tape: new Uint16Array(),
 			bodyWitnessPositionDeltaU32Tape: new Uint32Array(),
 		},
-		fuzzyRescue: EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+		fuzzyRescue: EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 		metrics: {} as ResidentBaseMetrics,
 	};
 }

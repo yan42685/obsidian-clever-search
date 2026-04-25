@@ -2433,15 +2433,29 @@ function registerBenchmarkFileSnapshotStore(
 	let benchmarkPersistedLexicalBytes = 0;
 
 	const buildBenchmarkLexicalDocEvidenceRowId = (locator: {
+		shardId?: string;
+		shardGeneration?: number;
 		docRef: number;
 		generation: number;
-	}): string => `${locator.docRef}:${locator.generation}`;
+	}): string => {
+		if (locator.shardId != null && locator.shardGeneration != null) {
+			return `${locator.shardId}:${locator.shardGeneration}:${locator.docRef}:${locator.generation}`;
+		}
+		return `${locator.docRef}:${locator.generation}`;
+	};
 
 	const buildBenchmarkLexicalBlockEvidenceRowId = (locator: {
+		shardId?: string;
+		shardGeneration?: number;
 		docRef: number;
 		generation: number;
 		blockOrdinal: number;
-	}): string => `${locator.docRef}:${locator.generation}:${locator.blockOrdinal}`;
+	}): string => {
+		if (locator.shardId != null && locator.shardGeneration != null) {
+			return `${locator.shardId}:${locator.shardGeneration}:${locator.docRef}:${locator.generation}:${locator.blockOrdinal}`;
+		}
+		return `${locator.docRef}:${locator.generation}:${locator.blockOrdinal}`;
+	};
 
 	const recomputePersistedLexicalBytes = () => {
 		benchmarkPersistedLexicalBytes =
@@ -2621,17 +2635,38 @@ function registerBenchmarkFileSnapshotStore(
 					docRef: number;
 					generation: number;
 					blockOrdinal: number;
+					exactShardLocalFamilySlots?: readonly number[];
+					exactTokenPositions?: readonly number[];
+					supportShardLocalFamilySlots?: readonly number[];
+					familySupportMaskByEntry?: readonly number[];
 				}
 			>,
 		) => {
-			lexicalBodyEvidence.clear();
 			for (const row of rows) {
-				lexicalBodyEvidence.set(row.id, row);
+				lexicalBodyEvidence.set(row.id, {
+					id: row.id,
+					docRef: row.docRef,
+					generation: row.generation,
+					blockOrdinal: row.blockOrdinal,
+					exactShardLocalFamilySlots: [
+						...(row.exactShardLocalFamilySlots ?? []),
+					],
+					exactTokenPositions: [...(row.exactTokenPositions ?? [])],
+					supportEntriesByShardLocalFamilySlot: Array.from(
+						row.supportShardLocalFamilySlots ?? [],
+						(shardLocalFamilySlot, index) => ({
+							shardLocalFamilySlot,
+							supportMask: row.familySupportMaskByEntry?.[index] ?? 0,
+						}),
+					),
+				});
 			}
 			recomputePersistedLexicalBytes();
 		},
 		readLexicalBodyEvidenceForBlocks: async (
 			locators: ReadonlyArray<{
+				shardId?: string;
+				shardGeneration?: number;
 				docRef: number;
 				generation: number;
 				blockOrdinal: number;
@@ -2653,17 +2688,47 @@ function registerBenchmarkFileSnapshotStore(
 					id: string;
 					docRef: number;
 					generation: number;
+					identityWitnessMatchKeys?: readonly number[];
+					identityWitnessTexts?: readonly string[];
+					identityWitnessSourceMaskByDocEntry?: readonly number[];
+					routeWitnessMatchKeys?: readonly number[];
+					routeWitnessTexts?: readonly string[];
+					routeWitnessSourceMaskByDocEntry?: readonly number[];
+					headingWitnessMatchKeys?: readonly number[];
+					headingWitnessTexts?: readonly string[];
 				}
 			>,
 		) => {
-			lexicalHanDocEvidence.clear();
 			for (const row of rows) {
-				lexicalHanDocEvidence.set(row.id, row);
+				lexicalHanDocEvidence.set(row.id, {
+					id: row.id,
+					docRef: row.docRef,
+					generation: row.generation,
+					identityWitnessMatchKeys: [
+						...(row.identityWitnessMatchKeys ?? []),
+					],
+					identityWitnessTexts: [...(row.identityWitnessTexts ?? [])],
+					identityWitnessSourceMasks: [
+						...(row.identityWitnessSourceMaskByDocEntry ?? []),
+					],
+					routeWitnessMatchKeys: [...(row.routeWitnessMatchKeys ?? [])],
+					routeWitnessTexts: [...(row.routeWitnessTexts ?? [])],
+					routeWitnessSourceMasks: [
+						...(row.routeWitnessSourceMaskByDocEntry ?? []),
+					],
+					headingWitnessMatchKeys: [...(row.headingWitnessMatchKeys ?? [])],
+					headingWitnessTexts: [...(row.headingWitnessTexts ?? [])],
+				});
 			}
 			recomputePersistedLexicalBytes();
 		},
 		readLexicalHanDocEvidenceForDocs: async (
-			locators: ReadonlyArray<{ docRef: number; generation: number }>,
+			locators: ReadonlyArray<{
+				shardId?: string;
+				shardGeneration?: number;
+				docRef: number;
+				generation: number;
+			}>,
 		) => {
 			const result = new Map<string, unknown>();
 			for (const locator of locators) {
@@ -2682,17 +2747,31 @@ function registerBenchmarkFileSnapshotStore(
 					docRef: number;
 					generation: number;
 					blockOrdinal: number;
+					bodyWitnessMatchKeys?: readonly number[];
+					bodyWitnessTexts?: readonly string[];
+					bodyWitnessStartOffsets?: readonly number[];
 				}
 			>,
 		) => {
-			lexicalHanBodyEvidence.clear();
 			for (const row of rows) {
-				lexicalHanBodyEvidence.set(row.id, row);
+				lexicalHanBodyEvidence.set(row.id, {
+					id: row.id,
+					docRef: row.docRef,
+					generation: row.generation,
+					blockOrdinal: row.blockOrdinal,
+					bodyWitnessMatchKeys: [...(row.bodyWitnessMatchKeys ?? [])],
+					bodyWitnessTexts: [...(row.bodyWitnessTexts ?? [])],
+					bodyWitnessStartOffsets: [
+						...(row.bodyWitnessStartOffsets ?? []),
+					],
+				});
 			}
 			recomputePersistedLexicalBytes();
 		},
 		readLexicalHanBodyEvidenceForBlocks: async (
 			locators: ReadonlyArray<{
+				shardId?: string;
+				shardGeneration?: number;
 				docRef: number;
 				generation: number;
 				blockOrdinal: number;

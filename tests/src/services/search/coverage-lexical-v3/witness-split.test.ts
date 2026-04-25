@@ -1,4 +1,4 @@
-import type { IndexedDocument } from "src/globals/search-types";
+﻿import type { IndexedDocument } from "src/globals/search-types";
 import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
 import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
 import type { V3DocumentTokenizer } from "src/services/search/coverage-lexical-v3/query";
@@ -47,9 +47,9 @@ describe("coverage lexical v3 witness split", () => {
 		const engine = new CoverageLexicalV3Engine();
 
 		expect(familyTexts).not.toContain("生命力");
-		expect(residentBase.hanRoute.bodyWitnessOccurrenceStringIds.length).toBeGreaterThan(0);
+	expect(residentBase.hanRoute.bodyWitnessOccurrenceTextIds.length).toBeGreaterThan(0);
 
-		engine.buildResidentBase([document], tokenizer);
+		engine.buildResidentIndexView([document], tokenizer);
 		const result = engine.search("生命力", ["生命"]);
 
 		expect(result.rankedCandidates).toHaveLength(1);

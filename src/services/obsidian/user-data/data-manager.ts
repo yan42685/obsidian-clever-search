@@ -347,12 +347,9 @@ const COVERAGE_LEXICAL_V3_PERSISTED_ARTIFACT_TABLES = [
   "lexicalSearchSnapshots",
   "lexicalIndexedMetadata",
   "lexicalFuzzyRescue",
-  "lexicalBodyFamilySupport",
   "lexicalBodyEvidence",
   "lexicalHanDocEvidence",
   "lexicalHanBodyEvidence",
-  "lexicalExactTapes",
-  "lexicalHanWitness",
 ] as const;
 
 const COVERAGE_LEXICAL_V3_PERSISTED_REGISTRY_TABLES = [
@@ -362,12 +359,9 @@ const COVERAGE_LEXICAL_V3_PERSISTED_REGISTRY_TABLES = [
 ] as const;
 
 const COVERAGE_LEXICAL_V3_PERSISTED_EVIDENCE_TABLES = [
-  "lexicalBodyFamilySupport",
   "lexicalBodyEvidence",
   "lexicalHanDocEvidence",
   "lexicalHanBodyEvidence",
-  "lexicalExactTapes",
-  "lexicalHanWitness",
 ] as const;
 
 type DevHeapContextRow = {
@@ -5425,7 +5419,7 @@ export class DataManager {
       }
       if (auxiliaryBytes > 0) {
         lines.push(
-          "Coverage V3 auxiliary sidecars: " +
+          "Coverage V3 auxiliary indexes: " +
             this.formatBytes(auxiliaryBytes) +
             " (" +
             this.formatPercent(auxiliaryBytes, residentTotal) +
@@ -5579,9 +5573,9 @@ export class DataManager {
     pushResidentSegment('lexicon.canonicalTerms', canonicalTermLexiconBytes);
     pushResidentSegment('lexicon.latinExpansion', latinExpansionLexiconBytes);
     pushResidentSegment('doc.bodyTokens(hot)', bodyTokensHotBytes);
-    pushColdOwnedSegment('doc.bodyTokens(sidecar)', bodyTokensSidecarBytes);
+    pushColdOwnedSegment('doc.bodyTokens(cold)', bodyTokensSidecarBytes);
     pushColdOwnedSegment(
-      'doc.bodyHanSegmentExact(sidecar)',
+      'doc.bodyHanSegmentExact(cold)',
       bodyHanSegmentExactSidecarBytes,
     );
     pushOverlapSegment(
@@ -5687,8 +5681,8 @@ export class DataManager {
           .join(' | '),
       'Coverage cold owned groups: ' +
         ([
-          ['bodyTokens(sidecar)', bodyTokensSidecarBytes],
-          ['bodyHanSegmentExact(sidecar)', bodyHanSegmentExactSidecarBytes],
+          ['bodyTokens(cold)', bodyTokensSidecarBytes],
+          ['bodyHanSegmentExact(cold)', bodyHanSegmentExactSidecarBytes],
         ] as Array<[string, number]>)
           .filter(([, bytes]) => bytes > 0)
           .map(([segment, bytes]) => segment + ' ' + this.formatBytes(bytes))
@@ -5923,6 +5917,8 @@ export class DataManager {
       [...segments].sort((left, right) => right.bytes - left.bytes).slice(0, 10),
       residentTotal,
     );
+    const shardReadiness = summary.shardReadiness;
+    const indexSummary = breakdown.indexSummary;
     const noticeLines = [
       "Coverage V3 resident base: " +
         this.formatBytes(residentTotal) +
@@ -5942,6 +5938,14 @@ export class DataManager {
         summary.blockCount +
         " | exactTapeValues " +
         summary.exactTapeValueCount,
+      "Coverage V3 resident shards: count " +
+        indexSummary.shardCount +
+        " | resident " +
+        this.formatBytes(indexSummary.residentBytes) +
+        " | largest " +
+        this.formatBytes(indexSummary.largestShardBytes) +
+        " | average " +
+        this.formatBytes(indexSummary.averageShardBytes),
       "Coverage V3 resident groups: " +
         residentTopRows
           .map((row) => row.segment + " " + row.size)
@@ -5962,6 +5966,69 @@ export class DataManager {
         hanRouteBodyDetailSegments
           .map((row) => row.segment + " " + this.formatBytes(row.bytes))
           .join(" | "),
+		"Coverage V3 shard readiness: familyLexiconIdentitySlots " +
+        String(shardReadiness.familyLexiconIdentitySlots) +
+        " | familyPostingTerms shardLocalSlot" +
+        " | duplicatedLiveDocLanes " +
+        this.formatBytes(shardReadiness.docTableDuplicatedLiveSlotBytes),
+      "Coverage V3 hanBigram readiness: terms " +
+        shardReadiness.hanBigramPosting.termCount +
+        " | values " +
+        shardReadiness.hanBigramPosting.valueCount +
+        " | buckets singleton/pair/small/delta " +
+        shardReadiness.hanBigramPosting.singletonCount +
+        "/" +
+        shardReadiness.hanBigramPosting.pairCount +
+        "/" +
+        shardReadiness.hanBigramPosting.smallCount +
+        "/" +
+        shardReadiness.hanBigramPosting.deltaCount +
+        " | maxTerm " +
+        shardReadiness.hanBigramPosting.maxTermId +
+        " | maxValue " +
+        shardReadiness.hanBigramPosting.maxValueId +
+        " | laneWidth term " +
+        shardReadiness.hanBigramPosting.termLaneWidth +
+        " value " +
+        shardReadiness.hanBigramPosting.valueLaneWidth,
+      "Coverage V3 hanBigram term gaps: raw " +
+        this.formatBytes(shardReadiness.hanBigramPosting.termGapCompression.rawBytes) +
+        " | estimated " +
+        this.formatBytes(shardReadiness.hanBigramPosting.termGapCompression.estimatedBytes) +
+        " | savings " +
+        this.formatBytes(
+          shardReadiness.hanBigramPosting.termGapCompression.estimatedSavingsBytes,
+        ) +
+        " | p95Gap " +
+        shardReadiness.hanBigramPosting.termGapCompression.p95Gap +
+        " | maxGap " +
+        shardReadiness.hanBigramPosting.termGapCompression.maxGap +
+        " | gapWidth u8/u16/u32 " +
+        shardReadiness.hanBigramPosting.termGapCompression.u8Count +
+        "/" +
+        shardReadiness.hanBigramPosting.termGapCompression.u16Count +
+        "/" +
+        shardReadiness.hanBigramPosting.termGapCompression.u32Count,
+      "Coverage V3 familyPosting readiness: terms " +
+        shardReadiness.familyPosting.termCount +
+        " | values " +
+        shardReadiness.familyPosting.valueCount +
+        " | buckets singleton/pair/small/delta " +
+        shardReadiness.familyPosting.singletonCount +
+        "/" +
+        shardReadiness.familyPosting.pairCount +
+        "/" +
+        shardReadiness.familyPosting.smallCount +
+        "/" +
+        shardReadiness.familyPosting.deltaCount +
+        " | maxTerm " +
+        shardReadiness.familyPosting.maxTermId +
+        " | maxValue " +
+        shardReadiness.familyPosting.maxValueId +
+        " | laneWidth term " +
+        shardReadiness.familyPosting.termLaneWidth +
+        " value " +
+        shardReadiness.familyPosting.valueLaneWidth,
       "Coverage V3 stringArena text detail: " +
         stringArenaDetailSegments
           .map((row) => row.segment + " " + this.formatBytes(row.bytes))

@@ -19,6 +19,10 @@ import {
 	type LexicalDocEvidenceLocator,
 } from "src/services/search/shared/file-snapshot-store";
 import { buildResidentHotBaseArtifactsStreaming } from "./build";
+import {
+	DEFAULT_RESIDENT_SHARD_GENERATION,
+	DEFAULT_RESIDENT_SHARD_ID,
+} from "./build/builder";
 import { getInstance } from "src/utils/my-lib";
 import { container, singleton } from "tsyringe";
 import type {
@@ -37,6 +41,8 @@ import type {
 	ResidentBase,
 	ResidentBaseMetrics,
 	ResidentBaseSummary,
+	ResidentIndexViewSummary,
+	ResidentShard,
 } from "./layout/types";
 import {
 	getLiveDocGeneration,
@@ -47,10 +53,11 @@ import {
 } from "./recall";
 import {
 	buildFuzzyLookupKeys,
-	EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR,
+	EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 	FUZZY_RESCUE_MIN_QUERY_LENGTH,
 } from "./layout/fuzzy-rescue";
 import {
+	buildCandidateHydrationKey,
 	comparePackingProfiles,
 	comparePackingProfilesBeforeHanSurfaceCompletion,
 	hydrateCandidateEvidenceBatch,
@@ -60,12 +67,14 @@ import {
 	type HanSurfaceCompletionTier,
 } from "./ranking";
 import { analyzeQuery } from "./query";
-import type { ResidentFuzzyRescueSidecar } from "./layout/types";
+import type { ResidentFuzzyRescueIndex } from "./layout/types";
+import { describeResidentBase } from "./metrics";
 
 export type CoverageLexicalV3RuntimeMemoryBreakdown = Readonly<{
 	__backend: "coverage-lexical-v3";
 	metrics: ResidentBaseMetrics;
 	summary: ResidentBaseSummary;
+	indexSummary: ResidentIndexViewSummary;
 }>;
 
 type BodyHanCompletionTier = Extract<HanSurfaceCompletionTier, "body_window" | "body_residue">;
@@ -103,7 +112,7 @@ type PendingDocumentMetadata = Readonly<{
 }>;
 
 type HydratedRankingEvidence = Readonly<{
-	hydratedEvidenceByLiveDocSlot: ReadonlyMap<number, CandidateEvidencePackage>;
+	hydratedEvidenceByCandidateKey: ReadonlyMap<string, CandidateEvidencePackage>;
 }>;
 
 type CoverageLexicalV3BenchmarkPhaseTimingEntry = Readonly<{
@@ -151,6 +160,8 @@ type CoverageLexicalV3BenchmarkPhaseSample = Readonly<{
 
 type PersistedLexicalBodyEvidenceRow = Readonly<{
 	id: string;
+	shardId: string;
+	shardGeneration: number;
 	docRef: number;
 	generation: number;
 	blockOrdinal: number;
@@ -162,6 +173,8 @@ type PersistedLexicalBodyEvidenceRow = Readonly<{
 
 type PersistedLexicalHanDocEvidenceRow = Readonly<{
 	id: string;
+	shardId: string;
+	shardGeneration: number;
 	docRef: number;
 	generation: number;
 	identityWitnessMatchKeys: readonly number[];
@@ -176,6 +189,8 @@ type PersistedLexicalHanDocEvidenceRow = Readonly<{
 
 type PersistedLexicalHanBodyEvidenceRow = Readonly<{
 	id: string;
+	shardId: string;
+	shardGeneration: number;
 	docRef: number;
 	generation: number;
 	blockOrdinal: number;
@@ -185,22 +200,30 @@ type PersistedLexicalHanBodyEvidenceRow = Readonly<{
 }>;
 
 type CachedLexicalDocEvidenceLocatorEntry = Readonly<{
+	shardId: string;
+	shardGeneration: number;
 	locator: LexicalDocEvidenceLocator;
 	rowId: string;
 }>;
 
 type CachedLexicalBlockEvidenceLocatorEntry = Readonly<{
+	shardId: string;
+	shardGeneration: number;
 	locator: LexicalBlockEvidenceLocator;
 	rowId: string;
 }>;
 
 type CollectedLexicalDocEvidenceRequest = Readonly<{
+	shardId: string;
+	shardGeneration: number;
 	liveDocSlot: number;
 	locator: LexicalDocEvidenceLocator;
 	rowId: string;
 }>;
 
 type CollectedLexicalBlockEvidenceRequest = Readonly<{
+	shardId: string;
+	shardGeneration: number;
 	blockId: number;
 	locator: LexicalBlockEvidenceLocator;
 	rowId: string;
@@ -325,7 +348,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		const searchTerms = this.getQueryTerms(queryText);
 		const tokenizeMs = shouldMeasureTiming ? nowDebugMs() - tokenizeStartedAtMs : 0;
 		const fuzzyRescueStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
-		const fuzzyRescueSidecar = await this.hydrateFuzzyRescueForQuery(
+		const fuzzyRescueIndex = await this.hydrateFuzzyRescueForQuery(
 			queryText,
 			searchTerms,
 			request.isFuzzy !== false,
@@ -338,22 +361,22 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			allowPrefixMatch: request.isPrefixMatch,
 			allowFuzzyMatch: request.isFuzzy,
 			maxItemResults: request.maxItemResults,
-		}, fuzzyRescueSidecar);
+		}, fuzzyRescueIndex);
 		const prepareMs = shouldMeasureTiming ? nowDebugMs() - prepareStartedAtMs : 0;
 		const hydrateStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
-		const { hydratedEvidenceByLiveDocSlot } =
+		const { hydratedEvidenceByCandidateKey } =
 			await this.hydrateRankingEvidenceForCandidates(preparedSearch);
 		const hydrateMs = shouldMeasureTiming ? nowDebugMs() - hydrateStartedAtMs : 0;
 		const rankStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
 		const result = this.engine.rankPreparedSearch(
 			preparedSearch,
-			hydratedEvidenceByLiveDocSlot,
+			hydratedEvidenceByCandidateKey,
 		);
 		const rankMs = shouldMeasureTiming ? nowDebugMs() - rankStartedAtMs : 0;
 		const shouldRefineHan = shouldRunHanSurfaceRefine(result);
 		const refineStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
 		const refinedCandidates = shouldRefineHan
-			? await this.refineHanSurfaceCompletion(result, hydratedEvidenceByLiveDocSlot)
+			? await this.refineHanSurfaceCompletion(result, hydratedEvidenceByCandidateKey)
 			: result.rankedCandidates;
 		const refineMs = shouldMeasureTiming ? nowDebugMs() - refineStartedAtMs : 0;
 		const visibilityFilteredCandidates =
@@ -487,7 +510,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		if (!this.documentViewsByPath.has(path)) {
 			return null;
 		}
-		const residentBase = this.engine.getResidentBase();
+		const residentBase = this.getSingleResidentShardBase();
 		if (residentBase == null) {
 			return null;
 		}
@@ -500,7 +523,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		const tokenizeStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const searchTerms = this.getQueryTerms(trimmedQuery);
 		const tokenizeMs = shouldLogDebug ? nowDebugMs() - tokenizeStartedAtMs : 0;
-		const fuzzyRescueSidecar = await this.hydrateFuzzyRescueForQuery(
+		const fuzzyRescueIndex = await this.hydrateFuzzyRescueForQuery(
 			trimmedQuery,
 			searchTerms,
 			true,
@@ -508,22 +531,22 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		const prepareStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const preparedSearch = this.engine.prepareSearch(trimmedQuery, searchTerms, {
 			maxItemResults: this.outerSetting.ui.maxItemResults,
-		}, fuzzyRescueSidecar);
+		}, fuzzyRescueIndex);
 		const prepareMs = shouldLogDebug ? nowDebugMs() - prepareStartedAtMs : 0;
 		const hydrateStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
-		const { hydratedEvidenceByLiveDocSlot } =
+		const { hydratedEvidenceByCandidateKey } =
 			await this.hydrateRankingEvidenceForCandidates(preparedSearch);
 		const hydrateMs = shouldLogDebug ? nowDebugMs() - hydrateStartedAtMs : 0;
 		const rankStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const result = this.engine.rankPreparedSearch(
 			preparedSearch,
-			hydratedEvidenceByLiveDocSlot,
+			hydratedEvidenceByCandidateKey,
 		);
 		const rankMs = shouldLogDebug ? nowDebugMs() - rankStartedAtMs : 0;
 		const shouldRefineHan = shouldRunHanSurfaceRefine(result);
 		const refineStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const refinedCandidates = shouldRefineHan
-			? await this.refineHanSurfaceCompletion(result, hydratedEvidenceByLiveDocSlot)
+			? await this.refineHanSurfaceCompletion(result, hydratedEvidenceByCandidateKey)
 			: result.rankedCandidates;
 		const refineMs = shouldLogDebug ? nowDebugMs() - refineStartedAtMs : 0;
 		const candidate = refinedCandidates.find((item) => item.path === path);
@@ -662,20 +685,29 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		return null;
 	}
 
+	private getSingleResidentShardBase(): ResidentBase | null {
+		return this.engine.getResidentIndexView()?.shards[0]?.base ?? null;
+	}
+
+	private getSingleResidentShard(): ResidentShard | null {
+		return this.engine.getResidentIndexView()?.shards[0] ?? null;
+	}
+
 	estimateIndexBytes(): number {
-		return this.engine.getResidentBaseMetrics()?.residentBytes ?? 0;
+		return this.getSingleResidentShardBase()?.metrics.residentBytes ?? 0;
 	}
 
 	getIndexBreakdown(): CoverageLexicalV3RuntimeMemoryBreakdown | null {
-		const metrics = this.engine.getResidentBaseMetrics();
-		const summary = this.engine.describeResidentBase();
-		if (!metrics || !summary) {
+		const residentBase = this.getSingleResidentShardBase();
+		const indexSummary = this.engine.describeResidentIndexView();
+		if (residentBase == null || indexSummary == null) {
 			return null;
 		}
 		return {
 			__backend: "coverage-lexical-v3",
-			metrics,
-			summary,
+			metrics: residentBase.metrics,
+			summary: describeResidentBase(residentBase),
+			indexSummary,
 		};
 	}
 
@@ -757,21 +789,31 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				},
 			},
 		);
-		this.engine.loadResidentBase(artifacts.base);
-		this.engine.setFuzzyRescueSidecar(artifacts.fuzzyRescueSidecar);
+		this.engine.loadResidentIndexView({
+			version: 1,
+			shards: [
+				{
+					shardId: DEFAULT_RESIDENT_SHARD_ID,
+					generation: DEFAULT_RESIDENT_SHARD_GENERATION,
+					base: artifacts.base,
+				},
+			],
+		});
+		this.engine.setFuzzyRescueIndex(artifacts.fuzzyRescueIndex);
 		await snapshotStore.publishLexicalFuzzyRescue?.(
-			artifacts.fuzzyRescueSidecar,
+			artifacts.fuzzyRescueIndex,
 		);
-		this.engine.clearFuzzyRescueSidecar();
+		this.engine.clearFuzzyRescueIndex();
 	}
 
 	private async hydrateRankingEvidenceForCandidates(
 		preparedSearch: CoverageLexicalV3PreparedSearch,
 	): Promise<HydratedRankingEvidence> {
-		const residentBase = this.engine.getResidentBase();
-		if (residentBase == null || preparedSearch.guardedCandidateDocs.length === 0) {
+		const residentShard = this.getSingleResidentShard();
+		const residentBase = residentShard?.base ?? null;
+		if (residentBase == null || residentShard == null || preparedSearch.guardedCandidateDocs.length === 0) {
 			return {
-				hydratedEvidenceByLiveDocSlot: new Map(),
+				hydratedEvidenceByCandidateKey: new Map(),
 			};
 		}
 		const needsBodyRankingEvidence = preparedSearch.guardedCandidateDocs.some(
@@ -782,16 +824,20 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		);
 		if (!needsBodyRankingEvidence && !needsHanRankingEvidence) {
 			return {
-				hydratedEvidenceByLiveDocSlot: new Map(),
+				hydratedEvidenceByCandidateKey: new Map(),
 			};
 		}
 		const snapshotStore = this.getFileSnapshotStore();
 		const shortlistedBodyBlockIds = needsBodyRankingEvidence
-			? collectShortlistedBodyBlockIds(preparedSearch.guardedCandidateDocs)
+			? collectCandidateHydrationBlockIds(
+					residentBase,
+					preparedSearch.guardedCandidateDocs,
+				)
 			: [];
 		const shortlistedBodyEvidenceLocators = needsBodyRankingEvidence
 			? collectShortlistedBodyEvidenceLocators(
 					residentBase,
+					residentShard,
 					shortlistedBodyBlockIds,
 				)
 			: [];
@@ -803,12 +849,16 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			: [];
 		const hanShortlistedBodyBlockIds =
 			needsHanRankingEvidence && hanBodyCandidateRecalls.length > 0
-				? collectShortlistedBodyBlockIds(hanBodyCandidateRecalls)
+				? collectCandidateHydrationBlockIds(
+						residentBase,
+						hanBodyCandidateRecalls,
+					)
 				: [];
 		const hanShortlistedBodyEvidenceLocators =
 			needsHanRankingEvidence && hanShortlistedBodyBlockIds.length > 0
 				? collectShortlistedBodyEvidenceLocators(
 						residentBase,
+						residentShard,
 						hanShortlistedBodyBlockIds,
 					)
 				: [];
@@ -816,6 +866,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			needsHanRankingEvidence && hanDocCandidateRecalls.length > 0
 				? collectCandidateDocEvidenceLocators(
 						residentBase,
+						residentShard,
 						hanDocCandidateRecalls,
 					)
 				: [];
@@ -851,8 +902,8 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				shortlistedBodyEvidenceLocators,
 				persistedBodyEvidenceByRowId,
 			);
-		const docHanEvidenceByLiveDocSlot =
-			materializePersistedDocEvidenceByLiveDocSlot(
+		const docHanEvidenceByCandidateKey =
+			materializePersistedDocEvidenceByCandidateKey(
 				candidateDocEvidenceLocators,
 				persistedDocHanEvidenceByRowId,
 			);
@@ -862,12 +913,12 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				persistedBodyHanEvidenceByRowId,
 			);
 		return {
-			hydratedEvidenceByLiveDocSlot: hydrateCandidateEvidenceBatch(
+			hydratedEvidenceByCandidateKey: hydrateCandidateEvidenceBatch(
 				residentBase,
 				preparedSearch.guardedCandidateDocs,
 				{
 					bodyEvidenceByBlockId,
-					docHanEvidenceByLiveDocSlot,
+					docHanEvidenceByCandidateKey,
 					bodyHanEvidenceByBlockId,
 				},
 			),
@@ -882,9 +933,9 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		queryText: string,
 		queryTerms: readonly string[],
 		allowFuzzyMatch: boolean,
-	): Promise<ResidentFuzzyRescueSidecar> {
+	): Promise<ResidentFuzzyRescueIndex> {
 		if (!allowFuzzyMatch || !shouldPotentiallyNeedFuzzyRescue(queryText)) {
-			return EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR;
+			return EMPTY_RESIDENT_FUZZY_RESCUE_INDEX;
 		}
 		const queryAnalysis = analyzeQuery(queryText, queryTerms);
 		const fuzzyLookupKeys = Array.from(
@@ -897,19 +948,19 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			),
 		);
 		if (fuzzyLookupKeys.length === 0) {
-			return EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR;
+			return EMPTY_RESIDENT_FUZZY_RESCUE_INDEX;
 		}
 		const snapshotStore = this.getFileSnapshotStore();
 		if (typeof snapshotStore.readLexicalFuzzyRescueForLookupKeys === "function") {
 			return (
 				(await snapshotStore.readLexicalFuzzyRescueForLookupKeys(
 					fuzzyLookupKeys,
-				)) ?? EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR
+				)) ?? EMPTY_RESIDENT_FUZZY_RESCUE_INDEX
 			);
 		}
 		return (
 			(await snapshotStore.readLexicalFuzzyRescue?.()) ??
-			EMPTY_RESIDENT_FUZZY_RESCUE_SIDECAR
+			EMPTY_RESIDENT_FUZZY_RESCUE_INDEX
 		);
 	}
 
@@ -1041,26 +1092,32 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 
 	private async refineHanSurfaceCompletion(
 		result: CoverageLexicalV3SearchResult,
-		hydratedEvidenceByLiveDocSlot: ReadonlyMap<number, CandidateEvidencePackage>,
+		hydratedEvidenceByCandidateKey: ReadonlyMap<string, CandidateEvidencePackage>,
 	): Promise<readonly EvidencePackingProfile[]> {
-		const residentBase = this.engine.getResidentBase();
+		const residentBase = this.getSingleResidentShardBase();
 		if (residentBase == null) {
 			return result.rankedCandidates;
 		}
-		const candidateRecallByLiveDocSlot = new Map<number, V3CandidateDocRecall>(
-			result.recallState.candidateDocs.map((candidate) => [
-				candidate.liveDocSlot,
-				candidate,
-			]),
+		const candidateKeyByLiveDocSlot = new Map<number, string>();
+		const candidateRecallByCandidateKey = new Map<string, V3CandidateDocRecall>(
+			result.recallState.candidateDocs.map((candidate) => {
+				const candidateKey = buildCandidateHydrationKey(candidate);
+				candidateKeyByLiveDocSlot.set(candidate.liveDocSlot, candidateKey);
+				return [candidateKey, candidate] as const;
+			}),
 		);
-		const refinedCandidates = new Map<number, EvidencePackingProfile>();
+		const refinedCandidates = new Map<string, EvidencePackingProfile>();
 		for (let candidateIndex = 0; candidateIndex < result.rankedCandidates.length; candidateIndex += 1) {
 			const candidate = result.rankedCandidates[candidateIndex];
-			const candidateRecall = candidateRecallByLiveDocSlot.get(candidate.liveDocSlot);
-			const candidateEvidence = hydratedEvidenceByLiveDocSlot.get(candidate.liveDocSlot);
+			const candidateKey = candidateKeyByLiveDocSlot.get(candidate.liveDocSlot);
+			if (candidateKey == null) {
+				continue;
+			}
+			const candidateRecall = candidateRecallByCandidateKey.get(candidateKey);
 			if (candidateRecall == null || !hasBodyTierHanCompletion(candidate)) {
 				continue;
 			}
+			const candidateEvidence = hydratedEvidenceByCandidateKey.get(candidateKey);
 			if (candidateEvidence == null) {
 				continue;
 			}
@@ -1117,7 +1174,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				continue;
 			}
 			const nextSummary = summarizeHanSurfaceCompletionGroups(nextGroups);
-			refinedCandidates.set(candidate.liveDocSlot, {
+			refinedCandidates.set(candidateKey, {
 				...candidate,
 				completedHanSurfaceGroupCount: nextSummary.completedGroupCount,
 				hanSurfaceCompletionTierScoreTotal: nextSummary.tierScoreTotal,
@@ -1126,7 +1183,11 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			});
 		}
 		return result.rankedCandidates
-			.map((candidate) => refinedCandidates.get(candidate.liveDocSlot) ?? candidate)
+			.map(
+				(candidate) =>
+					refinedCandidates.get(candidateKeyByLiveDocSlot.get(candidate.liveDocSlot) ?? "") ??
+					candidate,
+			)
 			.sort(comparePackingProfiles);
 	}
 }
@@ -1604,18 +1665,26 @@ function needsHanBodyEvidenceForCandidate(
 	);
 }
 
-function collectShortlistedBodyBlockIds(
+function collectCandidateHydrationBlockIds(
+	residentBase: ResidentBase,
 	candidateRecalls: readonly V3CandidateDocRecall[],
 ): number[] {
 	const seen = new Set<number>();
 	const blockIds: number[] = [];
 	for (const candidateRecall of candidateRecalls) {
 		for (const blockId of candidateRecall.shortlistedBodyBlockIds) {
-			if (seen.has(blockId)) {
-				continue;
+			for (const scopedBlockId of [blockId - 1, blockId, blockId + 1]) {
+				if (
+					scopedBlockId < 0 ||
+					getLiveDocSlotForBlockId(residentBase, scopedBlockId) !==
+						candidateRecall.liveDocSlot ||
+					seen.has(scopedBlockId)
+				) {
+					continue;
+				}
+				seen.add(scopedBlockId);
+				blockIds.push(scopedBlockId);
 			}
-			seen.add(blockId);
-			blockIds.push(blockId);
 		}
 	}
 	return blockIds;
@@ -1623,18 +1692,22 @@ function collectShortlistedBodyBlockIds(
 
 function collectShortlistedBodyEvidenceLocators(
 	residentBase: ResidentBase,
+	residentShard: ResidentShard,
 	blockIds: readonly number[],
 ): CollectedLexicalBlockEvidenceRequest[] {
 	const requests: CollectedLexicalBlockEvidenceRequest[] = [];
 	for (const blockId of blockIds) {
 		const cached = getCachedLexicalBlockEvidenceLocatorEntry(
 			residentBase,
+			residentShard,
 			blockId,
 		);
 		if (cached == null) {
 			continue;
 		}
 		requests.push({
+			shardId: cached.shardId,
+			shardGeneration: cached.shardGeneration,
 			blockId,
 			locator: cached.locator,
 			rowId: cached.rowId,
@@ -1645,18 +1718,28 @@ function collectShortlistedBodyEvidenceLocators(
 
 function collectCandidateDocEvidenceLocators(
 	residentBase: ResidentBase,
+	residentShard: ResidentShard,
 	candidateRecalls: readonly V3CandidateDocRecall[],
 ): CollectedLexicalDocEvidenceRequest[] {
 	const requests: CollectedLexicalDocEvidenceRequest[] = [];
 	for (const candidateRecall of candidateRecalls) {
+		if (
+			candidateRecall.shardId !== residentShard.shardId ||
+			candidateRecall.shardGeneration !== residentShard.generation
+		) {
+			continue;
+		}
 		const cached = getCachedLexicalDocEvidenceLocatorEntry(
 			residentBase,
+			residentShard,
 			candidateRecall.liveDocSlot,
 		);
 		if (cached == null) {
 			continue;
 		}
 		requests.push({
+			shardId: cached.shardId,
+			shardGeneration: cached.shardGeneration,
 			liveDocSlot: candidateRecall.liveDocSlot,
 			locator: cached.locator,
 			rowId: cached.rowId,
@@ -1682,25 +1765,29 @@ function materializePersistedBlockEvidenceByBlockId<T>(
 	return evidenceByBlockId;
 }
 
-function materializePersistedDocEvidenceByLiveDocSlot<T>(
+function materializePersistedDocEvidenceByCandidateKey<T>(
 	requests: readonly CollectedLexicalDocEvidenceRequest[],
 	persistedByRowId: ReadonlyMap<string, T> | null,
-): ReadonlyMap<number, T> | null {
+): ReadonlyMap<string, T> | null {
 	if (persistedByRowId == null) {
 		return null;
 	}
-	const evidenceByLiveDocSlot = new Map<number, T>();
+	const evidenceByCandidateKey = new Map<string, T>();
 	for (const request of requests) {
 		const evidence = persistedByRowId.get(request.rowId);
 		if (evidence != null) {
-			evidenceByLiveDocSlot.set(request.liveDocSlot, evidence);
+			evidenceByCandidateKey.set(
+				`${request.shardId}:${request.shardGeneration}:${request.liveDocSlot}`,
+				evidence,
+			);
 		}
 	}
-	return evidenceByLiveDocSlot;
+	return evidenceByCandidateKey;
 }
 
 function buildLexicalDocEvidenceLocatorForLiveDocSlot(
 	residentBase: ResidentBase,
+	residentShard: ResidentShard,
 	liveDocSlot: number,
 ): LexicalDocEvidenceLocator | null {
 	const docRef = getLiveDocRef(residentBase, liveDocSlot);
@@ -1708,6 +1795,8 @@ function buildLexicalDocEvidenceLocatorForLiveDocSlot(
 		return null;
 	}
 	return {
+		shardId: residentShard.shardId,
+		shardGeneration: residentShard.generation,
 		docRef,
 		generation: getLiveDocGeneration(residentBase, liveDocSlot),
 	};
@@ -1715,6 +1804,7 @@ function buildLexicalDocEvidenceLocatorForLiveDocSlot(
 
 function getCachedLexicalDocEvidenceLocatorEntry(
 	residentBase: ResidentBase,
+	residentShard: ResidentShard,
 	liveDocSlot: number,
 ): CachedLexicalDocEvidenceLocatorEntry | null {
 	let cache = DOC_EVIDENCE_LOCATOR_CACHE.get(residentBase);
@@ -1728,12 +1818,15 @@ function getCachedLexicalDocEvidenceLocatorEntry(
 	}
 	const locator = buildLexicalDocEvidenceLocatorForLiveDocSlot(
 		residentBase,
+		residentShard,
 		liveDocSlot,
 	);
 	const created =
 		locator == null
 			? null
 			: {
+					shardId: locator.shardId,
+					shardGeneration: locator.shardGeneration,
 					locator,
 					rowId: buildLexicalDocEvidenceRowId(locator),
 				};
@@ -1743,6 +1836,7 @@ function getCachedLexicalDocEvidenceLocatorEntry(
 
 function buildLexicalBlockEvidenceLocatorForBlockId(
 	residentBase: ResidentBase,
+	residentShard: ResidentShard,
 	blockId: number,
 ): LexicalBlockEvidenceLocator | null {
 	const liveDocSlot = getLiveDocSlotForBlockId(residentBase, blockId);
@@ -1751,6 +1845,7 @@ function buildLexicalBlockEvidenceLocatorForBlockId(
 	}
 	const docLocator = buildLexicalDocEvidenceLocatorForLiveDocSlot(
 		residentBase,
+		residentShard,
 		liveDocSlot,
 	);
 	if (docLocator == null) {
@@ -1764,6 +1859,7 @@ function buildLexicalBlockEvidenceLocatorForBlockId(
 
 function getCachedLexicalBlockEvidenceLocatorEntry(
 	residentBase: ResidentBase,
+	residentShard: ResidentShard,
 	blockId: number,
 ): CachedLexicalBlockEvidenceLocatorEntry | null {
 	let cache = BLOCK_EVIDENCE_LOCATOR_CACHE.get(residentBase);
@@ -1775,11 +1871,17 @@ function getCachedLexicalBlockEvidenceLocatorEntry(
 	if (existing !== undefined) {
 		return existing;
 	}
-	const locator = buildLexicalBlockEvidenceLocatorForBlockId(residentBase, blockId);
+	const locator = buildLexicalBlockEvidenceLocatorForBlockId(
+		residentBase,
+		residentShard,
+		blockId,
+	);
 	const created =
 		locator == null
 			? null
 			: {
+					shardId: locator.shardId,
+					shardGeneration: locator.shardGeneration,
 					locator,
 					rowId: buildLexicalBlockEvidenceRowId(locator),
 				};

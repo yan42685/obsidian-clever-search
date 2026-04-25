@@ -1,4 +1,4 @@
-import type { IndexedDocument } from "src/globals/search-types";
+﻿import type { IndexedDocument } from "src/globals/search-types";
 import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
 import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
 import {
@@ -48,7 +48,7 @@ function createHanSequence(length: number, startCodePoint = 0x4e00): string {
 describe("coverage lexical v3 han route", () => {
 	test("metadata han route can recall a candidate before han exact confirmation", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "zh/cache-guide.md",
 				basename: "\u5173\u4e8e\u7f13\u5b58\u6062\u590d\u8bf4\u660e",
@@ -97,7 +97,7 @@ describe("coverage lexical v3 han route", () => {
 				"\u8bb0\u5f55",
 			],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/body-hit.md",
@@ -143,7 +143,7 @@ describe("coverage lexical v3 han route", () => {
 				"\u8bf4\u660e",
 			],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/a.md",
@@ -181,7 +181,7 @@ describe("coverage lexical v3 han route", () => {
 			"\u661f\u7a79\u63a5\u53e3": [],
 			"\u661f\u7a79\u63a5\u70b9": [],
 		});
-		engine.buildResidentBase(
+		engine.buildResidentIndexView(
 			[
 				createDocument({
 					path: "zh/opaque-exact.md",
@@ -293,7 +293,7 @@ describe("coverage lexical v3 han route", () => {
 
 	test("heading-only Han route no longer admits docs through metadata gate", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "zh/heading-only.md",
 				basename: "\u666e\u901a\u7b14\u8bb0",
@@ -311,7 +311,7 @@ describe("coverage lexical v3 han route", () => {
 
 	test("heading Han can still be admitted through body route when the content contains the heading text", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "zh/heading-in-body.md",
 				basename: "\u666e\u901a\u7b14\u8bb0",
@@ -330,7 +330,7 @@ describe("coverage lexical v3 han route", () => {
 
 	test("logical block route does not shortlist blocks when the exact Han surface is split across separate segments", () => {
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "zh/split-segments.md",
 				basename: "\u666e\u901a\u7b14\u8bb0",
@@ -405,12 +405,12 @@ describe("coverage lexical v3 han route", () => {
 			metadataCharIds: [],
 			metadataDocIdsByChar: [],
 			bodyPostingsByCharId: new Map(),
-			identityWitnessStringIdsByDoc: [],
+		identityWitnessTextIdsByDoc: [],
 			identityWitnessSourceMasksByDoc: [],
-			routeWitnessStringIdsByDoc: [],
+		routeWitnessTextIdsByDoc: [],
 			routeWitnessSourceMasksByDoc: [],
-			headingWitnessStringIdsByDoc: [],
-			bodyWitnessOccurrenceStringIdsByBlock: [],
+		headingWitnessTextIdsByDoc: [],
+		bodyWitnessOccurrenceTextIdsByBlock: [],
 			bodyWitnessOccurrenceStartOffsetsByBlock: [],
 		});
 
@@ -428,7 +428,7 @@ describe("coverage lexical v3 han route", () => {
 		const longHan = createHanSequence(1100);
 		const querySurface = Array.from(longHan).slice(1021, 1027).join("");
 		const engine = new CoverageLexicalV3Engine();
-		engine.buildResidentBase([
+		engine.buildResidentIndexView([
 			createDocument({
 				path: "zh/oversized-segment.md",
 				basename: "\u666e\u901a\u7b14\u8bb0",
@@ -447,6 +447,3 @@ describe("coverage lexical v3 han route", () => {
 		).toBeGreaterThan(0);
 	});
 });
-
-
-

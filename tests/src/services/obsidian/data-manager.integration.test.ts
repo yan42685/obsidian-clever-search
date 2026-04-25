@@ -176,6 +176,15 @@ function createMockFileSnapshotStore() {
   const current = new Map<string, { text: string; generation?: number }>();
   const persisted = new Map<string, { text: string; generation?: number }>();
   const shadow = new Map<string, { text: string; generation?: number }>();
+  const indexedMetadata = new Map<
+    string,
+    {
+      generation?: number;
+      aliasesText?: string;
+      tagsText?: string;
+      headingsText?: string;
+    }
+  >();
   const hybridIndexedRefs: Array<Record<string, any> & { path: string }> = [];
 
   const isGenerationMatch = (
@@ -277,13 +286,35 @@ function createMockFileSnapshotStore() {
         }
       },
     ),
+    publishIndexedMetadata: jest.fn(
+      async (
+        files: ReadonlyArray<{
+          path: string;
+          generation?: number;
+          aliasesText?: string;
+          tagsText?: string;
+          headingsText?: string;
+        }>,
+      ) => {
+        for (const file of files) {
+          indexedMetadata.set(file.path, {
+            generation: file.generation,
+            aliasesText: file.aliasesText,
+            tagsText: file.tagsText,
+            headingsText: file.headingsText,
+          });
+        }
+      },
+    ),
     deleteIndexedSnapshot: jest.fn(async (path: string) => {
       persisted.delete(path);
+      indexedMetadata.delete(path);
       shadow.delete(path);
     }),
     deleteIndexedSnapshots: jest.fn(async (paths: readonly string[]) => {
       for (const path of paths) {
         persisted.delete(path);
+        indexedMetadata.delete(path);
         shadow.delete(path);
       }
     }),
@@ -291,6 +322,7 @@ function createMockFileSnapshotStore() {
       for (const path of paths) {
         current.delete(path);
         persisted.delete(path);
+        indexedMetadata.delete(path);
         shadow.delete(path);
       }
     }),
@@ -323,6 +355,11 @@ function createMockFileSnapshotStore() {
             persisted.delete(path);
           }
         }
+        for (const path of Array.from(indexedMetadata.keys())) {
+          if (!validPaths.has(path)) {
+            indexedMetadata.delete(path);
+          }
+        }
         for (const path of Array.from(shadow.keys())) {
           if (!validPaths.has(path)) {
             shadow.delete(path);
@@ -345,6 +382,39 @@ function createMockFileSnapshotStore() {
             requests.map((request) => [request.path, request.generation]),
           ),
         ),
+    ),
+    readIndexedMetadata: jest.fn(
+      async (
+        requests: ReadonlyArray<{ path: string; generation?: number }>,
+      ) => {
+        const result = new Map<
+          string,
+          {
+            aliasesText?: string;
+            tagsText?: string;
+            headingsText?: string;
+          }
+        >();
+        for (const request of requests) {
+          const snapshot = indexedMetadata.get(request.path);
+          if (!snapshot) {
+            continue;
+          }
+          if (
+            request.generation !== undefined &&
+            snapshot.generation !== undefined &&
+            snapshot.generation !== request.generation
+          ) {
+            continue;
+          }
+          result.set(request.path, {
+            aliasesText: snapshot.aliasesText,
+            tagsText: snapshot.tagsText,
+            headingsText: snapshot.headingsText,
+          });
+        }
+        return result;
+      },
     ),
     getHybridIndexedFileRef: jest.fn(async (path: string) =>
       store.hybridIndexedRefs.find((ref) => ref.path === path)
@@ -426,6 +496,7 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
   const indexArtifactStates: Array<Record<string, any>> = [];
   const state = {
     lexicalSearchSnapshot: null as unknown,
+    lexicalQueryEvidenceReadyVersion: null as number | null,
   };
 
   const compareKeys = (left: string | number, right: string | number) => {
@@ -478,7 +549,22 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
   };
 
   return {
+    openAndConsumeSchemaUpgradeReport: jest.fn(async () => ({
+      schemaUpgradeDetected: false,
+      recovery: null,
+    })),
     openAndConsumeSchemaUpgradeFlag: jest.fn(async () => false),
+    hasLexicalQueryEvidenceReadyMarker: jest.fn(
+      async () =>
+        state.lexicalQueryEvidenceReadyVersion !== null ||
+        state.lexicalSearchSnapshot !== null,
+    ),
+    setLexicalQueryEvidenceReadyMarker: jest.fn(async (version: number) => {
+      state.lexicalQueryEvidenceReadyVersion = version;
+    }),
+    clearLexicalQueryEvidenceReadyMarker: jest.fn(async () => {
+      state.lexicalQueryEvidenceReadyVersion = null;
+    }),
     getLexicalSearchSnapshot: jest.fn(async () => state.lexicalSearchSnapshot),
     deleteLexicalSearchSnapshot: jest.fn(async () => {
       state.lexicalSearchSnapshot = null;
@@ -487,6 +573,7 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
       state.lexicalSearchSnapshot = snapshot;
     }),
     getLexicalIndexedFileRefs: jest.fn(async () => [...lexicalIndexedFileRefs]),
+    listDocRegistryEntries: jest.fn(async () => []),
     setLexicalIndexedFileRefs: jest.fn(async (refs: BaseIndexedFileRef[]) => {
       lexicalIndexedFileRefs.splice(
         0,
@@ -862,6 +949,17 @@ function createMockDataProvider(params: {
       return path.endsWith(".md");
     }),
     getFileByPath: jest.fn((path: string) => files.get(path) ?? null),
+    getIndexedDocumentMetadata: jest.fn((fileOrPath: TFile | string) => {
+      const path =
+        typeof fileOrPath === "string" ? fileOrPath : fileOrPath.path;
+      const text = texts.get(path) ?? "";
+      return {
+        aliasesText: "",
+        tagsText: "",
+        headingsText: "",
+        contentFingerprint: text,
+      };
+    }),
     readPlainText: jest.fn(async (fileOrPath: TFile | string) => {
       const path =
         typeof fileOrPath === "string" ? fileOrPath : fileOrPath.path;
@@ -1145,6 +1243,7 @@ describe("DataManager integration", () => {
     };
     const database = createMockDatabase({
       getLexicalSearchSnapshot: jest.fn(async () => lexicalSnapshot),
+      hasLexicalQueryEvidenceReadyMarker: jest.fn(async () => true),
       estimatePluginStorageUsage: jest.fn(async () => ({
         totalBytes: 126370,
         tables: [
@@ -1282,7 +1381,7 @@ describe("DataManager integration", () => {
     expect(latestNotice).toContain("Coverage combined owned");
     expect(latestNotice).toContain("Coverage resident major groups");
     expect(latestNotice).toContain("Coverage cold owned groups");
-    expect(latestNotice).toContain("bodyHanSegmentExact(sidecar)");
+    expect(latestNotice).toContain("bodyHanSegmentExact(cold)");
     expect(latestNotice).toContain("Coverage top resident segments (top 10)");
     expect(latestNotice).toContain("Coverage top cold/overlap segments (top 10)");
     expect(latestNotice).toContain("lexicon(total)");
@@ -1303,10 +1402,6 @@ describe("DataManager integration", () => {
           segment: "postings.total",
         }),
         expect.objectContaining({
-          segment: "postings.exactIncidence",
-          bytes: 32768,
-        }),
-        expect.objectContaining({
           segment: "documents.view",
           bytes: 18432,
         }),
@@ -1315,11 +1410,11 @@ describe("DataManager integration", () => {
           bytes: 17794,
         }),
         expect.objectContaining({
-          segment: "doc.bodyTokens(sidecar)",
+          segment: "doc.bodyTokens(cold)",
           bytes: 11264,
         }),
         expect.objectContaining({
-          segment: "doc.bodyHanSegmentExact(sidecar)",
+          segment: "doc.bodyHanSegmentExact(cold)",
           bytes: 7168,
         }),
         expect.objectContaining({
@@ -1453,14 +1548,14 @@ describe("DataManager integration", () => {
 
     const latestNotice = MyNotice.messages[MyNotice.messages.length - 1];
     expect(latestNotice).toContain("Lexical memory report");
-    expect(latestNotice).toContain("Persisted lexical snapshot: 2.56 KB");
+    expect(latestNotice).toContain("Persisted lexical snapshot: 3.48 KB");
     expect(latestNotice).toContain("Coverage resident hot");
     expect(latestNotice).toContain("Coverage cold owned");
     expect(latestNotice).toContain("Coverage resident major groups");
     expect(latestNotice).toContain("Coverage cold owned groups");
     expect(latestNotice).toContain("documents(view)");
-    expect(latestNotice).toContain("bodyTokens(sidecar)");
-    expect(latestNotice).toContain("bodyHanSegmentExact(sidecar)");
+    expect(latestNotice).toContain("bodyTokens(cold)");
+    expect(latestNotice).toContain("bodyHanSegmentExact(cold)");
     expect(latestNotice).toContain("lexicon(total)");
     expect(latestNotice).toContain("postings.exactIncidence");
     expect(latestNotice).not.toContain("JS heap used now:");
@@ -1477,19 +1572,15 @@ describe("DataManager integration", () => {
           segment: "postings.total",
         }),
         expect.objectContaining({
-          segment: "postings.exactIncidence",
-          bytes: 1536,
-        }),
-        expect.objectContaining({
           segment: "doc.bodyTokens(hot)",
           bytes: 992,
         }),
         expect.objectContaining({
-          segment: "doc.bodyTokens(sidecar)",
+          segment: "doc.bodyTokens(cold)",
           bytes: 992,
         }),
         expect.objectContaining({
-          segment: "doc.bodyHanSegmentExact(sidecar)",
+          segment: "doc.bodyHanSegmentExact(cold)",
           bytes: 352,
         }),
         expect.objectContaining({
@@ -3352,9 +3443,9 @@ describe("DataManager integration", () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = false;
 
-    const file = createFile("docs/han.md", "Î¯Ô±²âÊÔ", 420);
+    const file = createFile("docs/han.md", "Î¯Ô±ï¿½ï¿½ï¿½ï¿½", 420);
     const files = new Map<string, TFile>([[file.path, file]]);
-    const texts = new Map<string, string>([[file.path, "Î¯Ô±²âÊÔ"]]);
+    const texts = new Map<string, string>([[file.path, "Î¯Ô±ï¿½ï¿½ï¿½ï¿½"]]);
 
     const database = createMockDatabase();
     await database.setLexicalIndexedFileRefs([
@@ -3379,7 +3470,7 @@ describe("DataManager integration", () => {
     });
     const fileSnapshotStore = createMockFileSnapshotStore();
     fileSnapshotStore.persisted.set(file.path, {
-      text: "Î¯Ô±²âÊÔ",
+      text: "Î¯Ô±ï¿½ï¿½ï¿½ï¿½",
       generation: file.stat.mtime,
     });
     const hybridEngine = createMockHybridEngine({

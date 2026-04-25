@@ -57,17 +57,27 @@ function mockEstimateBenchmarkValueBytes(
 }
 
 function mockBuildBenchmarkLexicalDocEvidenceRowId(locator: {
+	shardId?: string;
+	shardGeneration?: number;
 	docRef: number;
 	generation: number;
 }): string {
+	if (locator.shardId != null && locator.shardGeneration != null) {
+		return `${locator.shardId}:${locator.shardGeneration}:${locator.docRef}:${locator.generation}`;
+	}
 	return `${locator.docRef}:${locator.generation}`;
 }
 
 function mockBuildBenchmarkLexicalBlockEvidenceRowId(locator: {
+	shardId?: string;
+	shardGeneration?: number;
 	docRef: number;
 	generation: number;
 	blockOrdinal: number;
 }): string {
+	if (locator.shardId != null && locator.shardGeneration != null) {
+		return `${locator.shardId}:${locator.shardGeneration}:${locator.docRef}:${locator.generation}:${locator.blockOrdinal}`;
+	}
 	return `${locator.docRef}:${locator.generation}:${locator.blockOrdinal}`;
 }
 
@@ -163,9 +173,12 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 				docRef: number;
 				generation: number;
 				blockOrdinal: number;
-				exactFamilyIds: number[];
+				exactShardLocalFamilySlots: number[];
 				exactTokenPositions: number[];
-				familySupportEntries: Array<{ familyId: number; supportMask: number }>;
+				supportEntriesByShardLocalFamilySlot: Array<{
+					shardLocalFamilySlot: number;
+					supportMask: number;
+				}>;
 			}
 		>();
 		private static lexicalHanDocEvidence = new Map<
@@ -174,11 +187,14 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 				id: string;
 				docRef: number;
 				generation: number;
-				identityWitnessStringIds: number[];
+		identityWitnessMatchKeys: number[];
+				identityWitnessTexts: string[];
 				identityWitnessSourceMasks: number[];
-				routeWitnessStringIds: number[];
+		routeWitnessMatchKeys: number[];
+				routeWitnessTexts: string[];
 				routeWitnessSourceMasks: number[];
-				headingWitnessStringIds: number[];
+		headingWitnessMatchKeys: number[];
+				headingWitnessTexts: string[];
 			}
 		>();
 		private static lexicalHanBodyEvidence = new Map<
@@ -188,7 +204,8 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 				docRef: number;
 				generation: number;
 				blockOrdinal: number;
-				bodyWitnessStringIds: number[];
+				bodyWitnessMatchKeys: number[];
+				bodyWitnessTexts: string[];
 				bodyWitnessStartOffsets: number[];
 			}
 		>();
@@ -346,8 +363,8 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 			return Promise.resolve(result);
 		}
 
-		publishLexicalFuzzyRescue(sidecar: unknown): Promise<void> {
-			MockFileSnapshotStore.lexicalFuzzyRescue = sidecar;
+		publishLexicalFuzzyRescue(payload: unknown): Promise<void> {
+			MockFileSnapshotStore.lexicalFuzzyRescue = payload;
 			MockFileSnapshotStore.recomputeBenchmarkPersistedLexicalBytes();
 			return Promise.resolve();
 		}
@@ -355,7 +372,7 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 		readLexicalFuzzyRescueForLookupKeys(
 			fuzzyLookupKeys: ReadonlyArray<string>,
 		): Promise<unknown> {
-			const sidecar = MockFileSnapshotStore.lexicalFuzzyRescue as
+			const payload = MockFileSnapshotStore.lexicalFuzzyRescue as
 				| {
 						candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey?: ReadonlyMap<
 							string,
@@ -364,14 +381,14 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 						fuzzyLookupKeyCount?: number;
 				  }
 				| null;
-			if (sidecar == null) {
+			if (payload == null) {
 				return Promise.resolve(null);
 			}
 			const candidates =
-				sidecar.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey ??
+				payload.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey ??
 				new Map<string, unknown>();
 			return Promise.resolve({
-				...sidecar,
+				...payload,
 				candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: new Map(
 					fuzzyLookupKeys.flatMap((fuzzyLookupKey) => {
 						const familyIds = candidates.get(fuzzyLookupKey);
@@ -390,25 +407,29 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 				docRef: number;
 				generation: number;
 				blockOrdinal: number;
-				exactFamilyIds: readonly number[];
+				exactShardLocalFamilySlots: readonly number[];
 				exactTokenPositions: readonly number[];
-				familySupportFamilyIds: readonly number[];
+				supportShardLocalFamilySlots: readonly number[];
 				familySupportMaskByEntry: readonly number[];
 			}>,
 		): Promise<void> {
-			MockFileSnapshotStore.lexicalBodyEvidence.clear();
 			for (const row of rows) {
 				MockFileSnapshotStore.lexicalBodyEvidence.set(row.id, {
 					id: row.id,
 					docRef: row.docRef,
 					generation: row.generation,
 					blockOrdinal: row.blockOrdinal,
-					exactFamilyIds: [...row.exactFamilyIds],
+					exactShardLocalFamilySlots: [
+						...row.exactShardLocalFamilySlots,
+					],
 					exactTokenPositions: [...row.exactTokenPositions],
-					familySupportEntries: row.familySupportFamilyIds.map((familyId, index) => ({
-						familyId,
-						supportMask: row.familySupportMaskByEntry[index] ?? 0,
-					})),
+					supportEntriesByShardLocalFamilySlot:
+						row.supportShardLocalFamilySlots.map(
+							(shardLocalFamilySlot, index) => ({
+								shardLocalFamilySlot,
+								supportMask: row.familySupportMaskByEntry[index] ?? 0,
+							}),
+						),
 				});
 			}
 			MockFileSnapshotStore.recomputeBenchmarkPersistedLexicalBytes();
@@ -425,20 +446,20 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 			ReadonlyMap<
 				string,
 				{
-					exactFamilyIds: readonly number[];
+					exactShardLocalFamilySlots: readonly number[];
 					exactTokenPositions: readonly number[];
-					familySupportEntries: ReadonlyArray<{
-						familyId: number;
+					supportEntriesByShardLocalFamilySlot: ReadonlyArray<{
+						shardLocalFamilySlot: number;
 						supportMask: number;
 					}>;
 				}
 			>
 		> {
 			const out = new Map<string, {
-				exactFamilyIds: readonly number[];
+				exactShardLocalFamilySlots: readonly number[];
 				exactTokenPositions: readonly number[];
-				familySupportEntries: ReadonlyArray<{
-					familyId: number;
+				supportEntriesByShardLocalFamilySlot: ReadonlyArray<{
+					shardLocalFamilySlot: number;
 					supportMask: number;
 				}>;
 			}>();
@@ -447,9 +468,11 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 				const snapshot = MockFileSnapshotStore.lexicalBodyEvidence.get(rowId);
 				if (snapshot != null) {
 					out.set(rowId, {
-						exactFamilyIds: snapshot.exactFamilyIds,
+						exactShardLocalFamilySlots:
+							snapshot.exactShardLocalFamilySlots,
 						exactTokenPositions: snapshot.exactTokenPositions,
-						familySupportEntries: snapshot.familySupportEntries,
+						supportEntriesByShardLocalFamilySlot:
+							snapshot.supportEntriesByShardLocalFamilySlot,
 					});
 				}
 			}
@@ -461,24 +484,29 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 				id: string;
 				docRef: number;
 				generation: number;
-				identityWitnessStringIds: readonly number[];
+				identityWitnessMatchKeys: readonly number[];
+				identityWitnessTexts: readonly string[];
 				identityWitnessSourceMaskByDocEntry: readonly number[];
-				routeWitnessStringIds: readonly number[];
+				routeWitnessMatchKeys: readonly number[];
+				routeWitnessTexts: readonly string[];
 				routeWitnessSourceMaskByDocEntry: readonly number[];
-				headingWitnessStringIds: readonly number[];
+				headingWitnessMatchKeys: readonly number[];
+				headingWitnessTexts: readonly string[];
 			}>,
 		): Promise<void> {
-			MockFileSnapshotStore.lexicalHanDocEvidence.clear();
 			for (const row of rows) {
 				MockFileSnapshotStore.lexicalHanDocEvidence.set(row.id, {
 					id: row.id,
 					docRef: row.docRef,
 					generation: row.generation,
-					identityWitnessStringIds: [...row.identityWitnessStringIds],
+					identityWitnessMatchKeys: [...row.identityWitnessMatchKeys],
+					identityWitnessTexts: [...row.identityWitnessTexts],
 					identityWitnessSourceMasks: [...row.identityWitnessSourceMaskByDocEntry],
-					routeWitnessStringIds: [...row.routeWitnessStringIds],
+					routeWitnessMatchKeys: [...row.routeWitnessMatchKeys],
+					routeWitnessTexts: [...row.routeWitnessTexts],
 					routeWitnessSourceMasks: [...row.routeWitnessSourceMaskByDocEntry],
-					headingWitnessStringIds: [...row.headingWitnessStringIds],
+					headingWitnessMatchKeys: [...row.headingWitnessMatchKeys],
+					headingWitnessTexts: [...row.headingWitnessTexts],
 				});
 			}
 			MockFileSnapshotStore.recomputeBenchmarkPersistedLexicalBytes();
@@ -494,31 +522,40 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 			ReadonlyMap<
 				string,
 				{
-					identityWitnessStringIds: readonly number[];
+					identityWitnessMatchKeys: readonly number[];
+					identityWitnessTexts: readonly string[];
 					identityWitnessSourceMasks: readonly number[];
-					routeWitnessStringIds: readonly number[];
+					routeWitnessMatchKeys: readonly number[];
+					routeWitnessTexts: readonly string[];
 					routeWitnessSourceMasks: readonly number[];
-					headingWitnessStringIds: readonly number[];
+					headingWitnessMatchKeys: readonly number[];
+					headingWitnessTexts: readonly string[];
 				}
 			>
 		> {
 			const out = new Map<string, {
-				identityWitnessStringIds: readonly number[];
+				identityWitnessMatchKeys: readonly number[];
+				identityWitnessTexts: readonly string[];
 				identityWitnessSourceMasks: readonly number[];
-				routeWitnessStringIds: readonly number[];
+				routeWitnessMatchKeys: readonly number[];
+				routeWitnessTexts: readonly string[];
 				routeWitnessSourceMasks: readonly number[];
-				headingWitnessStringIds: readonly number[];
+				headingWitnessMatchKeys: readonly number[];
+				headingWitnessTexts: readonly string[];
 			}>();
 			for (const locator of locators) {
 				const rowId = mockBuildBenchmarkLexicalDocEvidenceRowId(locator);
 				const snapshot = MockFileSnapshotStore.lexicalHanDocEvidence.get(rowId);
 				if (snapshot != null) {
 					out.set(rowId, {
-						identityWitnessStringIds: snapshot.identityWitnessStringIds,
+					identityWitnessMatchKeys: snapshot.identityWitnessMatchKeys,
+						identityWitnessTexts: snapshot.identityWitnessTexts,
 						identityWitnessSourceMasks: snapshot.identityWitnessSourceMasks,
-						routeWitnessStringIds: snapshot.routeWitnessStringIds,
+					routeWitnessMatchKeys: snapshot.routeWitnessMatchKeys,
+						routeWitnessTexts: snapshot.routeWitnessTexts,
 						routeWitnessSourceMasks: snapshot.routeWitnessSourceMasks,
-						headingWitnessStringIds: snapshot.headingWitnessStringIds,
+					headingWitnessMatchKeys: snapshot.headingWitnessMatchKeys,
+					headingWitnessTexts: snapshot.headingWitnessTexts,
 					});
 				}
 			}
@@ -531,18 +568,19 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 				docRef: number;
 				generation: number;
 				blockOrdinal: number;
-				bodyWitnessStringIds: readonly number[];
+				bodyWitnessMatchKeys: readonly number[];
+				bodyWitnessTexts: readonly string[];
 				bodyWitnessStartOffsets: readonly number[];
 			}>,
 		): Promise<void> {
-			MockFileSnapshotStore.lexicalHanBodyEvidence.clear();
 			for (const row of rows) {
 				MockFileSnapshotStore.lexicalHanBodyEvidence.set(row.id, {
 					id: row.id,
 					docRef: row.docRef,
 					generation: row.generation,
 					blockOrdinal: row.blockOrdinal,
-					bodyWitnessStringIds: [...row.bodyWitnessStringIds],
+					bodyWitnessMatchKeys: [...row.bodyWitnessMatchKeys],
+					bodyWitnessTexts: [...row.bodyWitnessTexts],
 					bodyWitnessStartOffsets: [...row.bodyWitnessStartOffsets],
 				});
 			}
@@ -560,13 +598,15 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 			ReadonlyMap<
 				string,
 				{
-					bodyWitnessStringIds: readonly number[];
+					bodyWitnessMatchKeys: readonly number[];
+					bodyWitnessTexts: readonly string[];
 					bodyWitnessStartOffsets: readonly number[];
 				}
 			>
 		> {
 			const out = new Map<string, {
-				bodyWitnessStringIds: readonly number[];
+				bodyWitnessMatchKeys: readonly number[];
+				bodyWitnessTexts: readonly string[];
 				bodyWitnessStartOffsets: readonly number[];
 			}>();
 			for (const locator of locators) {
@@ -574,7 +614,8 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 				const snapshot = MockFileSnapshotStore.lexicalHanBodyEvidence.get(rowId);
 				if (snapshot != null) {
 					out.set(rowId, {
-						bodyWitnessStringIds: snapshot.bodyWitnessStringIds,
+						bodyWitnessMatchKeys: snapshot.bodyWitnessMatchKeys,
+						bodyWitnessTexts: snapshot.bodyWitnessTexts,
 						bodyWitnessStartOffsets: snapshot.bodyWitnessStartOffsets,
 					});
 				}
@@ -798,7 +839,6 @@ function attachCoverageLexicalV3BenchmarkPersistence(engine: {
 	};
 	const originalAddDocuments = engine.addDocuments.bind(engine);
 	engine.addDocuments = async (documents: Array<Record<string, unknown>>) => {
-		await originalAddDocuments(documents);
 		const snapshotStore = container.resolve(FileSnapshotStore) as {
 			publishIndexedTexts?: (
 				files: ReadonlyArray<{
@@ -847,6 +887,7 @@ function attachCoverageLexicalV3BenchmarkPersistence(engine: {
 						: undefined,
 			})),
 		);
+		await originalAddDocuments(documents);
 		engine.notifyIndexedTextsCommitted?.(
 			documents.map((document) => ({
 				path: String(document.path),
@@ -1103,5 +1144,3 @@ describe("coverage lexical v3 automation benchmark", () => {
 		expect(benchmarkElapsedMs).toBeLessThan(20000);
 	});
 });
-
-

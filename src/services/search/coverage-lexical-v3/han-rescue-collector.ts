@@ -7,13 +7,6 @@ import {
 } from "./metadata-source";
 import type { V3QueryAnalysis } from "./query";
 import {
-	getBodyBlockHanWitnessOccurrences,
-	getBodyBlockHanWitnessTexts,
-	getLiveDocHeadingHanWitnessTexts,
-	getLiveDocIdentityHanWitnessSourceMasks,
-	getLiveDocIdentityHanWitnessTexts,
-	getLiveDocRouteHanWitnessSourceMasks,
-	getLiveDocRouteHanWitnessTexts,
 	getLiveDocSlotForBlockId,
 	getShardLocalFamilySlot,
 	type V3CandidateDocRecall,
@@ -35,7 +28,7 @@ import {
 	type HanRescueWitnessKind,
 } from "./han-rescue";
 
-type CachedDocEvidence = Readonly<{
+export type HanRescueDocEvidence = Readonly<{
 	identityWitnessTexts: readonly string[];
 	identityWitnessSourceMasks: readonly number[];
 	routeWitnessTexts: readonly string[];
@@ -43,17 +36,15 @@ type CachedDocEvidence = Readonly<{
 	headingWitnessTexts: readonly string[];
 }>;
 
-type PositionedWitnessOccurrence = Readonly<{
+type HanRescuePositionedWitnessOccurrence = Readonly<{
 	ordinalPosition: number;
 	localPosition: number;
 	localEndPosition: number;
 }>;
 
-type CachedBodyBlockEvidence = Readonly<{
-	witnessOccurrences: readonly PositionedWitnessOccurrence[];
+export type HanRescueBodyBlockEvidence = Readonly<{
+	witnessOccurrences: readonly HanRescuePositionedWitnessOccurrence[];
 	witnessTexts: readonly string[];
-	approxSpan: number;
-	ordinalSpan: number;
 }>;
 
 export type HanSyntheticBodyOccurrence = Readonly<{
@@ -147,12 +138,6 @@ type BodyWindowChooser<TBodyWindow extends HanBodyWindowLike> = (
 	}>,
 ) => TBodyWindow | null;
 
-const DOC_EVIDENCE_CACHE = new WeakMap<ResidentBase, Map<number, CachedDocEvidence>>();
-const BODY_BLOCK_EVIDENCE_CACHE = new WeakMap<
-	ResidentBase,
-	Map<number, CachedBodyBlockEvidence>
->();
-
 export function buildResolvedHanSurfaceGroupByIndex(
 	resolvedHanSurfaceGroups: readonly V3ResolvedHanSurfaceGroup[],
 ): ReadonlyMap<number, V3ResolvedHanSurfaceGroup> {
@@ -244,6 +229,8 @@ export function collectHanRescueArtifacts<TBodyWindow extends HanBodyWindowLike>
 	base: ResidentBase;
 	queryAnalysis: V3QueryAnalysis;
 	candidateRecall: V3CandidateDocRecall;
+	docEvidence: HanRescueDocEvidence;
+	bodyBlockEvidenceByBlockId: ReadonlyMap<number, HanRescueBodyBlockEvidence>;
 	resolvedHanSurfaceGroups: readonly V3ResolvedHanSurfaceGroup[];
 	bodyApproxSpanByBlockId: ReadonlyMap<number, number>;
 	bodyOrdinalSpanByBlockId: ReadonlyMap<number, number>;
@@ -260,8 +247,7 @@ export function collectHanRescueArtifacts<TBodyWindow extends HanBodyWindowLike>
 		excludedSurfaceGroupIndices: params.excludedSurfaceGroupIndices,
 	});
 	const metadataWitnessBySurfaceGroupIndex = collectMetadataWitnessAssessments({
-		base: params.base,
-		liveDocSlot: params.candidateRecall.liveDocSlot,
+		docEvidence: params.docEvidence,
 		queryAnalysis: params.queryAnalysis,
 		relevantGroups,
 	});
@@ -269,6 +255,7 @@ export function collectHanRescueArtifacts<TBodyWindow extends HanBodyWindowLike>
 		base: params.base,
 		queryAnalysis: params.queryAnalysis,
 		candidateRecall: params.candidateRecall,
+		bodyBlockEvidenceByBlockId: params.bodyBlockEvidenceByBlockId,
 		relevantGroups,
 		bodyApproxSpanByBlockId: params.bodyApproxSpanByBlockId,
 		bodyOrdinalSpanByBlockId: params.bodyOrdinalSpanByBlockId,
@@ -320,8 +307,7 @@ function collectRelevantHanGroups(params: Readonly<{
 }
 
 function collectMetadataWitnessAssessments(params: Readonly<{
-	base: ResidentBase;
-	liveDocSlot: number;
+	docEvidence: HanRescueDocEvidence;
 	queryAnalysis: V3QueryAnalysis;
 	relevantGroups: readonly RelevantHanGroup[];
 }>): ReadonlyMap<number, HanMetadataWitnessAssessmentCandidate> {
@@ -329,13 +315,12 @@ function collectMetadataWitnessAssessments(params: Readonly<{
 	if (params.relevantGroups.length === 0) {
 		return bestByGroup;
 	}
-	const docEvidence = getCachedDocEvidence(params.base, params.liveDocSlot);
 	const uniqueBigrams = [...new Set(params.relevantGroups.flatMap((group) => group.unresolvedBigrams))];
 	const uniqueRealAnchors = [
 		...new Set(params.relevantGroups.flatMap((group) => group.matchedRealAnchorTexts)),
 	];
-	for (let index = 0; index < docEvidence.identityWitnessTexts.length; index += 1) {
-		const text = docEvidence.identityWitnessTexts[index] ?? "";
+	for (let index = 0; index < params.docEvidence.identityWitnessTexts.length; index += 1) {
+		const text = params.docEvidence.identityWitnessTexts[index] ?? "";
 		applyMetadataWitnessEvidence({
 			queryAnalysis: params.queryAnalysis,
 			relevantGroups: params.relevantGroups,
@@ -345,13 +330,13 @@ function collectMetadataWitnessAssessments(params: Readonly<{
 			presentBigramSet: collectTextPresenceSet(text, uniqueBigrams),
 			presentRealAnchorSet: collectTextPresenceSet(text, uniqueRealAnchors),
 			identityMetadataSource: decodeIdentityMetadataSource(
-				docEvidence.identityWitnessSourceMasks[index] ?? 0,
+				params.docEvidence.identityWitnessSourceMasks[index] ?? 0,
 			),
 			routeMetadataSource: "none",
 		});
 	}
-	for (let index = 0; index < docEvidence.routeWitnessTexts.length; index += 1) {
-		const text = docEvidence.routeWitnessTexts[index] ?? "";
+	for (let index = 0; index < params.docEvidence.routeWitnessTexts.length; index += 1) {
+		const text = params.docEvidence.routeWitnessTexts[index] ?? "";
 		applyMetadataWitnessEvidence({
 			queryAnalysis: params.queryAnalysis,
 			relevantGroups: params.relevantGroups,
@@ -362,11 +347,11 @@ function collectMetadataWitnessAssessments(params: Readonly<{
 			presentRealAnchorSet: collectTextPresenceSet(text, uniqueRealAnchors),
 			identityMetadataSource: "none",
 			routeMetadataSource: decodeRouteMetadataSource(
-				docEvidence.routeWitnessSourceMasks[index] ?? 0,
+				params.docEvidence.routeWitnessSourceMasks[index] ?? 0,
 			),
 		});
 	}
-	for (const text of docEvidence.headingWitnessTexts) {
+	for (const text of params.docEvidence.headingWitnessTexts) {
 		applyMetadataWitnessEvidence({
 			queryAnalysis: params.queryAnalysis,
 			relevantGroups: params.relevantGroups,
@@ -470,6 +455,7 @@ function collectBodyRescueEvaluations<TBodyWindow extends HanBodyWindowLike>(par
 	base: ResidentBase;
 	queryAnalysis: V3QueryAnalysis;
 	candidateRecall: V3CandidateDocRecall;
+	bodyBlockEvidenceByBlockId: ReadonlyMap<number, HanRescueBodyBlockEvidence>;
 	relevantGroups: readonly RelevantHanGroup[];
 	bodyApproxSpanByBlockId: ReadonlyMap<number, number>;
 	bodyOrdinalSpanByBlockId: ReadonlyMap<number, number>;
@@ -499,7 +485,7 @@ function collectBodyRescueEvaluations<TBodyWindow extends HanBodyWindowLike>(par
 		}
 	}
 	const bodyBigramOccurrencesByBlockId = collectUnionBodyBigramOccurrences({
-		base: params.base,
+		bodyBlockEvidenceByBlockId: params.bodyBlockEvidenceByBlockId,
 		neighborhoodBlockIds: [...unionNeighborhoodBlockIds].sort((left, right) => left - right),
 		uniqueBigrams: [...new Set(params.relevantGroups.flatMap((group) => group.unresolvedBigrams))],
 	});
@@ -672,13 +658,16 @@ function projectGroupBodyBigramOccurrences(params: Readonly<{
 }
 
 function collectUnionBodyBigramOccurrences(params: Readonly<{
-	base: ResidentBase;
+	bodyBlockEvidenceByBlockId: ReadonlyMap<number, HanRescueBodyBlockEvidence>;
 	neighborhoodBlockIds: readonly number[];
 	uniqueBigrams: readonly string[];
 }>): ReadonlyMap<number, ReadonlyMap<string, readonly CollectedBodyBigramOccurrence[]>> {
 	const byBlock = new Map<number, Map<string, CollectedBodyBigramOccurrence[]>>();
 	for (const blockId of params.neighborhoodBlockIds) {
-		const blockEvidence = getCachedBodyBlockEvidence(params.base, blockId);
+		const blockEvidence = params.bodyBlockEvidenceByBlockId.get(blockId);
+		if (blockEvidence == null) {
+			continue;
+		}
 		for (let witnessIndex = 0; witnessIndex < blockEvidence.witnessTexts.length; witnessIndex += 1) {
 			const witnessText = blockEvidence.witnessTexts[witnessIndex] ?? "";
 			const witnessOccurrence = blockEvidence.witnessOccurrences[witnessIndex];
@@ -715,8 +704,9 @@ function collectUnionBodyBigramOccurrences(params: Readonly<{
 		if (rightBlockId !== leftBlockId + 1) {
 			continue;
 		}
-		const leftWitnessTexts = getCachedBodyBlockEvidence(params.base, leftBlockId).witnessTexts;
-		const rightWitnessTexts = getCachedBodyBlockEvidence(params.base, rightBlockId).witnessTexts;
+		const leftWitnessTexts = params.bodyBlockEvidenceByBlockId.get(leftBlockId)?.witnessTexts ?? [];
+		const rightWitnessTexts =
+			params.bodyBlockEvidenceByBlockId.get(rightBlockId)?.witnessTexts ?? [];
 		for (const bigram of params.uniqueBigrams) {
 			const chars = Array.from(bigram);
 			const leftChar = chars[0] ?? "";
@@ -767,74 +757,6 @@ function ensureBodyBigramOccurrenceList(
 		byBigram.set(bigram, occurrences);
 	}
 	return occurrences;
-}
-
-function getCachedDocEvidence(base: ResidentBase, liveDocSlot: number): CachedDocEvidence {
-	let cache = DOC_EVIDENCE_CACHE.get(base);
-	if (cache == null) {
-		cache = new Map<number, CachedDocEvidence>();
-		DOC_EVIDENCE_CACHE.set(base, cache);
-	}
-	const existing = cache.get(liveDocSlot);
-	if (existing != null) {
-		return existing;
-	}
-	const created: CachedDocEvidence = {
-		identityWitnessTexts: getLiveDocIdentityHanWitnessTexts(base, liveDocSlot),
-		identityWitnessSourceMasks: getLiveDocIdentityHanWitnessSourceMasks(
-			base,
-			liveDocSlot,
-		),
-		routeWitnessTexts: getLiveDocRouteHanWitnessTexts(base, liveDocSlot),
-		routeWitnessSourceMasks: getLiveDocRouteHanWitnessSourceMasks(
-			base,
-			liveDocSlot,
-		),
-		headingWitnessTexts: getLiveDocHeadingHanWitnessTexts(base, liveDocSlot),
-	};
-	cache.set(liveDocSlot, created);
-	return created;
-}
-
-function getCachedBodyBlockEvidence(base: ResidentBase, blockId: number): CachedBodyBlockEvidence {
-	let cache = BODY_BLOCK_EVIDENCE_CACHE.get(base);
-	if (cache == null) {
-		cache = new Map<number, CachedBodyBlockEvidence>();
-		BODY_BLOCK_EVIDENCE_CACHE.set(base, cache);
-	}
-	const existing = cache.get(blockId);
-	if (existing != null) {
-		return existing;
-	}
-	const witnessOccurrences = buildWitnessPositionedOccurrences(
-		base,
-		getBodyBlockHanWitnessOccurrences(base, blockId),
-	);
-	const created: CachedBodyBlockEvidence = {
-		witnessOccurrences,
-		witnessTexts: getBodyBlockHanWitnessTexts(base, blockId),
-		approxSpan: Math.max(1, getPositionedOccurrenceSpan(witnessOccurrences)),
-		ordinalSpan: Math.max(1, witnessOccurrences.length),
-	};
-	cache.set(blockId, created);
-	return created;
-}
-
-function buildWitnessPositionedOccurrences(
-	base: ResidentBase,
-	witnessOccurrences: readonly Readonly<{ stringId: number; start: number }>[],
-): PositionedWitnessOccurrence[] {
-	return witnessOccurrences.map(({ stringId, start }, index) => ({
-		ordinalPosition: index,
-		localPosition: start,
-		localEndPosition: start + Math.max(1, base.stringArena.lengths[stringId] ?? 0),
-	}));
-}
-
-function getPositionedOccurrenceSpan(
-	occurrences: readonly PositionedWitnessOccurrence[],
-): number {
-	return occurrences[occurrences.length - 1]?.localEndPosition ?? 0;
 }
 
 function getMatchedRealAnchorTextsForGroup(
