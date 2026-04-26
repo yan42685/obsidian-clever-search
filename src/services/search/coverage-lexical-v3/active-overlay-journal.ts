@@ -1,6 +1,7 @@
 import type { IndexedDocument } from "src/globals/search-types";
 import type { ExistingShardDocVersion } from "./append-planner";
 import { buildResidentHotBaseArtifacts } from "./build";
+import type { ShardInvalidationEntry } from "./invalidation";
 import type { ResidentShard } from "./layout/types";
 import type { V3DocumentTokenizer } from "./query";
 
@@ -47,7 +48,19 @@ type AsyncOverlayTable<Row, Key> = Readonly<{
 	clear: () => Promise<unknown>;
 }>;
 
+type AsyncInvalidationTable<Row> = Readonly<{
+	bulkPut: (rows: readonly Row[]) => Promise<unknown>;
+}>;
+
+type AsyncTransactionScope = Readonly<{
+	transaction: (
+		mode: "rw",
+		...args: [...unknown[], () => Promise<void>]
+	) => Promise<unknown>;
+}>;
+
 export type ActiveOverlayJournalRow = ActiveOverlayJournalEntry;
+type ActiveOverlayInvalidationRow = ShardInvalidationEntry & Readonly<{ id: string }>;
 
 export class MemoryActiveOverlayJournalStore implements ActiveOverlayJournalStore {
 	private entries: ActiveOverlayJournalEntry[];
@@ -105,7 +118,7 @@ export class MemoryActiveOverlayJournalStore implements ActiveOverlayJournalStor
 }
 
 export class DexieActiveOverlayJournalStore implements ActiveOverlayJournalStore {
-	constructor(private readonly table: AsyncOverlayTable<ActiveOverlayJournalRow, string>) {}
+	constructor(protected readonly table: AsyncOverlayTable<ActiveOverlayJournalRow, string>) {}
 
 	async appendEntries(entries: readonly ActiveOverlayJournalEntry[]): Promise<void> {
 		await this.appendOverlayEntries(entries);
@@ -154,10 +167,51 @@ export class DexieActiveOverlayJournalStore implements ActiveOverlayJournalStore
 	}
 }
 
+export class AtomicDexieActiveOverlayJournalStore extends DexieActiveOverlayJournalStore {
+	constructor(
+		table: AsyncOverlayTable<ActiveOverlayJournalRow, string>,
+		private readonly invalidationTable: AsyncInvalidationTable<ActiveOverlayInvalidationRow>,
+		private readonly transactionScope: AsyncTransactionScope,
+	) {
+		super(table);
+	}
+
+	async appendOverlayEntriesWithInvalidations(params: {
+		entries: readonly ActiveOverlayJournalEntry[];
+		invalidations: readonly ShardInvalidationEntry[];
+	}): Promise<void> {
+		await this.transactionScope.transaction(
+			"rw",
+			this.table,
+			this.invalidationTable,
+			async () => {
+				await this.appendOverlayEntries(params.entries);
+				if (params.invalidations.length > 0) {
+					await this.invalidationTable.bulkPut(
+						params.invalidations.map(toInvalidationRow),
+					);
+				}
+			},
+		);
+	}
+}
+
 export function createDexieActiveOverlayJournalStore(
 	table: AsyncOverlayTable<ActiveOverlayJournalRow, string>,
 ): ActiveOverlayJournalStore {
 	return new DexieActiveOverlayJournalStore(table);
+}
+
+export function createAtomicDexieActiveOverlayJournalStore(params: {
+	overlayTable: AsyncOverlayTable<ActiveOverlayJournalRow, string>;
+	invalidationTable: AsyncInvalidationTable<ActiveOverlayInvalidationRow>;
+	transactionScope: AsyncTransactionScope;
+}): ActiveOverlayJournalStore {
+	return new AtomicDexieActiveOverlayJournalStore(
+		params.overlayTable,
+		params.invalidationTable,
+		params.transactionScope,
+	);
 }
 
 export function buildActiveOverlayJournalEntryId(params: {
@@ -235,4 +289,11 @@ function sortEntries(
 	entries: readonly ActiveOverlayJournalEntry[],
 ): readonly ActiveOverlayJournalEntry[] {
 	return [...entries].sort((left, right) => left.sequence - right.sequence);
+}
+
+function toInvalidationRow(entry: ShardInvalidationEntry): ActiveOverlayInvalidationRow {
+	return {
+		...entry,
+		id: `${entry.shardId}@${entry.shardGeneration}:docref:${entry.docRef}@${entry.docGeneration}`,
+	};
 }

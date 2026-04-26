@@ -160,6 +160,10 @@ type CoverageLexicalV3PersistedStorageBreakdown = {
   artifactBytes: number;
   registryBytes: number;
   snapshotBytes: number;
+  shardArtifactBytes: number;
+  overlayJournalBytes: number;
+  compactBytes: number;
+  invalidationBytes: number;
   metadataBytes: number;
   evidenceBytes: number;
   fuzzyRescueBytes: number;
@@ -168,6 +172,7 @@ type CoverageLexicalV3PersistedStorageBreakdown = {
 
 const COVERAGE_LEXICAL_V3_PERSISTED_ARTIFACT_TABLES = [
   "lexicalSearchSnapshots",
+  "coverageLexicalV3ResidentShardArtifacts",
   "lexicalIndexedMetadata",
   "lexicalFuzzyRescue",
   "lexicalBodyEvidence",
@@ -179,6 +184,12 @@ const COVERAGE_LEXICAL_V3_PERSISTED_REGISTRY_TABLES = [
   "lexicalIndexedFileRefs",
   "docRegistry",
   "docRegistryMeta",
+  "coverageLexicalV3ShardRegistry",
+  "coverageLexicalV3Invalidations",
+  "coverageLexicalV3ActiveOverlayJournal",
+  "coverageLexicalV3CompactJobs",
+  "coverageLexicalV3CompactTempArtifacts",
+  "coverageLexicalV3SnapshotManifests",
 ] as const;
 
 const COVERAGE_LEXICAL_V3_PERSISTED_EVIDENCE_TABLES = [
@@ -425,6 +436,12 @@ class DataManagerDevDiagnostics {
     const sumBytes = (tableNames: readonly string[]) =>
       tableNames.reduce((sum, tableName) => sum + (bytesByName.get(tableName) ?? 0), 0);
     const snapshotBytes = bytesByName.get("lexicalSearchSnapshots") ?? 0;
+    const shardArtifactBytes = bytesByName.get("coverageLexicalV3ResidentShardArtifacts") ?? 0;
+    const overlayJournalBytes = bytesByName.get("coverageLexicalV3ActiveOverlayJournal") ?? 0;
+    const compactBytes =
+      (bytesByName.get("coverageLexicalV3CompactJobs") ?? 0) +
+      (bytesByName.get("coverageLexicalV3CompactTempArtifacts") ?? 0);
+    const invalidationBytes = bytesByName.get("coverageLexicalV3Invalidations") ?? 0;
     const metadataBytes = bytesByName.get("lexicalIndexedMetadata") ?? 0;
     const fuzzyRescueBytes = bytesByName.get("lexicalFuzzyRescue") ?? 0;
     const evidenceBytes = sumBytes(COVERAGE_LEXICAL_V3_PERSISTED_EVIDENCE_TABLES);
@@ -435,6 +452,10 @@ class DataManagerDevDiagnostics {
       artifactBytes,
       registryBytes,
       snapshotBytes,
+      shardArtifactBytes,
+      overlayJournalBytes,
+      compactBytes,
+      invalidationBytes,
       metadataBytes,
       evidenceBytes,
       fuzzyRescueBytes,
@@ -507,12 +528,24 @@ class DataManagerDevDiagnostics {
             ) +
             " of vault)",
         );
-        const coldSliceParts = [
-          persistedColdStorage.snapshotBytes > 0
-            ? "snapshot " + this.formatBytes(persistedColdStorage.snapshotBytes)
-            : null,
-          persistedColdStorage.evidenceBytes > 0
-            ? "evidence " + this.formatBytes(persistedColdStorage.evidenceBytes)
+          const coldSliceParts = [
+            persistedColdStorage.snapshotBytes > 0
+              ? "legacy-snapshot " + this.formatBytes(persistedColdStorage.snapshotBytes)
+              : null,
+            persistedColdStorage.shardArtifactBytes > 0
+              ? "shard-artifacts " + this.formatBytes(persistedColdStorage.shardArtifactBytes)
+              : null,
+            persistedColdStorage.overlayJournalBytes > 0
+              ? "overlay-journal " + this.formatBytes(persistedColdStorage.overlayJournalBytes)
+              : null,
+            persistedColdStorage.compactBytes > 0
+              ? "compact-state " + this.formatBytes(persistedColdStorage.compactBytes)
+              : null,
+            persistedColdStorage.invalidationBytes > 0
+              ? "invalidations " + this.formatBytes(persistedColdStorage.invalidationBytes)
+              : null,
+            persistedColdStorage.evidenceBytes > 0
+              ? "evidence " + this.formatBytes(persistedColdStorage.evidenceBytes)
             : null,
           persistedColdStorage.metadataBytes > 0
             ? "metadata " + this.formatBytes(persistedColdStorage.metadataBytes)

@@ -32,17 +32,18 @@ export async function commitCompactTempArtifact(params: {
 		shard: tempArtifact.shard,
 		createdAt: params.now ?? Date.now(),
 	});
-	for (const inputShardId of params.job.inputShardIds) {
-		const registry = await params.stores.shardRegistry.loadRegistry();
-		const inputDescriptor = registry.find((shard) => shard.shardId === inputShardId);
-		if (inputDescriptor != null) {
-			await params.stores.shardRegistry.updateShard({
-				...inputDescriptor,
-				state: "garbage",
-			});
-		}
-	}
-	await params.stores.shardRegistry.updateShard(params.outputDescriptor);
+	const registry = await params.stores.shardRegistry.loadRegistry();
+	const inputShardIds = new Set(params.job.inputShardIds);
+	const garbageInputDescriptors = registry
+		.filter((shard) => inputShardIds.has(shard.shardId))
+		.map((shard) => ({
+			...shard,
+			state: "garbage" as const,
+		}));
+	await params.stores.shardRegistry.updateShards([
+		...garbageInputDescriptors,
+		params.outputDescriptor,
+	]);
 	const committedJob = updateJob(params.job, "committed", params.now, {
 		commitMs: Date.now() - startedAt,
 	});

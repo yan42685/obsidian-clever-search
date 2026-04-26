@@ -256,17 +256,28 @@ export class HybridEngine {
     this.lastSearchFallbackNoticeKey = null;
     this.dirtyArtifacts.clear();
 
-    await Promise.all([
-      this.db.db.hybridChunks.clear(),
-      this.db.db.hybridChunkVectors.clear(),
-      this.db.db.hybridHnswSmall.clear(),
-      this.fileSnapshotStore.clearHybridIndexedFileRefs(),
-      this.db.db.indexArtifactState.bulkDelete(
-        HYBRID_DIRTY_ARTIFACTS.map((artifact) =>
-          buildIndexArtifactStateId("hybrid", artifact),
-        ),
-      ),
-    ]);
+    await this.db.db.transaction(
+      "rw",
+      this.db.db.hybridChunks,
+      this.db.db.hybridChunkVectors,
+      this.db.db.hybridHnswSmall,
+      this.db.db.hybridIndexedFileRefs,
+      this.db.db.indexArtifactState,
+      async () => {
+        await Promise.all([
+          this.db.db.hybridChunks.clear(),
+          this.db.db.hybridChunkVectors.clear(),
+          this.db.db.hybridHnswSmall.clear(),
+          this.db.db.hybridIndexedFileRefs.clear(),
+          this.db.db.indexArtifactState.bulkDelete(
+            HYBRID_DIRTY_ARTIFACTS.map((artifact) =>
+              buildIndexArtifactStateId("hybrid", artifact),
+            ),
+          ),
+        ]);
+      },
+    );
+    await this.fileSnapshotStore.notifyHybridIndexedRefsChanged();
   }
 
   isEnabled(): boolean {
@@ -413,23 +424,6 @@ export class HybridEngine {
         });
       }
 
-      if (chunkRows.length > 0) {
-        await this.db.db.hybridChunks.bulkPut(
-          chunkRows.map((row) => ({
-            ...row,
-            filePath: newPath,
-          })),
-        );
-      }
-
-      if (vectorRow) {
-        await this.db.db.hybridChunkVectors.put({
-          ...vectorRow,
-          filePath: newPath,
-        });
-        await this.db.db.hybridChunkVectors.delete(oldPath);
-      }
-
       if (indexedFileRef) {
         const movedDocEntry = await this.fileSnapshotStore.moveDocRegistryPath(
           oldPath,
@@ -438,14 +432,54 @@ export class HybridEngine {
             generation: indexedFileRef.generation ?? generation,
           },
         );
-        // Path-only move keeps the same semantic payload and generation.
-        await this.putHybridIndexedFileRef({
-          ...indexedFileRef,
-          docRef: movedDocEntry?.docRef ?? indexedFileRef.docRef,
-          path: newPath,
-          generation: indexedFileRef.generation ?? generation,
-        });
-        await this.deleteHybridIndexedFileRef(oldPath);
+        await this.db.db.transaction(
+          "rw",
+          this.db.db.hybridChunks,
+          this.db.db.hybridChunkVectors,
+          this.db.db.hybridIndexedFileRefs,
+          async () => {
+            if (chunkRows.length > 0) {
+              await this.db.db.hybridChunks.bulkPut(
+                chunkRows.map((row) => ({
+                  ...row,
+                  filePath: newPath,
+                })),
+              );
+            }
+            if (vectorRow) {
+              await this.db.db.hybridChunkVectors.put({
+                ...vectorRow,
+                filePath: newPath,
+              });
+              await this.db.db.hybridChunkVectors.delete(oldPath);
+            }
+            await this.db.db.hybridIndexedFileRefs.put({
+              ...indexedFileRef,
+              docRef: movedDocEntry?.docRef ?? indexedFileRef.docRef,
+              path: newPath,
+              generation: indexedFileRef.generation ?? generation,
+            });
+            await this.db.db.hybridIndexedFileRefs.delete(oldPath);
+          },
+        );
+        await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([oldPath, newPath]);
+      } else {
+        await this.db.db.transaction(
+          "rw",
+          this.db.db.hybridChunks,
+          this.db.db.hybridChunkVectors,
+          async () => {
+            if (chunkRows.length > 0) {
+              await this.db.db.hybridChunks.bulkPut(
+                chunkRows.map((row) => ({ ...row, filePath: newPath })),
+              );
+            }
+            if (vectorRow) {
+              await this.db.db.hybridChunkVectors.put({ ...vectorRow, filePath: newPath });
+              await this.db.db.hybridChunkVectors.delete(oldPath);
+            }
+          },
+        );
       }
 
       return true;
@@ -470,10 +504,21 @@ export class HybridEngine {
       await this.markHybridArtifactsDirty("runtime-delete-write");
     }
 
-    await this.db.db.hybridChunks.bulkDelete(ids);
-    await this.db.db.hybridChunkVectors.delete(filePath);
+    await this.db.db.transaction(
+      "rw",
+      this.db.db.hybridChunks,
+      this.db.db.hybridChunkVectors,
+      this.db.db.hybridIndexedFileRefs,
+      async () => {
+        await this.db.db.hybridChunks.bulkDelete(ids);
+        await this.db.db.hybridChunkVectors.delete(filePath);
+        if (option.deleteIndexedFileRef ?? true) {
+          await this.db.db.hybridIndexedFileRefs.delete(filePath);
+        }
+      },
+    );
     if (option.deleteIndexedFileRef ?? true) {
-      await this.deleteHybridIndexedFileRef(filePath);
+      await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([filePath]);
     }
 
     if (mustRebuildHnsw) {
@@ -828,6 +873,13 @@ export class HybridEngine {
       ) {
         continue;
       }
+      const indexedFileRef = refs.get(denseRow.row.filePath);
+      if (
+        indexedFileRef?.state !== "ready" ||
+        indexedFileRef.generation !== denseRow.row.generation
+      ) {
+        continue;
+      }
       const snapshot = snapshotsByPath.get(denseRow.row.filePath);
       if (!snapshot) {
         continue;
@@ -1026,8 +1078,9 @@ export class HybridEngine {
       );
       if (plannedChunks.length === 0) {
         const indexedAt = Date.now();
-        await this.persistSnapshot(filePath, plainText, generation);
-        await this.putHybridIndexedFileRef({
+        await this.commitHybridFileIndex({
+          snapshot: { filePath, plainText, generation, docRef: docRegistryEntry.docRef },
+          ref: {
           docRef: docRegistryEntry.docRef,
           path: filePath,
           state: "ready",
@@ -1036,6 +1089,7 @@ export class HybridEngine {
           vectorPrecision: null,
           indexedAt,
           lastIncrementalEmbedAt: indexedAt,
+          },
         });
         if (option.persistIndices ?? true) {
           await this.persistIndices();
@@ -1048,8 +1102,7 @@ export class HybridEngine {
         await this.indexLexicalOnly(filePath, plannedChunks, generation, option, {
           lastIncrementalEmbedAt:
             previousIndexedFileRef?.lastIncrementalEmbedAt,
-        }, docRegistryEntry.docRef);
-        await this.persistSnapshot(filePath, plainText, generation);
+        }, docRegistryEntry.docRef, plainText);
         return;
       }
 
@@ -1122,20 +1175,8 @@ export class HybridEngine {
             option,
             undefined,
             docRegistryEntry.docRef,
+            plainText,
           );
-          await this.persistSnapshot(filePath, plainText, generation);
-          const fallbackIndexedAt = Date.now();
-          await this.putHybridIndexedFileRef({
-            docRef: docRegistryEntry.docRef,
-            path: filePath,
-            state: "lexical_only",
-            generation,
-            chunkCount: plannedChunks.length,
-            vectorPrecision: null,
-            indexedAt: fallbackIndexedAt,
-            lastIncrementalEmbedAt:
-              previousIndexedFileRef?.lastIncrementalEmbedAt,
-          });
           return;
         } catch (fallbackError) {
           const failedIndexedAt = Date.now();
@@ -1158,7 +1199,9 @@ export class HybridEngine {
       if (option.persistIndices ?? true) {
         await this.persistIndices();
       }
-      await this.putHybridIndexedFileRef({
+      await this.commitHybridFileIndex({
+        snapshot: { filePath, plainText, generation, docRef: docRegistryEntry.docRef },
+        ref: {
         docRef: docRegistryEntry.docRef,
         path: filePath,
         state: "ready",
@@ -1167,6 +1210,7 @@ export class HybridEngine {
         vectorPrecision: this.precision,
         indexedAt,
         lastIncrementalEmbedAt: indexedAt,
+        },
       });
     });
   }
@@ -1269,6 +1313,31 @@ export class HybridEngine {
         text: plainText,
       },
     ]);
+  }
+
+  private async commitHybridFileIndex(params: {
+    snapshot: HybridFileSnapshotRow;
+    ref: HybridIndexedFileRef;
+  }): Promise<void> {
+    await this.db.db.transaction(
+      "rw",
+      this.db.db.fileSnapshots,
+      this.db.db.hybridIndexedFileRefs,
+      this.db.db.hybridDirtyShadows,
+      async () => {
+        await this.db.db.fileSnapshots.put(params.snapshot);
+        await this.db.db.hybridIndexedFileRefs.put(params.ref);
+        await this.db.db.hybridDirtyShadows.delete(params.ref.path);
+      },
+    );
+    if (params.ref.state !== "pending") {
+      await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([params.ref.path]);
+    }
+    if (isHybridLexicalFallbackState(params.ref.state)) {
+      this._hasStoredLexicalFallbackData = true;
+      return;
+    }
+    await this.refreshStoredQueryCapabilityFromIndexedRefs();
   }
 
   private async planIncrementalChunks(
@@ -1522,6 +1591,7 @@ export class HybridEngine {
     option: HybridWriteOption,
     meta?: LexicalOnlyIndexedFileRefMeta,
     docRef?: number,
+    plainText?: string,
   ): Promise<void> {
     for (
       let chunkStart = 0;
@@ -1549,7 +1619,7 @@ export class HybridEngine {
     if (option.persistIndices ?? true) {
       await this.persistIndices();
     }
-    await this.putHybridIndexedFileRef({
+    const ref: HybridIndexedFileRef = {
       docRef,
       path: filePath,
       state: "lexical_only",
@@ -1558,7 +1628,15 @@ export class HybridEngine {
       vectorPrecision: null,
       indexedAt: Date.now(),
       lastIncrementalEmbedAt: meta?.lastIncrementalEmbedAt,
-    });
+    };
+    if (plainText !== undefined) {
+      await this.commitHybridFileIndex({
+        snapshot: { filePath, plainText, generation, docRef },
+        ref,
+      });
+      return;
+    }
+    await this.putHybridIndexedFileRef(ref);
   }
 
   private async putHybridIndexedFileRef(
@@ -1635,11 +1713,18 @@ export class HybridEngine {
     if (this.hnswSmall.hasDeletedNodes()) {
       this.hnswSmall.rebuild();
     }
-    await this.db.db.hybridHnswSmall.put({
-      id: 0,
-      data: hnswToBlob(this.hnswSmall.serialize()),
-    });
-    await this.clearHybridArtifactDirtyState(["hnsw"]);
+    await this.db.db.transaction(
+      "rw",
+      this.db.db.hybridHnswSmall,
+      this.db.db.indexArtifactState,
+      async () => {
+        await this.db.db.hybridHnswSmall.put({
+          id: 0,
+          data: hnswToBlob(this.hnswSmall.serialize()),
+        });
+        await this.clearHybridArtifactDirtyState(["hnsw"]);
+      },
+    );
   }
 
   private async loadHnsw(forceRebuild = false): Promise<void> {

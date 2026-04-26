@@ -10,6 +10,7 @@ export * from "./append-planner";
 export * from "./active-overlay-journal";
 export * from "./active-overlay-writer";
 export * from "./active-overlay-fold";
+export * from "./snapshot";
 export * from "./active-document-source";
 export * from "./active-shard-publisher";
 export * from "./stores";

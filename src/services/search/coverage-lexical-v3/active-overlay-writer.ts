@@ -15,6 +15,13 @@ export type ActiveOverlayWriteResult = Readonly<{
 	invalidationCount: number;
 }>;
 
+export type ActiveOverlayWriteAtomicStore = Readonly<{
+	appendOverlayEntriesWithInvalidations: (params: {
+		entries: readonly ActiveOverlayJournalEntry[];
+		invalidations: Parameters<CoverageLexicalV3ProductionStores["invalidations"]["appendInvalidations"]>[0];
+	}) => Promise<void>;
+}>;
+
 export async function writeActiveOverlayChanges(params: {
 	stores: CoverageLexicalV3ProductionStores;
 	overlayJournalStore: ActiveOverlayJournalStore;
@@ -58,9 +65,14 @@ export async function writeActiveOverlayChanges(params: {
 			} as const,
 		];
 	});
-	await params.overlayJournalStore.appendOverlayEntries(entries);
-	if (invalidations.length > 0) {
-		await params.stores.invalidations.appendInvalidations(invalidations);
+	const atomicStore = params.overlayJournalStore as unknown as Partial<ActiveOverlayWriteAtomicStore>;
+	if (typeof atomicStore.appendOverlayEntriesWithInvalidations === "function") {
+		await atomicStore.appendOverlayEntriesWithInvalidations({ entries, invalidations });
+	} else {
+		await params.overlayJournalStore.appendOverlayEntries(entries);
+		if (invalidations.length > 0) {
+			await params.stores.invalidations.appendInvalidations(invalidations);
+		}
 	}
 	return {
 		entries,

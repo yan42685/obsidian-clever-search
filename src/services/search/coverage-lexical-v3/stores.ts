@@ -18,6 +18,7 @@ export type CoverageLexicalV3ShardRegistryStore = Readonly<{
 	loadRegistry: () => Promise<readonly ResidentShardDescriptor[]>;
 	saveRegistry: (registry: readonly ResidentShardDescriptor[]) => Promise<void>;
 	updateShard: (descriptor: ResidentShardDescriptor) => Promise<void>;
+	updateShards: (descriptors: readonly ResidentShardDescriptor[]) => Promise<void>;
 	removeShards: (shardIds: readonly string[]) => Promise<void>;
 }>;
 
@@ -51,16 +52,26 @@ export class MemoryCoverageLexicalV3ShardRegistryStore
 	}
 
 	async updateShard(descriptor: ResidentShardDescriptor): Promise<void> {
-		const existingIndex = this.registry.findIndex(
-			(shard) => shard.shardId === descriptor.shardId,
-		);
-		if (existingIndex >= 0) {
-			this.registry = this.registry.map((shard, index) =>
-				index === existingIndex ? descriptor : shard,
-			);
-		} else {
-			this.registry = [...this.registry, descriptor];
+		await this.updateShards([descriptor]);
+	}
+
+	async updateShards(descriptors: readonly ResidentShardDescriptor[]): Promise<void> {
+		if (descriptors.length === 0) {
+			return;
 		}
+		const descriptorById = new Map(descriptors.map((descriptor) => [descriptor.shardId, descriptor]));
+		const updatedShardIds = new Set(descriptorById.keys());
+		this.registry = [
+			...this.registry.map((shard) => descriptorById.get(shard.shardId) ?? shard),
+			...descriptors.filter((descriptor) =>
+				!this.registry.some((shard) => shard.shardId === descriptor.shardId),
+			),
+		].filter((shard, index, shards) => {
+			if (!updatedShardIds.has(shard.shardId)) {
+				return true;
+			}
+			return shards.findIndex((candidate) => candidate.shardId === shard.shardId) === index;
+		});
 		this.registry = [...this.registry].sort(
 			(left, right) => left.createdOrder - right.createdOrder,
 		);
@@ -121,6 +132,13 @@ export class DexieCoverageLexicalV3ShardRegistryStore
 
 	async updateShard(descriptor: ResidentShardDescriptor): Promise<void> {
 		await this.table.put(descriptor);
+	}
+
+	async updateShards(descriptors: readonly ResidentShardDescriptor[]): Promise<void> {
+		if (descriptors.length === 0) {
+			return;
+		}
+		await this.table.bulkPut([...descriptors]);
 	}
 
 	async removeShards(shardIds: readonly string[]): Promise<void> {

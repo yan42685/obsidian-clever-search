@@ -28,6 +28,7 @@ import type {
   CompactJobManifest,
   CompactTempArtifact,
 } from "src/services/search/coverage-lexical-v3/compact";
+import type { CoverageLexicalV3SnapshotManifest } from "src/services/search/coverage-lexical-v3/snapshot";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -172,6 +173,7 @@ export type CoverageLexicalV3ResidentShardArtifactRow = {
 export type CoverageLexicalV3ActiveOverlayJournalRow = ActiveOverlayJournalEntry;
 export type CoverageLexicalV3CompactJobManifestRow = CompactJobManifest;
 export type CoverageLexicalV3CompactTempArtifactRow = CompactTempArtifact;
+export type CoverageLexicalV3SnapshotManifestRow = CoverageLexicalV3SnapshotManifest;
 
 type DocRegistryMetaRow = {
   key: string;
@@ -195,6 +197,7 @@ const TARGETED_INDEX_RESET_TABLES = [
   "coverageLexicalV3ActiveOverlayJournal",
   "coverageLexicalV3CompactJobs",
   "coverageLexicalV3CompactTempArtifacts",
+  "coverageLexicalV3SnapshotManifests",
   "indexRecoveryState",
   "indexArtifactState",
   "lexicalMutationJournal",
@@ -216,6 +219,14 @@ export type DatabaseOpenRecoveryReport = {
   initialErrorName: string;
   initialErrorMessage: string;
   preservedTokenStats: boolean;
+  preservedSettings?: boolean;
+};
+
+type FullResetPreservedUserState = {
+  pluginSettingRows: Array<{ id?: number; data: OuterSetting }>;
+  hybridTokenStatsRows: HybridTokenRecord[];
+  hybridTokenSavingsRows: HybridTokenSavingRecord[];
+  hybridTokenBudgetResetRows: HybridTokenBudgetResetRecord[];
 };
 
 export type DatabaseOpenReport = {
@@ -268,6 +279,25 @@ export class Database {
       { name: "lexicalHanDocEvidence", table: this.db.lexicalHanDocEvidence },
       { name: "lexicalHanBodyEvidence", table: this.db.lexicalHanBodyEvidence },
       { name: "docRegistry", table: this.db.docRegistry },
+      { name: "coverageLexicalV3ShardRegistry", table: this.db.coverageLexicalV3ShardRegistry },
+      { name: "coverageLexicalV3Invalidations", table: this.db.coverageLexicalV3Invalidations },
+      {
+        name: "coverageLexicalV3ResidentShardArtifacts",
+        table: this.db.coverageLexicalV3ResidentShardArtifacts,
+      },
+      {
+        name: "coverageLexicalV3ActiveOverlayJournal",
+        table: this.db.coverageLexicalV3ActiveOverlayJournal,
+      },
+      { name: "coverageLexicalV3CompactJobs", table: this.db.coverageLexicalV3CompactJobs },
+      {
+        name: "coverageLexicalV3CompactTempArtifacts",
+        table: this.db.coverageLexicalV3CompactTempArtifacts,
+      },
+      {
+        name: "coverageLexicalV3SnapshotManifests",
+        table: this.db.coverageLexicalV3SnapshotManifests,
+      },
       { name: "docRegistryMeta", table: this.db.docRegistryMeta },
       { name: "hybridChunks", table: this.db.hybridChunks },
       { name: "fileSnapshots", table: this.db.fileSnapshots },
@@ -1012,14 +1042,18 @@ export class Database {
         );
       }
 
+      const preservedUserState = await this.exportUserStateBeforeFullReset();
       this.db.close();
       await this.deleteDatabaseByName(this.db.dbName);
 
       try {
         await this.db.open();
+        const restoreReport = await this.restoreUserStateAfterFullReset(
+          preservedUserState,
+        );
         console.warn(
-          "[clever-search] Dexie startup upgrade recovered by rebuilding the local search database. Settings were preserved; token stats may have been reset.",
-          initialErrorSummary,
+          "[clever-search] Dexie startup upgrade recovered by rebuilding the local search database. Settings and token stats were restored best-effort.",
+          { ...initialErrorSummary, restoreReport },
         );
         return {
           mode: "full-reset",
@@ -1027,7 +1061,8 @@ export class Database {
           targetVersion: this.db.dbVersion,
           initialErrorName,
           initialErrorMessage,
-          preservedTokenStats: false,
+          preservedTokenStats: restoreReport.tokenRowsRestored > 0,
+          preservedSettings: restoreReport.settingsRestored,
         };
       } catch (finalError) {
         console.warn(
@@ -1052,6 +1087,112 @@ export class Database {
       "message" in error &&
       (error as { name?: unknown }).name === "UpgradeError"
     );
+  }
+
+  private async exportUserStateBeforeFullReset(): Promise<FullResetPreservedUserState | null> {
+    try {
+      const database = await this.openIndexedDbByName(this.db.dbName);
+      try {
+        const storeNames = new Set(Array.from(database.objectStoreNames));
+        return {
+          pluginSettingRows: storeNames.has("pluginSetting")
+            ? await this.readAllRowsFromRawStore<{ id?: number; data: OuterSetting }>(
+                database,
+                "pluginSetting",
+              )
+            : [],
+          hybridTokenStatsRows: storeNames.has("hybridTokenStats")
+            ? await this.readAllRowsFromRawStore<HybridTokenRecord>(
+                database,
+                "hybridTokenStats",
+              )
+            : [],
+          hybridTokenSavingsRows: storeNames.has("hybridTokenSavings")
+            ? await this.readAllRowsFromRawStore<HybridTokenSavingRecord>(
+                database,
+                "hybridTokenSavings",
+              )
+            : [],
+          hybridTokenBudgetResetRows: storeNames.has("hybridTokenBudgetResets")
+            ? await this.readAllRowsFromRawStore<HybridTokenBudgetResetRecord>(
+                database,
+                "hybridTokenBudgetResets",
+              )
+            : [],
+        };
+      } finally {
+        database.close();
+      }
+    } catch (error) {
+      console.warn(
+        "[clever-search] Failed to export settings/token stats before full database reset; continuing recovery.",
+        error,
+      );
+      return null;
+    }
+  }
+
+  private async restoreUserStateAfterFullReset(
+    state: FullResetPreservedUserState | null,
+  ): Promise<{ settingsRestored: boolean; tokenRowsRestored: number }> {
+    if (state == null) {
+      return { settingsRestored: false, tokenRowsRestored: 0 };
+    }
+    try {
+      await this.db.transaction(
+        "rw",
+        this.db.pluginSetting,
+        this.db.hybridTokenStats,
+        this.db.hybridTokenSavings,
+        this.db.hybridTokenBudgetResets,
+        async () => {
+          if (state.pluginSettingRows.length > 0) {
+            await this.db.pluginSetting.bulkPut(state.pluginSettingRows);
+          }
+          if (state.hybridTokenStatsRows.length > 0) {
+            await this.db.hybridTokenStats.bulkPut(state.hybridTokenStatsRows);
+          }
+          if (state.hybridTokenSavingsRows.length > 0) {
+            await this.db.hybridTokenSavings.bulkPut(state.hybridTokenSavingsRows);
+          }
+          if (state.hybridTokenBudgetResetRows.length > 0) {
+            await this.db.hybridTokenBudgetResets.bulkPut(
+              state.hybridTokenBudgetResetRows,
+            );
+          }
+        },
+      );
+      return {
+        settingsRestored: state.pluginSettingRows.length > 0,
+        tokenRowsRestored:
+          state.hybridTokenStatsRows.length +
+          state.hybridTokenSavingsRows.length +
+          state.hybridTokenBudgetResetRows.length,
+      };
+    } catch (error) {
+      console.warn(
+        "[clever-search] Failed to restore settings/token stats after full database reset; continuing recovery.",
+        error,
+      );
+      return { settingsRestored: false, tokenRowsRestored: 0 };
+    }
+  }
+
+  private async readAllRowsFromRawStore<Row>(
+    database: IDBDatabase,
+    storeName: string,
+  ): Promise<Row[]> {
+    return await new Promise<Row[]>((resolve, reject) => {
+      const transaction = database.transaction([storeName], "readonly");
+      const request = transaction.objectStore(storeName).getAll();
+      request.onsuccess = () => resolve(request.result as Row[]);
+      request.onerror = () =>
+        reject(request.error ?? new Error(`Failed to read ${storeName}.`));
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error(`Failed to read ${storeName}.`));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error(`Read ${storeName} aborted.`));
+    });
   }
 
   private async resetTargetedPersistentIndexState(): Promise<void> {
@@ -1116,7 +1257,7 @@ export class Database {
 export class DexieWrapper extends Dexie {
   // Dexie keeps one decimal place for version() and multiplies by 10 when opening IndexedDB.
   // Use 0.1 increments here so app-level schema bumps stay readable while mapping to IDB integers.
-  private static readonly _dbVersion = 29.3;
+  private static readonly _dbVersion = 29.4;
   private static readonly dbNamePrefix = "clever-search/";
   static readonly docRegistryNextRefKey = DOC_REGISTRY_NEXT_REF_KEY;
   static readonly lexicalQueryEvidenceReadyKey = LEXICAL_QUERY_EVIDENCE_READY_KEY;
@@ -1140,6 +1281,7 @@ export class DexieWrapper extends Dexie {
   coverageLexicalV3ActiveOverlayJournal!: Dexie.Table<CoverageLexicalV3ActiveOverlayJournalRow, string>;
   coverageLexicalV3CompactJobs!: Dexie.Table<CoverageLexicalV3CompactJobManifestRow, string>;
   coverageLexicalV3CompactTempArtifacts!: Dexie.Table<CoverageLexicalV3CompactTempArtifactRow, string>;
+  coverageLexicalV3SnapshotManifests!: Dexie.Table<CoverageLexicalV3SnapshotManifestRow, string>;
   docRegistryMeta!: Dexie.Table<DocRegistryMetaRow, string>;
 
   hybridChunks!: Dexie.Table<ChunkRow, number>;
@@ -1250,9 +1392,10 @@ export class DexieWrapper extends Dexie {
           "id, shardId, generation, artifactOwner, [artifactOwner+generation]",
         coverageLexicalV3ActiveOverlayJournal:
           "id, sequence, activeShardId, activeShardGeneration, [activeShardId+activeShardGeneration+sequence]",
-        coverageLexicalV3CompactJobs: "jobId, status, createdAt, updatedAt",
-        coverageLexicalV3CompactTempArtifacts: "jobId, outputShardId, createdAt",
-        docRegistryMeta: "key",
+          coverageLexicalV3CompactJobs: "jobId, status, createdAt, updatedAt",
+          coverageLexicalV3CompactTempArtifacts: "jobId, outputShardId, createdAt",
+          coverageLexicalV3SnapshotManifests: "snapshotId, status, createdAt",
+          docRegistryMeta: "key",
         hybridChunks: "++id, filePath",
         fileSnapshots: "filePath",
         hybridDirtyShadows: "filePath",
@@ -1296,9 +1439,10 @@ export class DexieWrapper extends Dexie {
           "id, shardId, generation, artifactOwner, [artifactOwner+generation]",
         coverageLexicalV3ActiveOverlayJournal:
           "id, sequence, activeShardId, activeShardGeneration, [activeShardId+activeShardGeneration+sequence]",
-        coverageLexicalV3CompactJobs: "jobId, status, createdAt, updatedAt",
-        coverageLexicalV3CompactTempArtifacts: "jobId, outputShardId, createdAt",
-        docRegistryMeta: "key",
+          coverageLexicalV3CompactJobs: "jobId, status, createdAt, updatedAt",
+          coverageLexicalV3CompactTempArtifacts: "jobId, outputShardId, createdAt",
+          coverageLexicalV3SnapshotManifests: "snapshotId, status, createdAt",
+          docRegistryMeta: "key",
         hybridChunks: "++id, filePath",
         fileSnapshots: "filePath",
         hybridDirtyShadows: "filePath",
@@ -1332,8 +1476,18 @@ export class DexieWrapper extends Dexie {
           "id, shardId, shardGeneration, docRef, generation, [shardId+shardGeneration+docRef+generation]",
         lexicalHanBodyEvidence:
           "id, shardId, shardGeneration, docRef, generation, blockOrdinal, [shardId+shardGeneration+docRef+generation+blockOrdinal]",
-        docRegistry: "docRef, path, deleted, liveGeneration, updatedAt",
-        docRegistryMeta: "key",
+          docRegistry: "docRef, path, deleted, liveGeneration, updatedAt",
+          coverageLexicalV3ShardRegistry: "shardId, state, createdOrder",
+          coverageLexicalV3Invalidations:
+            "id, shardId, docRef, docGeneration, [shardId+shardGeneration+docRef+docGeneration]",
+          coverageLexicalV3ResidentShardArtifacts:
+            "id, shardId, generation, artifactOwner, [artifactOwner+generation]",
+          coverageLexicalV3ActiveOverlayJournal:
+            "id, sequence, activeShardId, activeShardGeneration, [activeShardId+activeShardGeneration+sequence]",
+          coverageLexicalV3CompactJobs: "jobId, status, createdAt, updatedAt",
+          coverageLexicalV3CompactTempArtifacts: "jobId, outputShardId, createdAt",
+          coverageLexicalV3SnapshotManifests: "snapshotId, status, createdAt",
+          docRegistryMeta: "key",
         hybridChunks: "++id, filePath",
         fileSnapshots: "filePath",
         hybridDirtyShadows: "filePath",

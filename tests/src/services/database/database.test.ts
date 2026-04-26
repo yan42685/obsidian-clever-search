@@ -9,6 +9,23 @@ function createUpgradeError(message = "Not yet support for changing primary key"
   return error;
 }
 
+type DatabaseRecoveryHarness = {
+  db: {
+    open: jest.Mock;
+    close: jest.Mock;
+    dbName: string;
+    dbVersion: number;
+    consumeSchemaUpgradeDetected: jest.Mock;
+  };
+  resetTargetedPersistentIndexState: jest.Mock;
+  deleteDatabaseByName: jest.Mock;
+  openAndConsumeSchemaUpgradeReport: Database["openAndConsumeSchemaUpgradeReport"];
+};
+
+function createDatabaseRecoveryHarness(): DatabaseRecoveryHarness {
+  return Object.create(Database.prototype) as DatabaseRecoveryHarness;
+}
+
 describe("Database Dexie upgrade recovery", () => {
   const createdDbNames: string[] = [];
   let consoleWarnSpy: jest.SpyInstance;
@@ -183,17 +200,7 @@ describe("Database Dexie upgrade recovery", () => {
       .mockRejectedValueOnce(createUpgradeError())
       .mockResolvedValueOnce(undefined);
     const consumeSchemaUpgradeDetected = jest.fn(() => false);
-    const database = Object.create(Database.prototype) as Database & {
-      db: {
-        open: jest.Mock;
-        close: jest.Mock;
-        dbName: string;
-        dbVersion: number;
-        consumeSchemaUpgradeDetected: jest.Mock;
-      };
-      resetTargetedPersistentIndexState: jest.Mock;
-      deleteDatabaseByName: jest.Mock;
-    };
+    const database = createDatabaseRecoveryHarness();
     database.db = {
       open,
       close: jest.fn(),
@@ -226,17 +233,7 @@ describe("Database Dexie upgrade recovery", () => {
       .fn()
       .mockRejectedValueOnce(createUpgradeError())
       .mockResolvedValueOnce(undefined);
-    const database = Object.create(Database.prototype) as Database & {
-      db: {
-        open: jest.Mock;
-        close: jest.Mock;
-        dbName: string;
-        dbVersion: number;
-        consumeSchemaUpgradeDetected: jest.Mock;
-      };
-      resetTargetedPersistentIndexState: jest.Mock;
-      deleteDatabaseByName: jest.Mock;
-    };
+    const database = createDatabaseRecoveryHarness();
     database.db = {
       open,
       close: jest.fn(),
@@ -260,6 +257,7 @@ describe("Database Dexie upgrade recovery", () => {
         initialErrorName: "UpgradeError",
         initialErrorMessage: "Not yet support for changing primary key",
         preservedTokenStats: false,
+        preservedSettings: false,
       },
     });
     expect(database.resetTargetedPersistentIndexState).toHaveBeenCalledTimes(1);
@@ -270,17 +268,7 @@ describe("Database Dexie upgrade recovery", () => {
 
   test("auto-heals a given upgrade signature only once per startup", async () => {
     const upgradeError = createUpgradeError();
-    const database = Object.create(Database.prototype) as Database & {
-      db: {
-        open: jest.Mock;
-        close: jest.Mock;
-        dbName: string;
-        dbVersion: number;
-        consumeSchemaUpgradeDetected: jest.Mock;
-      };
-      resetTargetedPersistentIndexState: jest.Mock;
-      deleteDatabaseByName: jest.Mock;
-    };
+    const database = createDatabaseRecoveryHarness();
     database.db = {
       open: jest.fn(async () => {
         throw upgradeError;

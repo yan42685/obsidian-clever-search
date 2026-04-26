@@ -70,10 +70,13 @@ export async function runActiveOverlayFoldMaintenanceJob(params: {
 	});
 	const overlayDocuments = materializeOverlayDocuments(entries);
 	const foldedDocuments = mergeFoldDocuments(currentDocuments, overlayDocuments);
+	const nextGeneration = params.activeShard.generation + 1;
 	const activeShardForFold = {
 		...params.activeShard,
+		generation: nextGeneration,
 		sourceBytes: 0,
 		docCount: 0,
+		artifactOwner: `${params.activeShard.shardId}@fold-${nextGeneration}`,
 	};
 	const result = await publishActiveShardAppend({
 		stores: params.stores,
@@ -89,6 +92,16 @@ export async function runActiveOverlayFoldMaintenanceJob(params: {
 		},
 		tokenizeDocumentText: params.tokenizeDocumentText,
 	});
+	const latestRegistry = await params.stores.shardRegistry.loadRegistry();
+	const activeStillVisible = latestRegistry.some(
+		(shard) =>
+			shard.shardId === params.activeShard.shardId &&
+			shard.generation === params.activeShard.generation &&
+			shard.artifactOwner === params.activeShard.artifactOwner,
+	);
+	if (activeStillVisible) {
+		throw new Error("Active overlay fold did not publish replacement registry before clearing overlay.");
+	}
 	await params.overlayJournalStore.clearActiveOverlayEntries({
 		activeShardId: params.activeShard.shardId,
 		activeShardGeneration: params.activeShard.generation,

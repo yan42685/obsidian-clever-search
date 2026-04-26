@@ -292,8 +292,9 @@ export class CoverageLexicalV3Engine {
 		};
 	}
 
-	private hydrateCandidateEvidenceByShard(
+	hydrateCandidateEvidenceByShard(
 		candidateRecalls: readonly V3CandidateDocRecall[],
+		sourceByShardKey?: ReadonlyMap<string, CandidateEvidenceHydrationSource | null>,
 	): ReadonlyMap<string, CandidateEvidencePackage> {
 		const hydratedByCandidateKey = new Map<string, CandidateEvidencePackage>();
 		const candidateRecallsByShardKey = new Map<string, V3CandidateDocRecall[]>();
@@ -317,7 +318,12 @@ export class CoverageLexicalV3Engine {
 			const hydratedForShard = hydrateCandidateEvidenceBatch(
 				this.requireCandidateResidentBase(firstCandidateRecall),
 				shardCandidateRecalls,
-				this.materializeResidentColdEvidence(shardCandidateRecalls),
+				sourceByShardKey?.get(
+					buildResidentShardKey(
+						firstCandidateRecall.shardId,
+						firstCandidateRecall.shardGeneration,
+					),
+				) ?? this.materializeResidentColdEvidence(shardCandidateRecalls),
 			);
 			for (const [candidateKey, evidence] of hydratedForShard) {
 				hydratedByCandidateKey.set(candidateKey, evidence);
@@ -509,7 +515,16 @@ export class CoverageLexicalV3Engine {
 				unitFamilyMatches,
 				effectiveHydratedEvidenceByCandidateKey,
 			);
-		const secondPassCandidateProfiles = guardedCandidateDocs.map((candidateRecall) => {
+		const secondPassCandidateProfiles = guardedCandidateDocs.map((candidateRecall, index) => {
+			const candidateKey = buildCandidateHydrationKey(candidateRecall);
+			const allowBodyOpaqueRescueSurfaceGroupIndices =
+				allowedBodyOpaqueRescueSurfaceGroupsByCandidateKey.get(candidateKey) ?? null;
+			if (
+				allowBodyOpaqueRescueSurfaceGroupIndices == null ||
+				allowBodyOpaqueRescueSurfaceGroupIndices.size === 0
+			) {
+				return provisionalCandidateProfiles[index]!;
+			}
 			const shardUnitFamilyMatches = filterUnitFamilyMatchesForCandidateShard(
 				unitFamilyMatches,
 				candidateRecall,
@@ -522,14 +537,9 @@ export class CoverageLexicalV3Engine {
 				candidateRecall,
 				shardUnitFamilyMatches,
 				{
-					allowBodyOpaqueRescueSurfaceGroupIndices:
-						allowedBodyOpaqueRescueSurfaceGroupsByCandidateKey.get(
-							buildCandidateHydrationKey(candidateRecall),
-						) ?? null,
+					allowBodyOpaqueRescueSurfaceGroupIndices,
 					hydratedEvidence:
-						effectiveHydratedEvidenceByCandidateKey.get(
-							buildCandidateHydrationKey(candidateRecall),
-						) ?? null,
+						effectiveHydratedEvidenceByCandidateKey.get(candidateKey) ?? null,
 					queryContext: shardPackingQueryContext,
 				},
 			);
@@ -654,7 +664,16 @@ export class CoverageLexicalV3Engine {
 				unitFamilyMatches,
 				hydratedEvidenceByCandidateKey,
 			);
-		const secondPassCandidateProfiles = guardedCandidateDocs.map((candidateRecall) => {
+		const secondPassCandidateProfiles = guardedCandidateDocs.map((candidateRecall, index) => {
+			const candidateKey = buildCandidateHydrationKey(candidateRecall);
+			const allowBodyOpaqueRescueSurfaceGroupIndices =
+				allowedBodyOpaqueRescueSurfaceGroupsByCandidateKey.get(candidateKey) ?? null;
+			if (
+				allowBodyOpaqueRescueSurfaceGroupIndices == null ||
+				allowBodyOpaqueRescueSurfaceGroupIndices.size === 0
+			) {
+				return provisionalCandidateProfiles[index]!;
+			}
 			const shardUnitFamilyMatches = filterUnitFamilyMatchesForCandidateShard(
 				unitFamilyMatches,
 				candidateRecall,
@@ -667,14 +686,9 @@ export class CoverageLexicalV3Engine {
 				candidateRecall,
 				shardUnitFamilyMatches,
 				{
-					allowBodyOpaqueRescueSurfaceGroupIndices:
-						allowedBodyOpaqueRescueSurfaceGroupsByCandidateKey.get(
-							buildCandidateHydrationKey(candidateRecall),
-						) ?? null,
+					allowBodyOpaqueRescueSurfaceGroupIndices,
 					hydratedEvidence:
-						hydratedEvidenceByCandidateKey.get(
-							buildCandidateHydrationKey(candidateRecall),
-						) ?? null,
+						hydratedEvidenceByCandidateKey.get(candidateKey) ?? null,
 					queryContext: shardPackingQueryContext,
 				},
 			);
@@ -1231,7 +1245,7 @@ function collectShardFamilyMatches(
 			shard.base,
 			queryAnalysis,
 			options,
-			shard.base.fuzzyRescue ?? fuzzyRescueIndex,
+			fuzzyRescueIndex,
 		);
 		for (const unitMatches of shardMatches) {
 			const shardOwnedUnitMatches: V3QueryUnitFamilyMatches = {

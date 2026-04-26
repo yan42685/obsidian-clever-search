@@ -42,9 +42,6 @@ export async function publishActiveShardAppend(params: {
 		params.changes,
 		params.plannerOptions,
 	);
-	if (plan.sealedActiveShard != null) {
-		await params.stores.shardRegistry.updateShard(plan.sealedActiveShard);
-	}
 	if (plan.invalidationEntries.length > 0) {
 		await params.stores.invalidations.appendInvalidations(plan.invalidationEntries);
 	}
@@ -69,7 +66,11 @@ export async function publishActiveShardAppend(params: {
 		shard: targetShard,
 		createdAt: params.plannerOptions?.now ?? Date.now(),
 	});
-	await params.stores.shardRegistry.updateShard(plan.nextActiveShard);
+	await params.stores.shardRegistry.updateShards(
+		[plan.sealedActiveShard, plan.nextActiveShard].filter(
+			(descriptor): descriptor is ResidentShardDescriptor => descriptor != null,
+		),
+	);
 	return {
 		appendTargetShard: plan.nextActiveShard,
 		sealedActiveShard: plan.sealedActiveShard,
@@ -121,8 +122,12 @@ async function publishOversizedAppendBatch(
 			),
 			createdAt: params.plannerOptions?.now ?? Date.now(),
 		});
-		await params.stores.shardRegistry.updateShard(descriptor);
 	}
+	await params.stores.shardRegistry.updateShards(
+		[plan.sealedActiveShard, ...descriptors].filter(
+			(descriptor): descriptor is ResidentShardDescriptor => descriptor != null,
+		),
+	);
 	const appendTargetShard = descriptors[descriptors.length - 1] ?? plan.nextActiveShard;
 	return {
 		appendTargetShard,
