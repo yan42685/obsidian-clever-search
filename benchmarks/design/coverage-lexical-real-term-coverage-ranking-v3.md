@@ -744,9 +744,14 @@ for V3 query analysis and realization:
   implicit fallback primary
 - uncovered residual Han spans now produce residual-span backstop bigrams
 - uncovered single-Han residuals now produce only adjacent bridge bigrams
-- whole-group Han backstop now activates only for zero-real-term Han groups
+- whole-group Han backstop now activates for zero-real-term Han groups and for
+  tokenizer-real Han groups whose real terms do not all resolve to family
+  matches, so Han bigram fallback remains a true tokenizer-mismatch backstop
 - zero-real-term Han groups can realize coverage only through opaque exact
   confirmation, never through bigram counts themselves
+- weak Han bigram rescue support remains `opaque_exact` rather than true
+  `exact`, but it is now sufficient to survive weak-result hiding without
+  contributing to `exactUnitCount` or the main realized-coverage count
 - the V3 regression baseline now includes `缁崵绮烘禒锝囨倞`, `婵柨鎲抽梹绺? and zero-real-term
   Han exact-confirm cases
 
@@ -2184,3 +2189,33 @@ Validation completed for this phase:
 
 - `npm run typecheck:build` passes on 2026-04-23
 - `npm test -- --runInBand tests/src/services/search/file-snapshot-store.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine-request-flags.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/ranking-stability.test.ts` passes on 2026-04-23
+
+### Phase 46
+
+Status: Completed on 2026-04-27
+
+This phase restores Han bigram fallback as a true tokenizer-mismatch backstop
+without promoting bigrams into true exact ranking evidence:
+
+- tokenizer-real Han groups now keep whole-surface bigram rescue available even
+  when a real-term family match exists elsewhere in the candidate set
+- weak Han bigram rescue support survives weak-result hiding and top coverage
+  gate pruning, but remains `opaque_exact` and does not contribute to
+  `exactUnitCount` or main realized coverage
+- cold Han witness hydration now handles array-backed witness rows safely after
+  the broader bigram rescue path asks ranking to inspect more body witnesses
+
+Quality anchor for the 0.3.3 release candidate on 2026-04-27:
+
+- corpus: 89 notes, 198 queries, 55 Han docs, 15 zh queries, 48 mixed queries
+- `CoverageLexical(V3)`: objective 0.863, top1 0.778, top3 0.939, top5 1.000,
+  zeroRate 0.000, mrr 0.865
+- timing anchor: avg 16.606 ms/query, p50 12.766 ms, p100 49.526 ms,
+  estimated index 736.436 KB
+- relative to MiniSearch: avg ratio 2.743, p50 ratio 2.255, p100 ratio 2.750,
+  index ratio 9.634
+
+Validation completed for this phase:
+
+- `npm run benchmark:coverage-lexical` passes on 2026-04-27
+- benchmark log captured at `.codex-bench/coverage-lexical-0.3.3-anchor.log`

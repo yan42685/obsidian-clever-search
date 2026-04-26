@@ -21,6 +21,8 @@ import type {
 	V3CandidateBodyBlockRecall,
 	V3CandidateDocRecall,
 } from "src/services/search/coverage-lexical-v3/recall";
+import { planHanSurfaceGroupRecallsAfterFamilyLookup } from "src/services/search/coverage-lexical-v3/recall/han-surface-groups";
+import type { HanRescueAssessment } from "src/services/search/coverage-lexical-v3/han-rescue";
 import {
 	buildLexicalBlockEvidenceRowId,
 	buildLexicalDocEvidenceRowId,
@@ -329,11 +331,13 @@ function createPersistedHanBodyEvidenceMap(
 			docRef: number;
 			generation: number;
 			blockOrdinal: number;
-			bodyWitnessMatchKeys: readonly number[];
-			bodyWitnessTexts: readonly string[];
+			bodyWitnessStringIds?: readonly number[];
+			bodyWitnessMatchKeys?: readonly number[];
+			bodyWitnessTexts?: readonly string[];
 			bodyWitnessStartOffsets: readonly number[];
 		}
 	>,
+	residentBase?: ResidentBase,
 ) {
 	return createMapFromEntries(
 		locators.map((locator) => {
@@ -343,11 +347,17 @@ function createPersistedHanBodyEvidenceMap(
 			if (row == null) {
 				return null;
 			}
+			const bodyWitnessTexts =
+				row.bodyWitnessTexts ??
+				(row.bodyWitnessStringIds ?? []).map((stringId) =>
+					residentBase == null ? "" : readTestResidentString(residentBase, stringId),
+				);
 			return [
 				row.id,
 				{
-					bodyWitnessMatchKeys: row.bodyWitnessMatchKeys,
-					bodyWitnessTexts: row.bodyWitnessTexts,
+					bodyWitnessMatchKeys:
+						row.bodyWitnessMatchKeys ?? bodyWitnessTexts.map(buildStableWitnessMatchKey),
+					bodyWitnessTexts,
 					bodyWitnessStartOffsets: row.bodyWitnessStartOffsets,
 				},
 			] as const;
@@ -449,6 +459,24 @@ function createRealizedFamily(
 		inHeading: overrides.inHeading ?? false,
 		inBestBodyWindow: overrides.inBestBodyWindow ?? false,
 		inBodyResidue: overrides.inBodyResidue ?? false,
+	};
+}
+
+function createHanBigramRescueAssessment(
+	overrides: Partial<HanRescueAssessment> = {},
+): HanRescueAssessment {
+	return {
+		surfaceGroupIndex: overrides.surfaceGroupIndex ?? 0,
+		context: overrides.context ?? "body",
+		rescueMode: overrides.rescueMode ?? "whole_group_when_real_miss",
+		strength: overrides.strength ?? "weak",
+		matchedBigramCount: overrides.matchedBigramCount ?? 1,
+		matchedRealAnchorCount: overrides.matchedRealAnchorCount ?? 0,
+		coversStartAnchor: overrides.coversStartAnchor ?? true,
+		coversEndAnchor: overrides.coversEndAnchor ?? true,
+		coversEndpoints: overrides.coversEndpoints ?? true,
+		preservesSurfaceOrder: overrides.preservesSurfaceOrder ?? true,
+		rankingScore: overrides.rankingScore ?? 1,
 	};
 }
 
@@ -1857,6 +1885,11 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 					createPersistedHanBodyEvidenceMap(
 						locators,
 						persistedHanBodyEvidence,
+						(
+							engine as unknown as {
+								engine: { getResidentIndexView: () => { shards: [{ base: ResidentBase }] } };
+							}
+						).engine.getResidentIndexView().shards[0].base,
 					),
 			),
 			publishLexicalExactTapes: jest.fn(async () => undefined),
@@ -1880,9 +1913,9 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 			createDocument({
 				docRef: 201,
 				path: "zh/cache-recovery.md",
-                basename: "\u7f13\u5b58\u6062\u590d\u8bf4\u660e",
+				basename: "\u7f13\u5b58\u6062\u590d\u8bf4\u660e",
 				folder: "zh",
-                content: "\u7f13\u5b58\u6062\u590d\u8bf4\u660e \u6b65\u9aa4",
+				content: "\u7f13\u5b58\u6062\u590d\u8bf4\u660e \u6b65\u9aa4",
 			}),
 		]);
 
@@ -1900,7 +1933,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 					) => unknown;
 				};
 			}
-        ).engine.prepareSearch("\u7f13\u5b58\u6062\u590d\u8bf4\u660e", ["\u7f13\u5b58\u6062\u590d\u8bf4\u660e"], {
+		).engine.prepareSearch("\u7f13\u5b58\u6062\u590d\u8bf4\u660e", ["\u7f13\u5b58\u6062\u590d", "\u8bf4\u660e"], {
 			allowPrefixMatch: true,
 			allowFuzzyMatch: false,
 			maxItemResults: 5,
@@ -1919,7 +1952,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 		expect(snapshotStore.publishLexicalHanDocEvidence).toHaveBeenCalledTimes(1);
 		expect(snapshotStore.readLexicalHanDocEvidenceForDocs).toHaveBeenCalledTimes(1);
 		expect(snapshotStore.publishLexicalHanBodyEvidence).toHaveBeenCalledTimes(1);
-		expect(snapshotStore.readLexicalHanBodyEvidenceForBlocks).toHaveBeenCalledTimes(0);
+		expect(snapshotStore.readLexicalHanBodyEvidenceForBlocks).toHaveBeenCalledTimes(1);
 		expect(snapshotStore.readLexicalHanWitnesses).not.toHaveBeenCalled();
 	});
 
@@ -2844,5 +2877,221 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 				(candidate) => candidate.strongestHanSurfaceCompletionTier === "body_window",
 			),
 		).toBe(true);
+	});
+
+	test("plans whole-surface bigram rescue when any Han tokenizer real term misses family lookup", () => {
+		const fullSurface = "\u91ce\u602a";
+		const queryAnalysis = createHanQueryAnalysis(fullSurface, fullSurface);
+		const resolvedGroups = planHanSurfaceGroupRecallsAfterFamilyLookup(
+			queryAnalysis,
+			[],
+		);
+
+		expect(resolvedGroups).toEqual([
+			expect.objectContaining({
+				surfaceGroupIndex: 0,
+				rescueMode: "residual_only",
+				rescueBigrams: [fullSurface],
+			}),
+		]);
+	});
+
+	test("keeps whole-surface bigram rescue available even when another candidate has a real-term match", () => {
+		const fullSurface = "\u91ce\u602a";
+		const queryAnalysis = createHanQueryAnalysis(fullSurface, fullSurface);
+		const resolvedGroups = planHanSurfaceGroupRecallsAfterFamilyLookup(
+			queryAnalysis,
+			[
+				{
+					queryUnitIndex: 0,
+					queryUnitText: fullSurface,
+					queryUnitSource: "han_tokenizer_real",
+					querySurfaceGroupIndex: 0,
+					matches: [
+						{
+							familyId: 1,
+							shardLocalFamilySlot: 1,
+							familyText: fullSurface,
+							matchKind: "exact",
+							editDistance: 0,
+						},
+					],
+				},
+			],
+		);
+
+		expect(resolvedGroups).toEqual([
+			expect.objectContaining({
+				surfaceGroupIndex: 0,
+				matchedRealUnitIndices: [0],
+				rescueMode: "whole_group_when_real_miss",
+				rescueBigrams: [fullSurface],
+			}),
+		]);
+	});
+
+	test("keeps weak Han bigram rescue candidates visible when weak results are hidden", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		await engine.reIndexAll([
+			createDocument({
+				path: "fleeting.md",
+				basename: "Fleeting thoughts",
+				folder: "notes",
+				content: "\u6211\u7684\u806a\u660e\u624d\u667a\u600e\u4e48\u80fd\u6d6a\u8d39\u5728\u91ce\u602a\u4e0a",
+			}),
+		]);
+		const fullSurface = "\u91ce\u602a";
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: createHanQueryAnalysis(fullSurface, fullSurface),
+				unitFamilyMatches: [],
+				candidateDocs: [],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					path: "fleeting.md",
+					realizedCoverageCount: 0,
+					coverageGate: {
+						realizedCoverageCount: 0,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+					exactUnitCount: 0,
+					realizedFamilies: [
+						createRealizedFamily({
+							queryUnitIndex: 500000,
+							queryUnitText: fullSurface,
+							querySurfaceGroupIndex: 0,
+							familyId: -500001,
+							familyText: fullSurface,
+							matchKind: "opaque_exact",
+							inBodyResidue: true,
+						}),
+					],
+					hasOnlyWeakHanRescue: true,
+					hasAnyHanRescueAssessment: true,
+					hanRescueAssessments: [
+						createHanBigramRescueAssessment({ strength: "weak" }),
+					],
+					hanWeakRescueGroupCount: 1,
+					hanStrongRescueGroupCount: 0,
+				}),
+			],
+		}));
+		(engine as unknown as {
+			engine: {
+				search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
+				getResidentIndexView: () => { shards: [{ base: ResidentBase }] } | null;
+			};
+		}).engine = {
+			...createMockSearchRuntime(search, createResidentBaseForBlockCounts([1])),
+			getResidentIndexView: () => null,
+		};
+
+		const visible = await engine.searchFiles({
+			queryText: fullSurface,
+			isPrefixMatch: true,
+			isFuzzy: false,
+			hideWeaklyRelatedResults: true,
+			maxItemResults: 5,
+		});
+
+		expect(visible.map((file) => file.path)).toEqual(["fleeting.md"]);
+		expect(visible[0]?.score).toBe(0);
+	});
+
+	test("preserves exact ranking semantics while allowing opaque bigram rescue visibility", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		await engine.reIndexAll([
+			createDocument({
+				path: "exact.md",
+				basename: "exact",
+				folder: "notes",
+				content: "\u91ce\u602a",
+			}),
+			createDocument({
+				path: "bigram.md",
+				basename: "bigram",
+				folder: "notes",
+				content: "\u5728\u91ce\u602a\u4e0a",
+			}),
+		]);
+		const fullSurface = "\u91ce\u602a";
+		const exactFamily = createRealizedFamily({
+			queryUnitIndex: 0,
+			queryUnitText: fullSurface,
+			querySurfaceGroupIndex: 0,
+			familyId: 1,
+			familyText: fullSurface,
+			matchKind: "exact",
+		});
+		const opaqueFamily = createRealizedFamily({
+			queryUnitIndex: 500000,
+			queryUnitText: fullSurface,
+			querySurfaceGroupIndex: 0,
+			familyId: -500001,
+			familyText: fullSurface,
+			matchKind: "opaque_exact",
+			inBodyResidue: true,
+		});
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: createHanQueryAnalysis(fullSurface, fullSurface),
+				unitFamilyMatches: [],
+				candidateDocs: [],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					path: "exact.md",
+					realizedFamilies: [exactFamily],
+					exactUnitCount: 1,
+					realizedCoverageCount: 1,
+				}),
+				createPackingProfile({
+					docId: 1,
+					path: "bigram.md",
+					realizedFamilies: [opaqueFamily],
+					exactUnitCount: 0,
+					realizedCoverageCount: 0,
+					coverageGate: {
+						realizedCoverageCount: 0,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+					hasOnlyWeakHanRescue: true,
+					hasAnyHanRescueAssessment: true,
+					hanRescueAssessments: [
+						createHanBigramRescueAssessment({ strength: "weak" }),
+					],
+					hanWeakRescueGroupCount: 1,
+					hanStrongRescueGroupCount: 0,
+				}),
+			],
+		}));
+		(engine as unknown as {
+			engine: {
+				search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
+				getResidentIndexView: () => { shards: [{ base: ResidentBase }] } | null;
+			};
+		}).engine = {
+			...createMockSearchRuntime(search, createResidentBaseForBlockCounts([1, 1])),
+			getResidentIndexView: () => null,
+		};
+
+		const visible = await engine.searchFiles({
+			queryText: fullSurface,
+			isPrefixMatch: true,
+			isFuzzy: false,
+			hideWeaklyRelatedResults: true,
+			maxItemResults: 5,
+		});
+
+		expect(visible.map((file) => file.path)).toEqual(["exact.md", "bigram.md"]);
+		expect(visible.map((file) => file.score)).toEqual([1, 0]);
+		expect(opaqueFamily.matchKind).toBe("opaque_exact");
 	});
 });

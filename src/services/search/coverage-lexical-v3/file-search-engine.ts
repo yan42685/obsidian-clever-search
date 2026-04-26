@@ -386,7 +386,8 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				? refinedCandidates.filter(
 						(candidate) =>
 							!candidate.hasOnlyWeakHanRescue ||
-							candidate.singletonHanCompletion.matched,
+							candidate.singletonHanCompletion.matched ||
+							hasHanBigramRescueSupport(candidate),
 					)
 				: refinedCandidates;
 		const pruneStartedAtMs = shouldMeasureTiming ? nowDebugMs() : 0;
@@ -1505,6 +1506,13 @@ function collectFilteredCandidatePaths(
 		.map((candidate) => candidate.path);
 }
 
+function hasHanBigramRescueSupport(candidate: EvidencePackingProfile): boolean {
+	return candidate.hanRescueAssessments.some(
+		(assessment) =>
+			assessment.matchedBigramCount > 0 && assessment.strength !== "none",
+	);
+}
+
 function filterToTopCoverageGateBand(
 	candidates: readonly EvidencePackingProfile[],
 ): readonly EvidencePackingProfile[] {
@@ -1513,7 +1521,8 @@ function filterToTopCoverageGateBand(
 		return candidates;
 	}
 	return candidates.filter((candidate) =>
-		hasSameCoverageGate(candidate.coverageGate, strongestCoverageGate),
+		hasSameCoverageGate(candidate.coverageGate, strongestCoverageGate) ||
+		hasHanBigramRescueSupport(candidate),
 	);
 }
 

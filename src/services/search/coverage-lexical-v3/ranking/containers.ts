@@ -1374,7 +1374,7 @@ function buildWitnessPositionedOccurrences(
 		Readonly<{ matchKey: number; start: number; text: string }>
 	>,
 ): PositionedFamilyOccurrence[] {
-	return occurrences.map((occurrence, index) => {
+	return Array.from(occurrences, (occurrence, index) => {
 		const familyId = occurrence.matchKey;
 		const approxLength = Math.max(1, occurrence.text.length);
 		return {
@@ -1397,7 +1397,7 @@ function buildColdWitnessOccurrences(
 	}
 	const effectiveTexts = texts ?? [];
 	const effectiveMatchKeys = matchKeys;
-	return effectiveMatchKeys.map((matchKey, index) => ({
+	return Array.from(effectiveMatchKeys, (matchKey, index) => ({
 		matchKey,
 		start: startOffsets[index] ?? 0,
 		text: effectiveTexts[index] ?? "",
