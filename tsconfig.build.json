@@ -4,6 +4,6 @@
 		"types": ["svelte", "node"]
 	},
 	"include": ["src/**/*.ts"],
-	"exclude": ["tests/**", "**/*.test.ts", "**/*.bench.ts", "src/services/search/coverage-lexical/**", "src/services/search/coverage-lexical-v2/**"]
+	"exclude": ["tests/**", "**/*.test.ts", "**/*.bench.ts"]
 }
 

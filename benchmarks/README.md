@@ -1,4 +1,4 @@
-# Benchmark Corpora
+﻿# Benchmark Corpora
 
 This directory stores benchmark corpus notes plus archived benchmark design docs for repeatable local runs.
 
@@ -94,8 +94,9 @@ node scripts/benchmark-big-vault-read.mjs
 ```
 
 ### `coverage-lexical-automation-v1`
+### `coverage-lexical-automation-v1`
 
-This is the shared synthetic corpus used by `npm run benchmark:coverage-lexical` (V3) and `npm run benchmark:coverage-lexical:legacy`.
+This is the shared synthetic corpus used by `npm run benchmark:coverage-lexical` (V3).
 
 Materialize the benchmark corpus locally with:
 
@@ -128,62 +129,17 @@ Run the current V3 benchmark with:
 npm run benchmark:coverage-lexical
 ```
 
-Run the preserved legacy continuity benchmark with:
+The current V3 benchmark uses the automation corpus, query cases, and core summary metrics, and compares `CoverageLexical(V3)` against `MiniSearch`.
 
-```bash
-npm run benchmark:coverage-lexical:legacy
-```
-
-The current V3 benchmark reuses the legacy automation corpus, query cases, and
-core summary metrics, but narrows the comparison set to
-`CoverageLexical(V3)` versus `MiniSearch`.
-
-The preserved legacy benchmark keeps `coverage-lexical-automation-v1` as the
-continuity anchor and still reports the original intent gates:
+The benchmark keeps `coverage-lexical-automation-v1` as the continuity anchor and reports the original intent gates:
 
 - `product_guardrail_gate`
 - `exception_aware_gate`
 - `legacy_continuity_gate`
 
-For coverage-lexical Chinese regression work, do not rely on this synthetic
-benchmark alone. There are also dedicated regression suites for:
-
-- tokenizer-side real-Chinese segmentation:
-  - `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-chinese-regression.test.ts`
-- engine-side short-Chinese and mixed-script ranking checks:
-  - `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-chinese-engine-regression.test.ts`
-- versioned real-tokenizer manifest gate:
-  - `npm test -- --runInBand tests/src/services/search/coverage-lexical-real-tokenizer-gate.test.ts`
-
-The dedicated real-tokenizer assets live in:
-
-- `tests/src/services/search/coverage-lexical-real-tokenizer-manifest-v1.ts`
-
-Those assets are the current place to protect realistic short-Chinese and
-mixed-script display-front behavior with corrected Han text, including:
-
-- `政治理论`
-- `关于快乐的定义和适用范围`
-- `projected token 运行时访问`
-- `obsidian sync 问题`
-
-That real-tokenizer gate is intentionally separate from the synthetic
-`coverage-lexical-automation-v1` benchmark. Use it to verify:
-
-- top1 correctness on realistic short Chinese / mixed-script queries
-- display-front suppression of one-sided distractors once a balanced top result exists
-
-Those dedicated regression suites are meant to cover realistic short Chinese
-and mixed-script query shapes such as:
-
-- `政治理论`
-- `关于快乐的定义和适用范围`
-- `projected token 运行时访问`
-- `obsidian sync 问题`
-
 The materialized corpus and the benchmark both come from the same generator:
 
-- `tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts#createAutomationCorpus`
+- `tests/src/services/search/coverage-lexical-automation-fixture.ts#createAutomationCorpus`
 
 ## Design intent
 

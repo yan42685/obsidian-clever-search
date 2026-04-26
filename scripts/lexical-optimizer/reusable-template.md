@@ -13,7 +13,7 @@ Use this template when you want to port the current automation loop to another l
 
 2. Provide one explicit implementation target file for mechanism work.
 
-- for this repository, that file is `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
+- for this repository, that file is `src/services/search/coverage-lexical-v3/file-search-engine.ts`
 - keep new backend mechanism work there rather than inside removed legacy engines
 - use the tuning surface only for smaller orchestration and numeric tuning
 
@@ -29,8 +29,8 @@ Use this template when you want to port the current automation loop to another l
 
 ## Default Files
 
-- tuning surface: `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
-- implementation target: `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
+- tuning surface: `src/services/search/coverage-lexical-v3/file-search-engine.ts`
+- implementation target: `src/services/search/coverage-lexical-v3/file-search-engine.ts`
 - candidate manifest: `.codex-bench/lexical-optimizer/candidates.json`
 - example manifest: `scripts/lexical-optimizer/candidate-manifest.example.json`
 - operator prompt: `scripts/lexical-optimizer/automation-prompt.md`

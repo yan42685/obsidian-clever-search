@@ -1,4 +1,4 @@
-﻿jest.mock("src/services/search/tokenizer", () => ({
+jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
 }));
 
@@ -11,7 +11,7 @@ jest.mock(
 );
 
 jest.mock(
-	"src/services/search/coverage-lexical/direct-subitems",
+	"src/services/search/coverage-lexical-v3/direct-subitems",
 	() => ({
 		buildDirectSubitemsExactFileSubItems: () => [],
 	}),

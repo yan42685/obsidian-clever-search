@@ -47,18 +47,18 @@ export const DEFAULT_LATEST_REPORT = path.join(
 export const DEFAULT_BENCHMARK_ARGS = [
 	"node_modules/jest/bin/jest.js",
 	"--config",
-	"jest.coverage-lexical-legacy-benchmark.config.js",
+	"jest.coverage-lexical-benchmark.config.js",
 	"--runInBand",
 ];
 
 export const DEFAULT_PARAMETER_TARGET_FILE = path.resolve(
 	process.cwd(),
-	"src/services/search/coverage-lexical/coverage-lexical-engine.ts",
+	"src/services/search/coverage-lexical-v3/file-search-engine.ts",
 );
 
 export const DEFAULT_IMPLEMENTATION_TARGET_FILE = path.resolve(
 	process.cwd(),
-	"src/services/search/coverage-lexical/coverage-lexical-engine.ts",
+	"src/services/search/coverage-lexical-v3/file-search-engine.ts",
 );
 
 export const DEFAULT_CANDIDATE_FILE = path.resolve(

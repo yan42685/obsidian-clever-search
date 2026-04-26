@@ -259,6 +259,7 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 			files: ReadonlyArray<{
 				path: string;
 				text?: string;
+				generation?: number;
 			}>,
 		): Promise<void> {
 			for (const file of files) {
@@ -632,7 +633,7 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 
 const previousFixtureImportEnv = process.env.COVERAGE_LEXICAL_FIXTURE_IMPORT;
 process.env.COVERAGE_LEXICAL_FIXTURE_IMPORT = "1";
-const legacyFixtureModule = require("./coverage-lexical-legacy-automation-benchmark.bench") as {
+const legacyFixtureModule = require("./coverage-lexical-automation-fixture") as {
 	createAutomationCorpus(): {
 		documents: Array<Record<string, unknown>>;
 		queryCases: Array<Record<string, unknown>>;
@@ -771,7 +772,7 @@ function attachCoverageLexicalV3SlowQueryDiagnostics(
 				topResultPath === benchmarkQueryCase.relevantPath,
 			missed:
 				benchmarkQueryCase?.relevantPath != null &&
-				!results.some((result) => result.path === benchmarkQueryCase.relevantPath),
+				!results.some((result: { path: string }) => result.path === benchmarkQueryCase.relevantPath),
 		});
 		return results;
 	};
