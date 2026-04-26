@@ -94,19 +94,16 @@ export function buildHanRouteArena(
 		metadataCharDocIds: metadataCharBuckets.ids,
 		bodyCharAdaptivePostings,
 		identityWitnessStartByDocId: identityWitnessBuckets.starts,
-		identityWitnessStartByLiveDocSlot: identityWitnessBuckets.starts,
 		identityWitnessTextIds: identityWitnessBuckets.ids,
 		identityWitnessSourceMaskByDocEntry: Uint8Array.from(
 			flattenBuckets(identityWitnessSourceMasksByDoc),
 		),
 		routeWitnessStartByDocId: routeWitnessBuckets.starts,
-		routeWitnessStartByLiveDocSlot: routeWitnessBuckets.starts,
 		routeWitnessTextIds: routeWitnessBuckets.ids,
 		routeWitnessSourceMaskByDocEntry: Uint8Array.from(
 			flattenBuckets(routeWitnessSourceMasksByDoc),
 		),
 		headingWitnessStartByDocId: headingWitnessBuckets.starts,
-		headingWitnessStartByLiveDocSlot: headingWitnessBuckets.starts,
 		headingWitnessTextIds: headingWitnessBuckets.ids,
 		bodyWitnessOccurrenceStartByBlockId: bodyWitnessBuckets.starts,
 		bodyWitnessOccurrenceTextIds: bodyWitnessBuckets.ids,
@@ -169,19 +166,16 @@ export function estimateHanRouteBytes(arena: ResidentHanRouteArena): number {
 			arena.identityWitnessStartByDocId,
 			arena.identityWitnessTextIds,
 		) +
-		(arena.identityWitnessStartByLiveDocSlot?.byteLength ?? 0) +
 		arena.identityWitnessSourceMaskByDocEntry.byteLength +
 		estimateSentinelPostingBytes(
 			arena.routeWitnessStartByDocId,
 			arena.routeWitnessTextIds,
 		) +
-		(arena.routeWitnessStartByLiveDocSlot?.byteLength ?? 0) +
 		arena.routeWitnessSourceMaskByDocEntry.byteLength +
 		estimateSentinelPostingBytes(
 			arena.headingWitnessStartByDocId,
 			arena.headingWitnessTextIds,
 		) +
-		(arena.headingWitnessStartByLiveDocSlot?.byteLength ?? 0) +
 		estimateSentinelPostingBytes(
 			arena.bodyWitnessOccurrenceStartByBlockId,
 			arena.bodyWitnessOccurrenceTextIds,
@@ -299,19 +293,16 @@ export function describeHanRouteByteBreakdown(
 				arena.identityWitnessStartByDocId,
 				arena.identityWitnessTextIds,
 			) +
-			(arena.identityWitnessStartByLiveDocSlot?.byteLength ?? 0) +
 			arena.identityWitnessSourceMaskByDocEntry.byteLength +
 			estimateSentinelPostingBytes(
 				arena.routeWitnessStartByDocId,
 				arena.routeWitnessTextIds,
 			) +
-			(arena.routeWitnessStartByLiveDocSlot?.byteLength ?? 0) +
 			arena.routeWitnessSourceMaskByDocEntry.byteLength +
 			estimateSentinelPostingBytes(
 				arena.headingWitnessStartByDocId,
 				arena.headingWitnessTextIds,
-			) +
-			(arena.headingWitnessStartByLiveDocSlot?.byteLength ?? 0),
+			),
 		bodyWitnessBytes: estimateSentinelPostingBytes(
 			arena.bodyWitnessOccurrenceStartByBlockId,
 			arena.bodyWitnessOccurrenceTextIds,

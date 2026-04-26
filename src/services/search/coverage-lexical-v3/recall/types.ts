@@ -7,6 +7,8 @@ export type V3QueryFamilyMatchKind =
 	| "fuzzy";
 
 export type V3QueryFamilyMatch = Readonly<{
+	shardId?: string;
+	shardGeneration?: number;
 	familyId: number;
 	shardLocalFamilySlot: number;
 	familyText: string;

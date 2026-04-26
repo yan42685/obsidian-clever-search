@@ -3,6 +3,7 @@ import type {
 	ResidentSectionEncodingDescriptor,
 } from "./integer-arrays";
 import type { ResidentBlockPositionLane } from "./position-lanes";
+import type { ResidentShardDescriptor } from "../shards";
 
 export type ResidentStringArena = Readonly<{
 	text: string;
@@ -15,29 +16,18 @@ export type ResidentDocTable = Readonly<{
 	docCount: number;
 	liveDocCount: number;
 	docRefsByDocId: Float64Array;
-	docRefsByLiveDocSlot: Float64Array;
 	liveDocSlotByDocId: ResidentIntegerArray;
 	docIdByLiveDocSlot: ResidentIntegerArray;
 	pathStringIds: ResidentIntegerArray;
-	pathStringIdsByLiveDocSlot: ResidentIntegerArray;
 	generationByDocId: Float64Array;
-	generationByLiveDocSlot: Float64Array;
 	identityStartByDocId: ResidentIntegerArray;
 	identityCountByDocId: ResidentIntegerArray;
-	identityStartByLiveDocSlot: ResidentIntegerArray;
-	identityCountByLiveDocSlot: ResidentIntegerArray;
 	routeStartByDocId: ResidentIntegerArray;
 	routeCountByDocId: ResidentIntegerArray;
-	routeStartByLiveDocSlot: ResidentIntegerArray;
-	routeCountByLiveDocSlot: ResidentIntegerArray;
 	headingStartByDocId: ResidentIntegerArray;
 	headingCountByDocId: ResidentIntegerArray;
-	headingStartByLiveDocSlot: ResidentIntegerArray;
-	headingCountByLiveDocSlot: ResidentIntegerArray;
 	bodyBlockStartByDocId: ResidentIntegerArray;
 	bodyBlockCountByDocId: ResidentIntegerArray;
-	bodyBlockStartByLiveDocSlot: ResidentIntegerArray;
-	bodyBlockCountByLiveDocSlot: ResidentIntegerArray;
 }>;
 
 export type ResidentFamilyKind = "latin" | "han" | "mixed" | "other";
@@ -125,15 +115,12 @@ export type ResidentHanRouteArena = Readonly<{
 	metadataCharDocIds: ResidentIntegerArray;
 	bodyCharAdaptivePostings: ResidentAdaptivePostingField;
 	identityWitnessStartByDocId: ResidentIntegerArray;
-	identityWitnessStartByLiveDocSlot?: ResidentIntegerArray;
 	identityWitnessTextIds: ResidentIntegerArray;
 	identityWitnessSourceMaskByDocEntry: Uint8Array;
 	routeWitnessStartByDocId: ResidentIntegerArray;
-	routeWitnessStartByLiveDocSlot?: ResidentIntegerArray;
 	routeWitnessTextIds: ResidentIntegerArray;
 	routeWitnessSourceMaskByDocEntry: Uint8Array;
 	headingWitnessStartByDocId: ResidentIntegerArray;
-	headingWitnessStartByLiveDocSlot?: ResidentIntegerArray;
 	headingWitnessTextIds: ResidentIntegerArray;
 	bodyWitnessOccurrenceStartByBlockId: ResidentIntegerArray;
 	bodyWitnessOccurrenceTextIds: ResidentIntegerArray;
@@ -249,6 +236,7 @@ export type ResidentShard = Readonly<{
 export type ResidentIndexView = Readonly<{
 	version: 1;
 	shards: readonly ResidentShard[];
+	shardRegistry?: readonly ResidentShardDescriptor[];
 }>;
 
 export type ResidentIndexViewSummary = Readonly<{

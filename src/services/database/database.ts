@@ -22,6 +22,12 @@ import type {
   HybridIndexedFileRef,
 } from "src/services/search/hybrid/hybrid-store";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
+import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
+import type { ActiveOverlayJournalEntry } from "src/services/search/coverage-lexical-v3/active-overlay-journal";
+import type {
+  CompactJobManifest,
+  CompactTempArtifact,
+} from "src/services/search/coverage-lexical-v3/compact";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -132,6 +138,41 @@ export type DocRegistryRow = {
   updatedAt: number;
 };
 
+export type CoverageLexicalV3ShardRegistryRow = {
+  shardId: string;
+  generation: number;
+  state: "active" | "sealing" | "sealed" | "compact_temp" | "garbage";
+  sourceBytes: number;
+  staleSourceBytes?: number;
+  docCount: number;
+  staleDocCount?: number;
+  createdOrder: number;
+  artifactOwner: string;
+};
+
+export type CoverageLexicalV3InvalidationRow = {
+  id: string;
+  shardId: string;
+  shardGeneration: number;
+  docRef: DocRef;
+  docGeneration: number;
+  reason: "superseded" | "deleted";
+  createdAt: number;
+};
+
+export type CoverageLexicalV3ResidentShardArtifactRow = {
+  id: string;
+  shardId: string;
+  generation: number;
+  artifactOwner: string;
+  base: ResidentBase;
+  createdAt: number;
+};
+
+export type CoverageLexicalV3ActiveOverlayJournalRow = ActiveOverlayJournalEntry;
+export type CoverageLexicalV3CompactJobManifestRow = CompactJobManifest;
+export type CoverageLexicalV3CompactTempArtifactRow = CompactTempArtifact;
+
 type DocRegistryMetaRow = {
   key: string;
   value: number;
@@ -148,6 +189,12 @@ const TARGETED_INDEX_RESET_TABLES = [
   "lexicalHanDocEvidence",
   "lexicalHanBodyEvidence",
   "docRegistry",
+  "coverageLexicalV3ShardRegistry",
+  "coverageLexicalV3Invalidations",
+  "coverageLexicalV3ResidentShardArtifacts",
+  "coverageLexicalV3ActiveOverlayJournal",
+  "coverageLexicalV3CompactJobs",
+  "coverageLexicalV3CompactTempArtifacts",
   "indexRecoveryState",
   "indexArtifactState",
   "lexicalMutationJournal",
@@ -1069,7 +1116,7 @@ export class Database {
 export class DexieWrapper extends Dexie {
   // Dexie keeps one decimal place for version() and multiplies by 10 when opening IndexedDB.
   // Use 0.1 increments here so app-level schema bumps stay readable while mapping to IDB integers.
-  private static readonly _dbVersion = 28.9;
+  private static readonly _dbVersion = 29.3;
   private static readonly dbNamePrefix = "clever-search/";
   static readonly docRegistryNextRefKey = DOC_REGISTRY_NEXT_REF_KEY;
   static readonly lexicalQueryEvidenceReadyKey = LEXICAL_QUERY_EVIDENCE_READY_KEY;
@@ -1087,6 +1134,12 @@ export class DexieWrapper extends Dexie {
   lexicalHanDocEvidence!: Dexie.Table<LexicalHanDocEvidenceRow, string>;
   lexicalHanBodyEvidence!: Dexie.Table<LexicalHanBodyEvidenceRow, string>;
   docRegistry!: Dexie.Table<DocRegistryRow, number>;
+  coverageLexicalV3ShardRegistry!: Dexie.Table<CoverageLexicalV3ShardRegistryRow, string>;
+  coverageLexicalV3Invalidations!: Dexie.Table<CoverageLexicalV3InvalidationRow, string>;
+  coverageLexicalV3ResidentShardArtifacts!: Dexie.Table<CoverageLexicalV3ResidentShardArtifactRow, string>;
+  coverageLexicalV3ActiveOverlayJournal!: Dexie.Table<CoverageLexicalV3ActiveOverlayJournalRow, string>;
+  coverageLexicalV3CompactJobs!: Dexie.Table<CoverageLexicalV3CompactJobManifestRow, string>;
+  coverageLexicalV3CompactTempArtifacts!: Dexie.Table<CoverageLexicalV3CompactTempArtifactRow, string>;
   docRegistryMeta!: Dexie.Table<DocRegistryMetaRow, string>;
 
   hybridChunks!: Dexie.Table<ChunkRow, number>;
@@ -1190,6 +1243,15 @@ export class DexieWrapper extends Dexie {
         lexicalExactTapes: "id",
         lexicalHanWitness: "id",
         docRegistry: "docRef, path, deleted, liveGeneration, updatedAt",
+        coverageLexicalV3ShardRegistry: "shardId, state, createdOrder",
+        coverageLexicalV3Invalidations:
+          "id, shardId, docRef, docGeneration, [shardId+shardGeneration+docRef+docGeneration]",
+        coverageLexicalV3ResidentShardArtifacts:
+          "id, shardId, generation, artifactOwner, [artifactOwner+generation]",
+        coverageLexicalV3ActiveOverlayJournal:
+          "id, sequence, activeShardId, activeShardGeneration, [activeShardId+activeShardGeneration+sequence]",
+        coverageLexicalV3CompactJobs: "jobId, status, createdAt, updatedAt",
+        coverageLexicalV3CompactTempArtifacts: "jobId, outputShardId, createdAt",
         docRegistryMeta: "key",
         hybridChunks: "++id, filePath",
         fileSnapshots: "filePath",
@@ -1227,6 +1289,15 @@ export class DexieWrapper extends Dexie {
         lexicalExactTapes: "id",
         lexicalHanWitness: "id",
         docRegistry: "docRef, path, deleted, liveGeneration, updatedAt",
+        coverageLexicalV3ShardRegistry: "shardId, state, createdOrder",
+        coverageLexicalV3Invalidations:
+          "id, shardId, docRef, docGeneration, [shardId+shardGeneration+docRef+docGeneration]",
+        coverageLexicalV3ResidentShardArtifacts:
+          "id, shardId, generation, artifactOwner, [artifactOwner+generation]",
+        coverageLexicalV3ActiveOverlayJournal:
+          "id, sequence, activeShardId, activeShardGeneration, [activeShardId+activeShardGeneration+sequence]",
+        coverageLexicalV3CompactJobs: "jobId, status, createdAt, updatedAt",
+        coverageLexicalV3CompactTempArtifacts: "jobId, outputShardId, createdAt",
         docRegistryMeta: "key",
         hybridChunks: "++id, filePath",
         fileSnapshots: "filePath",
@@ -1458,6 +1529,3 @@ function addDocLocalWitnessTexts(
     texts.add(value);
   }
 }
-
-
-

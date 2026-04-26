@@ -23,18 +23,7 @@ export type FileSearchRequest = {
 	maxSubItemResults?: number;
 };
 
-export type SerializedCoverageLexicalBinarySnapshot = {
-	__backend: "coverage-lexical";
-	__version: 1 | 2;
-	__encoding: "binary-snapshot-v1" | "binary-snapshot-v2";
-	data: ArrayBuffer;
-};
-
-export type SerializedUnsupportedLegacyFileSearchIndex = Record<string, unknown>;
-
-export type SerializedFileSearchIndex =
-	| SerializedCoverageLexicalBinarySnapshot
-	| SerializedUnsupportedLegacyFileSearchIndex;
+export type SerializedFileSearchIndex = Record<string, unknown>;
 
 export type PersistentFileIndexRecoveryMove = {
 	oldPath: string;

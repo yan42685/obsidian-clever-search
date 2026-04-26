@@ -13,6 +13,8 @@ if you want to view the source, please visit the github repository of this plugi
 */
 `;
 const prod = process.argv[2] === "production";
+const analyzeBundle =
+    process.argv.includes("--analyze") || process.env.CS_BUNDLE_ANALYZE === "1";
 
 // function debounce(delay, func) {
 // 	let timeoutId;
@@ -83,9 +85,81 @@ async function printFilesSize(directory) {
     }
 }
 
+function formatBytes(bytes) {
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+
+    return `${(bytes / 1024).toFixed(2)} KB`;
+}
+
+async function writeBundleAnalysis(metafile) {
+    if (!metafile) {
+        return;
+    }
+
+    const metafilePath = pathUtil.join(DIST_PATH, "metafile.json");
+    const analyzePath = pathUtil.join(DIST_PATH, "analyze.txt");
+    const mainBreakdownPath = pathUtil.join(DIST_PATH, "main-breakdown.md");
+
+    await fsUtil.promises.writeFile(
+        metafilePath,
+        JSON.stringify(metafile, null, 2),
+        "utf8",
+    );
+    await fsUtil.promises.writeFile(
+        analyzePath,
+        await esbuild.analyzeMetafile(metafile, { verbose: true }),
+        "utf8",
+    );
+
+    const mainOutput = Object.entries(metafile.outputs).find(([filePath]) => {
+        const normalizedPath = filePath.replace(/\\/g, "/");
+        return normalizedPath.endsWith("/main.js") || normalizedPath === "main.js";
+    });
+
+    if (!mainOutput) {
+        console.warn("Could not find main.js in esbuild metafile outputs.");
+        return;
+    }
+
+    const [mainOutputPath, mainOutputInfo] = mainOutput;
+    const rows = Object.entries(mainOutputInfo.inputs)
+        .map(([inputPath, inputInfo]) => ({
+            inputPath,
+            bytes: inputInfo.bytesInOutput ?? 0,
+        }))
+        .sort((left, right) => right.bytes - left.bytes);
+
+    const lines = [
+        "# main.js Bundle Breakdown",
+        "",
+        `Output: \`${mainOutputPath}\``,
+        `Total size: ${formatBytes(mainOutputInfo.bytes)}`,
+        "",
+        "| Rank | Size | Share | Module |",
+        "| ---: | ---: | ---: | --- |",
+        ...rows.map((row, index) => {
+            const share = mainOutputInfo.bytes > 0
+                ? `${((row.bytes / mainOutputInfo.bytes) * 100).toFixed(2)}%`
+                : "0.00%";
+            return `| ${index + 1} | ${formatBytes(row.bytes)} | ${share} | \`${row.inputPath}\` |`;
+        }),
+        "",
+    ];
+
+    await fsUtil.promises.writeFile(mainBreakdownPath, lines.join("\n"), "utf8");
+    console.log(`Bundle metafile written to ${metafilePath}`);
+    console.log(`Bundle analysis written to ${analyzePath}`);
+    console.log(`main.js breakdown written to ${mainBreakdownPath}`);
+}
+
 const DIST_PATH = "dist";
 const DEV_COMMAND_REGISTRY_STUB_PATH = pathUtil.resolve(
     "src/services/obsidian/command-registry.noop.ts",
+);
+const DEV_DATA_MANAGER_STUB_PATH = pathUtil.resolve(
+    "src/services/obsidian/user-data/data-manager.dev.noop.ts",
 );
 // 根据环境决定输出位置：生产环境去 dist，开发环境留根目录
 const outDir = prod ? DIST_PATH : "./";
@@ -126,6 +200,7 @@ const esbuildConfig = {
     target: "es2018",
     logLevel: "info",
     sourcemap: prod ? false : "inline",
+    metafile: analyzeBundle,
     treeShaking: true,
     outdir: outDir, 
     define: {
@@ -134,10 +209,13 @@ const esbuildConfig = {
     },
     plugins: [
         prod && {
-            name: "alias-dev-command-registry",
+            name: "alias-dev-only-modules",
             setup(build) {
                 build.onResolve({ filter: /command-registry\.dev$/ }, () => {
                     return { path: DEV_COMMAND_REGISTRY_STUB_PATH };
+                });
+                build.onResolve({ filter: /data-manager\.dev$/ }, () => {
+                    return { path: DEV_DATA_MANAGER_STUB_PATH };
                 });
             },
         },
@@ -152,7 +230,8 @@ const context = await esbuild.context(esbuildConfig);
 
 if (prod) {
     // 生产环境构建逻辑
-    await context.rebuild();
+    const result = await context.rebuild();
+    await writeBundleAnalysis(result.metafile);
     
     // 自动将根目录的资源复制到 dist 文件夹，方便 GitHub Release 直接打包
     const filesToCopy = ["manifest.json", "styles.css"];

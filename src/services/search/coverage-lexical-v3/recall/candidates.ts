@@ -33,6 +33,10 @@ export function recallCandidateDocs(
 	base: ResidentBase,
 	queryAnalysis: V3QueryAnalysis,
 	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
+	shardOwner: Readonly<{ shardId: string; shardGeneration: number }> = {
+		shardId: DEFAULT_RESIDENT_SHARD_ID,
+		shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
+	},
 ): V3CandidateDocRecall[] {
 	const recallByLiveDocSlot = new Map<number, RecallBucket>();
 	for (const unitMatches of unitFamilyMatches) {
@@ -126,8 +130,8 @@ export function recallCandidateDocs(
 				}))
 				.sort((left, right) => left.blockId - right.blockId);
 			return {
-				shardId: DEFAULT_RESIDENT_SHARD_ID,
-				shardGeneration: DEFAULT_RESIDENT_SHARD_GENERATION,
+				shardId: shardOwner.shardId,
+				shardGeneration: shardOwner.shardGeneration,
 				docId: bucket.docId,
 				liveDocSlot: bucket.liveDocSlot,
 				matchedIdentityUnitIndices: [...bucket.identity].sort((left, right) => left - right),

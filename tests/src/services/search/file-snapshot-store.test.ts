@@ -934,7 +934,7 @@ test("publishes and reloads lexical fuzzy rescue payloads", async () => {
     expect(evidenceByRowId.has(buildLexicalBlockEvidenceRowId(missingLocator))).toBe(false);
   });
 
-  test("getRuntimeMemoryEstimate reports resident breakdown and slot reuse", async () => {
+  test("getRuntimeMemoryEstimate reports resident breakdown and cache-slot reuse", async () => {
     const first = new TFile("docs/one.md", "alpha", 100);
     const second = new TFile("docs/two.md", "beta beta", 200);
     const third = new TFile("docs/three.md", "gamma", 300);
@@ -952,8 +952,8 @@ test("publishes and reloads lexical fuzzy rescue payloads", async () => {
 
     const estimateAfterDelete = store.getRuntimeMemoryEstimate();
     expect(estimateAfterDelete.fileCount).toBe(1);
-    expect(estimateAfterDelete.slotCount).toBe(2);
-    expect(estimateAfterDelete.freeSlotCount).toBe(1);
+    expect(estimateAfterDelete.cacheSlotCount).toBe(2);
+    expect(estimateAfterDelete.freeCacheSlotCount).toBe(1);
     expect(estimateAfterDelete.largestEntries[0]).toEqual(
       expect.objectContaining({
         path: second.path,
@@ -974,8 +974,8 @@ test("publishes and reloads lexical fuzzy rescue payloads", async () => {
     expect(estimate.currentTextBytes).toBe(expectedTextBytes);
     expect(estimate.generationBytes).toBe(16);
     expect(estimate.fileCount).toBe(2);
-    expect(estimate.slotCount).toBe(2);
-    expect(estimate.freeSlotCount).toBe(0);
+    expect(estimate.cacheSlotCount).toBe(2);
+    expect(estimate.freeCacheSlotCount).toBe(0);
     expect(estimate.totalBytes).toBe(expectedPathBytes + expectedTextBytes + 16);
     expect(estimate.largestEntries.map((entry) => entry.path)).toEqual([
       second.path,

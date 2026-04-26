@@ -246,7 +246,7 @@ type EnsureDocRegistryEntryRequest = {
 
 type CurrentFileEntry = {
 	path: string;
-	slot: number;
+	cacheSlot: number;
 	text: string;
 	generation?: number;
 };
@@ -285,6 +285,7 @@ export type LexicalHanBodyEvidenceSnapshot = Readonly<{
 	bodyWitnessStartOffsets: readonly number[];
 }>;
 
+// Canonical cold-evidence locator for a shard-owned doc evidence slice.
 export type LexicalDocEvidenceLocator = Readonly<{
 	shardId: string;
 	shardGeneration: number;
@@ -292,11 +293,13 @@ export type LexicalDocEvidenceLocator = Readonly<{
 	generation: number;
 }>;
 
+// Canonical cold-evidence locator for a shard-owned block evidence slice.
 export type LexicalBlockEvidenceLocator = LexicalDocEvidenceLocator &
 	Readonly<{
 		blockOrdinal: number;
 	}>;
 
+// Row ids are the storage-layer implementation keys for shard-owned slice locators.
 export function buildLexicalDocEvidenceRowId(
 	locator: LexicalDocEvidenceLocator,
 ): string {
@@ -317,8 +320,8 @@ export type FileSnapshotRuntimeMemoryEstimate = {
 	currentTextBytes: number;
 	generationBytes: number;
 	fileCount: number;
-	slotCount: number;
-	freeSlotCount: number;
+	cacheSlotCount: number;
+	freeCacheSlotCount: number;
 	totalBytes: number;
 	largestEntries: Array<{
 		path: string;
@@ -350,12 +353,12 @@ export class FileSnapshotStore {
 	private static readonly STRING_CODE_UNIT_BYTES = 2;
 	private static readonly GENERATION_BYTES = 8;
 	private readonly vault = getInstance(Vault);
-	private readonly currentFilePathToSlot = new Map<string, number>();
+	private readonly currentFilePathToCacheSlot = new Map<string, number>();
 	private readonly currentFileLru = new Map<string, true>();
-	private readonly currentSlotTexts: Array<string | undefined> = [];
-	private readonly currentSlotGenerations: Array<number | undefined> = [];
-	private readonly currentSlotBytes: Array<number | undefined> = [];
-	private readonly freeCurrentSlots: number[] = [];
+	private readonly currentCacheSlotTexts: Array<string | undefined> = [];
+	private readonly currentCacheSlotGenerations: Array<number | undefined> = [];
+	private readonly currentCacheSlotBytes: Array<number | undefined> = [];
+	private readonly freeCurrentCacheSlots: number[] = [];
 	private currentRuntimeBytes = 0;
 
 	async readCurrentTexts(
@@ -904,7 +907,7 @@ export class FileSnapshotStore {
 	}
 
 	async retainOnlyFiles(validPaths: ReadonlySet<string>): Promise<void> {
-		for (const path of Array.from(this.currentFilePathToSlot.keys())) {
+		for (const path of Array.from(this.currentFilePathToCacheSlot.keys())) {
 			if (!validPaths.has(path)) {
 				this.deleteCurrentFile(path);
 			}
@@ -999,12 +1002,12 @@ export class FileSnapshotStore {
 	}
 
 	resetRuntimeState(): void {
-		this.currentFilePathToSlot.clear();
+		this.currentFilePathToCacheSlot.clear();
 		this.currentFileLru.clear();
-		this.currentSlotTexts.length = 0;
-		this.currentSlotGenerations.length = 0;
-		this.currentSlotBytes.length = 0;
-		this.freeCurrentSlots.length = 0;
+		this.currentCacheSlotTexts.length = 0;
+		this.currentCacheSlotGenerations.length = 0;
+		this.currentCacheSlotBytes.length = 0;
+		this.freeCurrentCacheSlots.length = 0;
 		this.currentRuntimeBytes = 0;
 	}
 
@@ -1031,11 +1034,11 @@ export class FileSnapshotStore {
 			this.deleteCurrentFile(path);
 			return text;
 		}
-		const slot = this.ensureCurrentSlot(path);
-		const previousBytes = this.currentSlotBytes[slot] ?? 0;
-		this.currentSlotTexts[slot] = text;
-		this.currentSlotGenerations[slot] = generation;
-		this.currentSlotBytes[slot] = entryBytes;
+		const cacheSlot = this.ensureCurrentCacheSlot(path);
+		const previousBytes = this.currentCacheSlotBytes[cacheSlot] ?? 0;
+		this.currentCacheSlotTexts[cacheSlot] = text;
+		this.currentCacheSlotGenerations[cacheSlot] = generation;
+		this.currentCacheSlotBytes[cacheSlot] = entryBytes;
 		this.currentRuntimeBytes += entryBytes - previousBytes;
 		this.touchCurrentFile(path);
 		this.enforceCurrentTextCacheBudget();
@@ -1043,24 +1046,24 @@ export class FileSnapshotStore {
 	}
 
 	private deleteCurrentFile(path: string): void {
-		const slot = this.currentFilePathToSlot.get(path);
-		if (slot === undefined) {
+		const cacheSlot = this.currentFilePathToCacheSlot.get(path);
+		if (cacheSlot === undefined) {
 			return;
 		}
-		this.currentFilePathToSlot.delete(path);
+		this.currentFilePathToCacheSlot.delete(path);
 		this.currentFileLru.delete(path);
 		this.currentRuntimeBytes = Math.max(
 			0,
-			this.currentRuntimeBytes - (this.currentSlotBytes[slot] ?? 0),
+			this.currentRuntimeBytes - (this.currentCacheSlotBytes[cacheSlot] ?? 0),
 		);
-		this.currentSlotTexts[slot] = undefined;
-		this.currentSlotGenerations[slot] = undefined;
-		this.currentSlotBytes[slot] = undefined;
-		if (slot === this.currentSlotTexts.length - 1) {
-			this.trimTrailingCurrentSlots();
+		this.currentCacheSlotTexts[cacheSlot] = undefined;
+		this.currentCacheSlotGenerations[cacheSlot] = undefined;
+		this.currentCacheSlotBytes[cacheSlot] = undefined;
+		if (cacheSlot === this.currentCacheSlotTexts.length - 1) {
+			this.trimTrailingCurrentCacheSlots();
 			return;
 		}
-		this.freeCurrentSlots.push(slot);
+		this.freeCurrentCacheSlots.push(cacheSlot);
 	}
 
 	getRuntimeMemoryEstimate(): FileSnapshotRuntimeMemoryEstimate {
@@ -1069,15 +1072,15 @@ export class FileSnapshotStore {
 		let generationBytes = 0;
 		const largestEntries: FileSnapshotRuntimeMemoryEstimate["largestEntries"] = [];
 
-		for (const [path, slot] of this.currentFilePathToSlot) {
-			const text = this.currentSlotTexts[slot];
+		for (const [path, cacheSlot] of this.currentFilePathToCacheSlot) {
+			const text = this.currentCacheSlotTexts[cacheSlot];
 			if (text === undefined) {
 				continue;
 			}
 			const entryPathBytes = this.estimateStringBytes(path);
 			const entryTextBytes = this.estimateStringBytes(text);
 			const entryGenerationBytes =
-				this.currentSlotGenerations[slot] !== undefined
+				this.currentCacheSlotGenerations[cacheSlot] !== undefined
 					? FileSnapshotStore.GENERATION_BYTES
 					: 0;
 			pathBytes += entryPathBytes;
@@ -1099,9 +1102,9 @@ export class FileSnapshotStore {
 			pathBytes,
 			currentTextBytes,
 			generationBytes,
-			fileCount: this.currentFilePathToSlot.size,
-			slotCount: this.currentSlotTexts.length,
-			freeSlotCount: this.freeCurrentSlots.length,
+			fileCount: this.currentFilePathToCacheSlot.size,
+			cacheSlotCount: this.currentCacheSlotTexts.length,
+			freeCacheSlotCount: this.freeCurrentCacheSlots.length,
 			totalBytes: this.currentRuntimeBytes,
 			largestEntries: largestEntries.slice(
 				0,
@@ -1407,11 +1410,11 @@ export class FileSnapshotStore {
 		path: string,
 		touch = true,
 	): CurrentFileEntry | undefined {
-		const slot = this.currentFilePathToSlot.get(path);
-		if (slot === undefined) {
+		const cacheSlot = this.currentFilePathToCacheSlot.get(path);
+		if (cacheSlot === undefined) {
 			return undefined;
 		}
-		const text = this.currentSlotTexts[slot];
+		const text = this.currentCacheSlotTexts[cacheSlot];
 		if (text === undefined) {
 			return undefined;
 		}
@@ -1420,9 +1423,9 @@ export class FileSnapshotStore {
 		}
 		return {
 			path,
-			slot,
+			cacheSlot,
 			text,
-			generation: this.currentSlotGenerations[slot],
+			generation: this.currentCacheSlotGenerations[cacheSlot],
 		};
 	}
 
@@ -1434,42 +1437,43 @@ export class FileSnapshotStore {
 		return this.getCurrentFile(path)?.generation;
 	}
 
-	private ensureCurrentSlot(path: string): number {
-		const existingSlot = this.currentFilePathToSlot.get(path);
-		if (existingSlot !== undefined) {
-			return existingSlot;
+	private ensureCurrentCacheSlot(path: string): number {
+		const existingCacheSlot = this.currentFilePathToCacheSlot.get(path);
+		if (existingCacheSlot !== undefined) {
+			return existingCacheSlot;
 		}
-		const recycledSlot = this.freeCurrentSlots.pop();
-		if (recycledSlot !== undefined) {
-			this.currentFilePathToSlot.set(path, recycledSlot);
-			return recycledSlot;
+		const recycledCacheSlot = this.freeCurrentCacheSlots.pop();
+		if (recycledCacheSlot !== undefined) {
+			this.currentFilePathToCacheSlot.set(path, recycledCacheSlot);
+			return recycledCacheSlot;
 		}
-		const nextSlot = this.currentSlotTexts.length;
-		this.currentFilePathToSlot.set(path, nextSlot);
-		this.currentSlotTexts.push(undefined);
-		this.currentSlotGenerations.push(undefined);
-		this.currentSlotBytes.push(undefined);
-		return nextSlot;
+		const nextCacheSlot = this.currentCacheSlotTexts.length;
+		this.currentFilePathToCacheSlot.set(path, nextCacheSlot);
+		this.currentCacheSlotTexts.push(undefined);
+		this.currentCacheSlotGenerations.push(undefined);
+		this.currentCacheSlotBytes.push(undefined);
+		return nextCacheSlot;
 	}
 
-	private trimTrailingCurrentSlots(): void {
-		while (this.currentSlotTexts.length > 0) {
-			const lastSlot = this.currentSlotTexts.length - 1;
-			if (this.currentSlotTexts[lastSlot] !== undefined) {
+	private trimTrailingCurrentCacheSlots(): void {
+		while (this.currentCacheSlotTexts.length > 0) {
+			const lastCacheSlot = this.currentCacheSlotTexts.length - 1;
+			if (this.currentCacheSlotTexts[lastCacheSlot] !== undefined) {
 				return;
 			}
-			this.currentSlotTexts.pop();
-			this.currentSlotGenerations.pop();
-			this.currentSlotBytes.pop();
-			const freeSlotIndex = this.freeCurrentSlots.lastIndexOf(lastSlot);
-			if (freeSlotIndex >= 0) {
-				this.freeCurrentSlots.splice(freeSlotIndex, 1);
+			this.currentCacheSlotTexts.pop();
+			this.currentCacheSlotGenerations.pop();
+			this.currentCacheSlotBytes.pop();
+			const freeCacheSlotIndex =
+				this.freeCurrentCacheSlots.lastIndexOf(lastCacheSlot);
+			if (freeCacheSlotIndex >= 0) {
+				this.freeCurrentCacheSlots.splice(freeCacheSlotIndex, 1);
 			}
 		}
 	}
 
 	private touchCurrentFile(path: string): void {
-		if (!this.currentFilePathToSlot.has(path)) {
+		if (!this.currentFilePathToCacheSlot.has(path)) {
 			return;
 		}
 		this.currentFileLru.delete(path);

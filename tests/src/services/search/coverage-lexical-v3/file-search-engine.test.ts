@@ -33,6 +33,8 @@ const { Tokenizer } = jest.requireMock("src/services/search/tokenizer") as {
 	Tokenizer: new () => unknown;
 };
 
+const UNUSED_LEGACY_EVIDENCE_PAYLOAD = {} as never;
+
 function createDocument(
 	overrides: Partial<IndexedDocument> &
 		Pick<IndexedDocument, "path" | "basename" | "folder">,
@@ -1083,12 +1085,10 @@ describe("coverage lexical v3 file search engine", () => {
 					async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 				),
 				publishLexicalExactTapes: jest.fn(async () => undefined),
-				readLexicalExactTapes: jest.fn(
-					async () => EMPTY_RESIDENT_EXACT_TAPE_SIDECAR,
-				),
+				readLexicalExactTapes: jest.fn(async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD),
 				publishLexicalBodyFamilySupport: jest.fn(async () => undefined),
 				readLexicalBodyFamilySupport: jest.fn(
-					async () => EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
+					async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD,
 				),
 				publishLexicalBodyEvidence: jest.fn(async () => undefined),
 				readLexicalBodyEvidenceForBlocks: jest.fn(async () => new Map()),
@@ -1098,7 +1098,7 @@ describe("coverage lexical v3 file search engine", () => {
 				readLexicalHanBodyEvidenceForBlocks: jest.fn(async () => new Map()),
 				publishLexicalHanWitnesses: jest.fn(async () => undefined),
 				readLexicalHanWitnesses: jest.fn(
-					async () => EMPTY_RESIDENT_HAN_WITNESS_SIDECAR,
+					async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD,
 				),
 			} as unknown as FileSnapshotStore,
 		);
@@ -1261,12 +1261,12 @@ test("offloads fuzzy rescue payload and reloads matching fuzzy lookup keys for f
 			readIndexedTexts: jest.fn(async () => new Map<string, string>()),
 			readIndexedMetadata: jest.fn(async () => new Map()),
 			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
-			publishLexicalFuzzyRescue: jest.fn(async (sidecar) => {
-				persistedFuzzyRescue = sidecar;
+			publishLexicalFuzzyRescue: jest.fn(async (fuzzyRescueIndex) => {
+				persistedFuzzyRescue = fuzzyRescueIndex;
 			}),
 			readLexicalFuzzyRescueForLookupKeys: jest.fn(async (fuzzyLookupKeys: readonly string[]) => {
 				if (persistedFuzzyRescue == null) {
-					throw new Error("missing fuzzy rescue sidecar");
+					throw new Error("missing fuzzy rescue payload");
 				}
 				return {
 					...persistedFuzzyRescue,
@@ -1329,7 +1329,7 @@ test("offloads fuzzy rescue payload and reloads matching fuzzy lookup keys for f
 		).toBe(0);
 	});
 
-	test("does not publish or read legacy whole body family support rows during search rebuilds", async () => {
+	test("does not publish or read legacy whole body-family support payload rows during search rebuilds", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let persistedBodyFamilySupport: { entryCount: number } | null = null;
 		const snapshotStore = {
@@ -1340,8 +1340,8 @@ test("offloads fuzzy rescue payload and reloads matching fuzzy lookup keys for f
 			readLexicalFuzzyRescue: jest.fn(
 				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			),
-			publishLexicalBodyFamilySupport: jest.fn(async (sidecar) => {
-				persistedBodyFamilySupport = sidecar;
+			publishLexicalBodyFamilySupport: jest.fn(async (payload) => {
+				persistedBodyFamilySupport = payload;
 			}),
 			readLexicalBodyFamilySupport: jest.fn(async () => {
 				if (persistedBodyFamilySupport == null) {
@@ -1379,7 +1379,7 @@ test("offloads fuzzy rescue payload and reloads matching fuzzy lookup keys for f
 		expect(matchedFiles[0]?.path).toBe("infra/projected-token.md");
 	});
 
-	test("does not publish or read legacy whole exact tape rows during search rebuilds", async () => {
+	test("does not publish or read legacy whole exact-payload rows during search rebuilds", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let persistedExactTapes: { entryCount: number } | null = null;
 		const snapshotStore = {
@@ -1390,8 +1390,8 @@ test("offloads fuzzy rescue payload and reloads matching fuzzy lookup keys for f
 			readLexicalFuzzyRescue: jest.fn(
 				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			),
-			publishLexicalExactTapes: jest.fn(async (sidecar) => {
-				persistedExactTapes = sidecar;
+			publishLexicalExactTapes: jest.fn(async (payload) => {
+				persistedExactTapes = payload;
 			}),
 			readLexicalExactTapes: jest.fn(async () => {
 				if (persistedExactTapes == null) {
@@ -1401,7 +1401,7 @@ test("offloads fuzzy rescue payload and reloads matching fuzzy lookup keys for f
 			}),
 			publishLexicalBodyFamilySupport: jest.fn(async () => undefined),
 			readLexicalBodyFamilySupport: jest.fn(
-				async () => EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
+				async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD,
 			),
 		};
 		(
@@ -1444,16 +1444,14 @@ test("skips body cold-evidence reads when ranking does not shortlist body blocks
 				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			),
 			publishLexicalExactTapes: jest.fn(async () => undefined),
-			readLexicalExactTapes: jest.fn(
-				async () => EMPTY_RESIDENT_EXACT_TAPE_SIDECAR,
-			),
+			readLexicalExactTapes: jest.fn(async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD),
 			publishLexicalBodyFamilySupport: jest.fn(async () => undefined),
 			readLexicalBodyFamilySupport: jest.fn(
-				async () => EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
+				async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD,
 			),
 			publishLexicalHanWitnesses: jest.fn(async () => undefined),
 			readLexicalHanWitnesses: jest.fn(
-				async () => EMPTY_RESIDENT_HAN_WITNESS_SIDECAR,
+				async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD,
 			),
 		};
 		(
@@ -1508,10 +1506,10 @@ test("skips body cold-evidence reads when ranking does not shortlist body blocks
 				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			),
 			publishLexicalExactTapes: jest.fn(async () => undefined),
-			readLexicalExactTapes: jest.fn(async () => EMPTY_RESIDENT_EXACT_TAPE_SIDECAR),
+			readLexicalExactTapes: jest.fn(async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD),
 			publishLexicalBodyFamilySupport: jest.fn(async () => undefined),
 			readLexicalBodyFamilySupport: jest.fn(
-				async () => EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
+				async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD,
 			),
 			publishLexicalBodyEvidence: jest.fn(
 				async (
@@ -1537,7 +1535,7 @@ test("skips body cold-evidence reads when ranking does not shortlist body blocks
 			),
 			publishLexicalHanWitnesses: jest.fn(async () => undefined),
 			readLexicalHanWitnesses: jest.fn(
-				async () => EMPTY_RESIDENT_HAN_WITNESS_SIDECAR,
+				async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD,
 			),
 		};
 		(
@@ -1624,7 +1622,7 @@ test("skips body cold-evidence reads when ranking does not shortlist body blocks
 			}),
 			publishLexicalHanWitnesses: jest.fn(async () => undefined),
 			readLexicalHanWitnesses: jest.fn(
-				async () => EMPTY_RESIDENT_HAN_WITNESS_SIDECAR,
+				async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD,
 			),
 		};
 		(
@@ -1711,7 +1709,7 @@ test("skips body cold-evidence reads when ranking does not shortlist body blocks
 			}),
 			publishLexicalHanWitnesses: jest.fn(async () => undefined),
 			readLexicalHanWitnesses: jest.fn(
-				async () => EMPTY_RESIDENT_HAN_WITNESS_SIDECAR,
+				async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD,
 			),
 		};
 		(
@@ -1831,14 +1829,14 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 					),
 			),
 			publishLexicalExactTapes: jest.fn(async () => undefined),
-			readLexicalExactTapes: jest.fn(async () => EMPTY_RESIDENT_EXACT_TAPE_SIDECAR),
+			readLexicalExactTapes: jest.fn(async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD),
 			publishLexicalBodyFamilySupport: jest.fn(async () => undefined),
 			readLexicalBodyFamilySupport: jest.fn(
-				async () => EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
+				async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD,
 			),
 			publishLexicalHanWitnesses: jest.fn(async () => undefined),
 			readLexicalHanWitnesses: jest.fn(async () => {
-				throw new Error("legacy whole Han witness rows should not be read");
+				throw new Error("legacy whole Han witness payload rows should not be read");
 			}),
 		};
 		(
@@ -1894,7 +1892,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 		expect(snapshotStore.readLexicalHanWitnesses).not.toHaveBeenCalled();
 	});
 
-	test("does not publish or read legacy whole Han witness rows during search rebuilds", async () => {
+	test("does not publish or read legacy whole Han witness payload rows during search rebuilds", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let persistedHanWitness: { bodyWitnessEntryCount: number } | null = null;
 		const snapshotStore = {
@@ -1906,15 +1904,13 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
 			),
 			publishLexicalExactTapes: jest.fn(async () => undefined),
-			readLexicalExactTapes: jest.fn(
-				async () => EMPTY_RESIDENT_EXACT_TAPE_SIDECAR,
-			),
+			readLexicalExactTapes: jest.fn(async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD),
 			publishLexicalBodyFamilySupport: jest.fn(async () => undefined),
 			readLexicalBodyFamilySupport: jest.fn(
-				async () => EMPTY_RESIDENT_BODY_FAMILY_SUPPORT_SIDECAR,
+				async () => UNUSED_LEGACY_EVIDENCE_PAYLOAD,
 			),
-			publishLexicalHanWitnesses: jest.fn(async (sidecar) => {
-				persistedHanWitness = sidecar;
+			publishLexicalHanWitnesses: jest.fn(async (payload) => {
+				persistedHanWitness = payload;
 			}),
 			readLexicalHanWitnesses: jest.fn(async () => {
 				if (persistedHanWitness == null) {

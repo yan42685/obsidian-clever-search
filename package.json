@@ -13,6 +13,7 @@
 		"typecheck:build": "tsc -p tsconfig.build.json -noEmit -skipLibCheck",
 		"typecheck:test": "tsc -p tsconfig.test.json -noEmit -skipLibCheck",
 		"build": "npm run typecheck:build && node esbuild.config.mjs production",
+		"build:analyze": "npm run typecheck:build && node esbuild.config.mjs production --analyze",
 		"benchmark:hybrid": "node scripts/hybrid-search-benchmark.mjs",
 		"benchmark:coverage-lexical": "node node_modules/jest/bin/jest.js --config jest.coverage-lexical-benchmark.config.js --runInBand",
 		"benchmark:coverage-lexical:legacy": "node node_modules/jest/bin/jest.js --config jest.coverage-lexical-legacy-benchmark.config.js --runInBand",

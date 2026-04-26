@@ -690,19 +690,8 @@ function estimateTermGapCompression(
 }
 
 function estimateDocTableLiveSlotDuplicateBytes(docTable: ResidentDocTable): number {
-	return (
-		docTable.docRefsByLiveDocSlot.byteLength +
-		docTable.pathStringIdsByLiveDocSlot.byteLength +
-		docTable.generationByLiveDocSlot.byteLength +
-		docTable.identityStartByLiveDocSlot.byteLength +
-		docTable.identityCountByLiveDocSlot.byteLength +
-		docTable.routeStartByLiveDocSlot.byteLength +
-		docTable.routeCountByLiveDocSlot.byteLength +
-		docTable.headingStartByLiveDocSlot.byteLength +
-		docTable.headingCountByLiveDocSlot.byteLength +
-		docTable.bodyBlockStartByLiveDocSlot.byteLength +
-		docTable.bodyBlockCountByLiveDocSlot.byteLength
-	);
+	void docTable;
+	return 0;
 }
 
 function isIdentityMapping(values: Uint8Array | Uint16Array | Uint32Array): boolean {
