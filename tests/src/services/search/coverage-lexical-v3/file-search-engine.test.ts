@@ -662,8 +662,10 @@ function createResidentBase(): ResidentBase {
 
 function createResidentBaseForBlockCounts(
 	blockCountsByDoc: readonly number[],
+	paths: readonly string[] = [],
 ): ResidentBase {
 	const base = createResidentBase();
+	const stringArena = createStringArena(paths);
 	let blockStart = 0;
 	const bodyBlockStartByDocId: number[] = [];
 	const bodyBlockCountByDocId: number[] = [];
@@ -682,6 +684,7 @@ function createResidentBaseForBlockCounts(
 	}
 	return {
 		...base,
+		stringArena: paths.length > 0 ? stringArena : base.stringArena,
 		docTable: {
 			...base.docTable,
 			docCount: blockCountsByDoc.length,
@@ -698,8 +701,8 @@ function createResidentBaseForBlockCounts(
 			docIdByLiveDocSlot: new Uint32Array(
 				blockCountsByDoc.map((_, index) => index),
 			),
-			pathStringIds: new Uint32Array(blockCountsByDoc.map(() => 0)),
-			pathStringIdsByLiveDocSlot: new Uint32Array(blockCountsByDoc.map(() => 0)),
+			pathStringIds: new Uint32Array(blockCountsByDoc.map((_, index) => index)),
+			pathStringIdsByLiveDocSlot: new Uint32Array(blockCountsByDoc.map((_, index) => index)),
 			generationByDocId: new Float64Array(blockCountsByDoc.map((_, index) => 100 + index)),
 			generationByLiveDocSlot: new Float64Array(
 				blockCountsByDoc.map((_, index) => 100 + index),
@@ -738,12 +741,36 @@ function createResidentBaseForBlockCounts(
 	};
 }
 
+function createStringArena(texts: readonly string[]): ResidentBase["stringArena"] {
+	let text = "";
+	const offsets: number[] = [];
+	const lengths: number[] = [];
+	for (const value of texts) {
+		offsets.push(text.length);
+		lengths.push(value.length);
+		text += value;
+	}
+	return {
+		text,
+		offsets: new Uint32Array(offsets),
+		lengths: new Uint32Array(lengths),
+		count: texts.length,
+	};
+}
+
 function withBodyWitnessTexts(
 	base: ResidentBase,
 	bodyWitnessTextsByBlock: ReadonlyArray<readonly string[]>,
 ): ResidentBase {
-	const uniqueStrings = new Map<string, number>([["", 0]]);
-	const orderedStrings = [""];
+	const orderedStrings = Array.from({ length: base.stringArena.count }, (_, stringId) =>
+		readTestResidentString(base, stringId),
+	);
+	if (orderedStrings.length === 0) {
+		orderedStrings.push("");
+	}
+	const uniqueStrings = new Map<string, number>(
+		orderedStrings.map((text, stringId) => [text, stringId]),
+	);
 	const bodyWitnessOccurrenceStartByBlockId: number[] = [];
 	const bodyWitnessOccurrenceTextIds: number[] = [];
 	const bodyWitnessStartOffsetsByBlock = bodyWitnessTextsByBlock.map((texts) =>
@@ -959,6 +986,9 @@ function createMockSearchRuntime(
 		) =>
 			preparedSearch.__result ??
 			searchMock(preparedSearch.queryText, preparedSearch.queryTerms),
+		hydrateCandidateEvidenceByShard: (
+			candidateDocs: readonly V3CandidateDocRecall[],
+		) => hydrateCandidateEvidenceBatch(residentBase, candidateDocs, {}),
 		getResidentIndexView: () => ({ shards: [{ base: residentBase }] }),
 	};
 }
@@ -1979,6 +2009,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 				createPackingProfile({
 					docId: 0,
 					path: "notes/lifeforce.md",
+					stableKey: "docref:1",
 					realizedFamilies: [
 						createRealizedFamily({
 							queryUnitIndex: 0,
@@ -2022,7 +2053,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 			}
 		).engine = createMockSearchRuntime(
 			search,
-			createResidentBaseForBlockCounts([2]),
+			createResidentBaseForBlockCounts([2], ["notes/lifeforce.md"]),
 		);
 		(
 			engine as unknown as {
@@ -2082,6 +2113,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 				createPackingProfile({
 					docId: 0,
 					path: "notes/life-force.md",
+					stableKey: "docref:1",
 					realizedFamilies: [
 						createRealizedFamily({
 							queryUnitIndex: 0,
@@ -2123,7 +2155,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 			}
 		).engine = createMockSearchRuntime(
 			search,
-			createResidentBaseForBlockCounts([2]),
+			createResidentBaseForBlockCounts([2], ["notes/life-force.md"]),
 		);
 		(
 			engine as unknown as {
@@ -2173,6 +2205,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 				createPackingProfile({
 					docId: 0,
 					path: "notes/body-dominant.md",
+					stableKey: "docref:1",
 					realizedFamilies: [
 						createRealizedFamily({
 							queryUnitIndex: 0,
@@ -2214,7 +2247,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 			}
 		).engine = createMockSearchRuntime(
 			search,
-			createResidentBaseForBlockCounts([1]),
+			createResidentBaseForBlockCounts([1], ["notes/body-dominant.md"]),
 		);
 		(
 			engine as unknown as {
@@ -2267,6 +2300,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 				createPackingProfile({
 					docId: 0,
 					path: "notes/missing-snapshot.md",
+					stableKey: "docref:1",
 					realizedFamilies: [
 						createRealizedFamily({
 							queryUnitIndex: 0,
@@ -2310,7 +2344,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 			}
 		).engine = createMockSearchRuntime(
 			search,
-			createResidentBaseForBlockCounts([1]),
+			createResidentBaseForBlockCounts([1], ["notes/missing-snapshot.md"]),
 		);
 		(
 			engine as unknown as {
@@ -2708,27 +2742,39 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 	});
 
 	test("resident Han witness refine promotes best-window surface confirms above residue confirms", async () => {
+		const fullSurface = "\u7f13\u5b58\u6062\u590d\u6b65\u9aa4";
 		const result: CoverageLexicalV3SearchResult = {
 			recallState: createRefineSearchResult().recallState,
 			rankedCandidates: [
 				createPackingProfile({
 					docId: 0,
 					path: "b-residue.md",
+					stableKey: "docref:1",
 					bodyWindowContainer: createBodyWindowContainer([1]),
 					strongestContainer: createBodyWindowContainer([1]),
+					hanSurfaceCompletionGroups: [
+						{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "body_residue" },
+					],
 				}),
 				createPackingProfile({
 					docId: 1,
 					path: "a-window.md",
+					stableKey: "docref:2",
 					bodyWindowContainer: createBodyWindowContainer([2]),
 					strongestContainer: createBodyWindowContainer([2]),
+					hanSurfaceCompletionGroups: [
+						{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "body_residue" },
+					],
 				}),
 			],
 		};
-		const residentBase = withBodyWitnessTexts(createResidentBase(), [
-			["lifeforce"],
+		const residentBase = withBodyWitnessTexts(createResidentBaseForBlockCounts([2, 1], [
+			"b-residue.md",
+			"a-window.md",
+		]), [
+			["\u7f13\u5b58\u6062\u590d\u6b65\u9aa4"],
 			[],
-			["lifeforce"],
+			["\u7f13\u5b58\u6062\u590d\u6b65\u9aa4"],
 		]);
 		const refined = await runHanRefine(result, {
 			residentBase,
@@ -2743,8 +2789,10 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 	});
 
 	test("resident Han witness refine checks all shortlisted blocks without raw query budget caps", async () => {
+		const fullSurface = "\u7f13\u5b58\u6062\u590d\u6b65\u9aa4";
 		const blockCounts = [100, 100, 100, 100, 100] as const;
-		const residentBaseWithoutWitness = createResidentBaseForBlockCounts(blockCounts);
+		const paths = blockCounts.map((_, docId) => String.fromCharCode(97 + docId) + ".md");
+		const residentBaseWithoutWitness = createResidentBaseForBlockCounts(blockCounts, paths);
 		const candidateDocs = blockCounts.map((blockCount, docId) =>
 			createCandidateDocRecall(docId, {
 				shortlistedBodyBlocks: Array.from({ length: blockCount }, (_, ordinal) =>
@@ -2758,13 +2806,17 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 		const rankedCandidates = blockCounts.map((_, docId) =>
 			createPackingProfile({
 				docId,
-				path: String.fromCharCode(97 + docId) + ".md",
+				path: paths[docId],
+				stableKey: `docref:${docId + 1}`,
 				bodyWindowContainer: createBodyWindowContainer([
 					residentBaseWithoutWitness.docTable.bodyBlockStartByDocId[docId],
 				]),
 				strongestContainer: createBodyWindowContainer([
 					residentBaseWithoutWitness.docTable.bodyBlockStartByDocId[docId],
 				]),
+				hanSurfaceCompletionGroups: [
+					{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "body_residue" },
+				],
 			}),
 		);
 		const result: CoverageLexicalV3SearchResult = {
@@ -2781,7 +2833,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 				(_, blockId) => {
 					const blockOrdinal =
 						residentBaseWithoutWitness.bodyBlocks.blockOrdinalByBlockId[blockId] ?? 0;
-					return blockOrdinal === 0 ? ["lifeforce"] : [];
+					return blockOrdinal === 0 ? ["\u7f13\u5b58\u6062\u590d\u6b65\u9aa4"] : [];
 				},
 			),
 		);
