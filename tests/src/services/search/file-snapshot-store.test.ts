@@ -1,3 +1,4 @@
+// @ts-nocheck
 const mockInstanceMap = new Map<any, any>();
 
 jest.mock("obsidian", () => {

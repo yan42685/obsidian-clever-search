@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { TFile } from "obsidian";
 
 import type { BaseIndexedFileRef } from "src/globals/search-types";

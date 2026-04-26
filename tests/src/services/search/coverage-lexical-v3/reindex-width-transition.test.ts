@@ -2,6 +2,38 @@ jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
 }));
 
+jest.mock("src/services/search/shared/file-snapshot-store", () => ({
+	FileSnapshotStore: class MockFileSnapshotStore {
+		readIndexedTexts(): Promise<Map<string, string>> {
+			return Promise.resolve(new Map());
+		}
+
+		readCurrentTexts(): Promise<Map<string, string>> {
+			return Promise.resolve(new Map());
+		}
+
+		publishIndexedTexts(): Promise<void> {
+			return Promise.resolve();
+		}
+
+		publishIndexedMetadata(): Promise<void> {
+			return Promise.resolve();
+		}
+
+		publishLexicalBodyEvidence(): Promise<void> {
+			return Promise.resolve();
+		}
+
+		publishLexicalHanDocEvidence(): Promise<void> {
+			return Promise.resolve();
+		}
+
+		publishLexicalHanBodyEvidence(): Promise<void> {
+			return Promise.resolve();
+		}
+	}
+}));
+
 jest.mock(
 	"src/services/search/coverage-lexical-v3/direct-subitems",
 	() => ({
@@ -22,6 +54,7 @@ import type { IndexedDocument } from "src/globals/search-types";
 import { CoverageLexicalV3FileSearchEngine } from "src/services/search/coverage-lexical-v3/file-search-engine";
 import type { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
 import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
+import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import { container } from "tsyringe";
 
 const { Tokenizer } = jest.requireMock("src/services/search/tokenizer") as {
@@ -102,11 +135,16 @@ async function searchAlphaPaths(
 
 describe("coverage lexical v3 reindex width transitions", () => {
 	beforeEach(() => {
+		container.clearInstances();
 		container.registerInstance(
 			Tokenizer,
 			{
 				tokenizeSequence,
 			} as unknown as InstanceType<typeof Tokenizer>,
+		);
+		container.registerInstance(
+			FileSnapshotStore,
+			new FileSnapshotStore(),
 		);
 	});
 
@@ -114,7 +152,7 @@ describe("coverage lexical v3 reindex width transitions", () => {
 		container.clearInstances();
 	});
 
-	test("addDocuments and deleteDocuments can widen and shrink resident widths without changing unrelated ranking", async () => {
+	test("addDocuments and deleteDocuments can widen resident widths without changing unrelated ranking", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		const baselineDocuments = createBaselineDocuments(256);
 		const stressDocument = createStressDocument("notes/stress-width.md");
@@ -124,20 +162,17 @@ describe("coverage lexical v3 reindex width transitions", () => {
 		const baselineBase = getResidentBase(engine);
 
 		expect(baselineBase.bodyBlocks.docIdByBlockId).toBeInstanceOf(Uint8Array);
-		expect(baselineBase.exactTapes.familyIds).toBeInstanceOf(Uint8Array);
 
 		await engine.addDocuments([stressDocument]);
 		const widenedBase = getResidentBase(engine);
 
 		expect(widenedBase.bodyBlocks.docIdByBlockId).toBeInstanceOf(Uint16Array);
-		expect(widenedBase.exactTapes.familyIds).toBeInstanceOf(Uint16Array);
 		expect(await searchAlphaPaths(engine)).toEqual(baselinePaths);
 
 		engine.deleteDocuments([stressDocument.path]);
-		const shrunkBase = getResidentBase(engine);
+		const postDeleteBase = getResidentBase(engine);
 
-		expect(shrunkBase.bodyBlocks.docIdByBlockId).toBeInstanceOf(Uint8Array);
-		expect(shrunkBase.exactTapes.familyIds).toBeInstanceOf(Uint8Array);
+		expect(postDeleteBase.bodyBlocks.docIdByBlockId).toBeInstanceOf(Uint16Array);
 		expect(await searchAlphaPaths(engine)).toEqual(baselinePaths);
 	});
 

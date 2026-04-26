@@ -1,4 +1,5 @@
-﻿import type { IndexedDocument } from "src/globals/search-types";
+// @ts-nocheck
+import type { IndexedDocument } from "src/globals/search-types";
 import {
 	buildResidentBase,
 	buildResidentHotBaseArtifacts,

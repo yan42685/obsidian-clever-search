@@ -1,3 +1,4 @@
+// @ts-nocheck
 export {};
 
 const mockInstanceMap = new Map<any, any>();

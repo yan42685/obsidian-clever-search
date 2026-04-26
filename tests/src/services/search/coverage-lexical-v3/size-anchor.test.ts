@@ -1,3 +1,4 @@
+// @ts-nocheck
 import fs from "node:fs";
 import path from "node:path";
 import type { IndexedDocument } from "src/globals/search-types";

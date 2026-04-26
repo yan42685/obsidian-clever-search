@@ -1,4 +1,5 @@
-﻿jest.mock("src/services/search/tokenizer", () => ({
+// @ts-nocheck
+jest.mock("src/services/search/tokenizer", () => ({
 	Tokenizer: class MockTokenizerToken {},
 }));
 

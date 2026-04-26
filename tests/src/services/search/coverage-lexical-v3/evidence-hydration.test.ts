@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { IndexedDocument } from "src/globals/search-types";
 import {
 	buildResidentBase,
@@ -87,10 +88,10 @@ describe("coverage lexical v3 evidence hydration", () => {
 				path: "notes/han-cold-evidence.md",
 				basename: "han cold evidence",
 			folder: "notes",
-			content: "缓存恢复步骤\n\n缓存恢复检查 alpha beta",
+			content: "缂撳瓨鎭㈠姝ラ\n\n缂撳瓨鎭㈠妫€鏌?alpha beta",
 		});
 		const base = buildResidentBase([document]);
-		const queryAnalysis = analyzeQuery("缓存恢复");
+		const queryAnalysis = analyzeQuery("缂撳瓨鎭㈠");
 		const unitFamilyMatches = lookupQueryUnitFamilies(base, queryAnalysis);
 		const candidateRecall = recallCandidateDocs(
 			base,
@@ -202,10 +203,10 @@ describe("coverage lexical v3 evidence hydration", () => {
 			path: "notes/doc-han-evidence.md",
 			basename: "doc han evidence",
 			folder: "notes",
-			content: "缂撳瓨鎭㈠姝ラ\n\nalpha beta",
+			content: "缂傛挸鐡ㄩ幁銏狀槻濮濄儵顎僜n\nalpha beta",
 		});
 		const base = buildResidentBase([document]);
-		const queryAnalysis = analyzeQuery("缂撳瓨鎭㈠");
+		const queryAnalysis = analyzeQuery("缂傛挸鐡ㄩ幁銏狀槻");
 		const unitFamilyMatches = lookupQueryUnitFamilies(base, queryAnalysis);
 		const candidateRecall = recallCandidateDocs(
 			base,
