@@ -130,6 +130,60 @@ describe("Database Dexie upgrade recovery", () => {
     database.db.close();
   });
 
+  test("upgrades a 29.4 database by creating the V3 shard and snapshot stores", async () => {
+    const appId = `db-v3-stores-${Date.now()}`;
+    const dbName = `clever-search/${appId}`;
+    createdDbNames.push(dbName);
+
+    const legacyDb = new Dexie(dbName);
+    legacyDb.version(29.4).stores({
+      pluginSetting: "++id",
+      lexicalSearchSnapshots: "++id",
+      lexicalIndexedFileRefs: "path",
+      lexicalIndexedMetadata: "filePath",
+      lexicalFuzzyRescue: "id",
+      lexicalBodyEvidence:
+        "id, shardId, shardGeneration, docRef, generation, blockOrdinal, [shardId+shardGeneration+docRef+generation+blockOrdinal]",
+      lexicalHanDocEvidence:
+        "id, shardId, shardGeneration, docRef, generation, [shardId+shardGeneration+docRef+generation]",
+      lexicalHanBodyEvidence:
+        "id, shardId, shardGeneration, docRef, generation, blockOrdinal, [shardId+shardGeneration+docRef+generation+blockOrdinal]",
+      docRegistry: "docRef, path, deleted, liveGeneration, updatedAt",
+      docRegistryMeta: "key",
+      hybridChunks: "++id, filePath",
+      fileSnapshots: "filePath",
+      hybridDirtyShadows: "filePath",
+      hybridChunkVectors: "filePath",
+      hybridHnswSmall: "id",
+      hybridIndexedFileRefs: "path",
+      indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
+      indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
+      hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+      hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
+      hybridTokenBudgetResets: "++id, periodKey",
+    });
+    await legacyDb.open();
+    legacyDb.close();
+
+    const database = createDatabaseHarness(appId);
+
+    const report = await database.openAndConsumeSchemaUpgradeReport();
+
+    expect(report).toEqual({
+      schemaUpgradeDetected: true,
+      recovery: null,
+    });
+    await expect(database.db.coverageLexicalV3ShardRegistry.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3Invalidations.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3ResidentShardArtifacts.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3ActiveOverlayJournal.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3CompactJobs.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3CompactTempArtifacts.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3SnapshotManifests.count()).resolves.toBe(0);
+
+    database.db.close();
+  });
+
   test("targeted index reset clears lexical and hybrid index state while preserving settings and token stats", async () => {
     const appId = `db-targeted-${Date.now()}`;
     const dbName = `clever-search/${appId}`;
@@ -205,7 +259,7 @@ describe("Database Dexie upgrade recovery", () => {
       open,
       close: jest.fn(),
       dbName: "clever-search/stub-targeted",
-      dbVersion: 28.4,
+      dbVersion: 29.5,
       consumeSchemaUpgradeDetected,
     };
     database.resetTargetedPersistentIndexState = jest.fn(async () => {});
@@ -218,7 +272,7 @@ describe("Database Dexie upgrade recovery", () => {
       recovery: {
         mode: "targeted-reset",
         dbName: "clever-search/stub-targeted",
-        targetVersion: 28.4,
+        targetVersion: 29.5,
         initialErrorName: "UpgradeError",
         initialErrorMessage: "Not yet support for changing primary key",
         preservedTokenStats: true,
@@ -238,7 +292,7 @@ describe("Database Dexie upgrade recovery", () => {
       open,
       close: jest.fn(),
       dbName: "clever-search/stub-full",
-      dbVersion: 28.4,
+      dbVersion: 29.5,
       consumeSchemaUpgradeDetected: jest.fn(() => false),
     };
     database.resetTargetedPersistentIndexState = jest.fn(async () => {
@@ -253,7 +307,7 @@ describe("Database Dexie upgrade recovery", () => {
       recovery: {
         mode: "full-reset",
         dbName: "clever-search/stub-full",
-        targetVersion: 28.4,
+        targetVersion: 29.5,
         initialErrorName: "UpgradeError",
         initialErrorMessage: "Not yet support for changing primary key",
         preservedTokenStats: false,
@@ -275,7 +329,7 @@ describe("Database Dexie upgrade recovery", () => {
       }),
       close: jest.fn(),
       dbName: "clever-search/stub-once",
-      dbVersion: 28.4,
+      dbVersion: 29.5,
       consumeSchemaUpgradeDetected: jest.fn(() => false),
     };
     database.resetTargetedPersistentIndexState = jest.fn(async () => {

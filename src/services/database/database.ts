@@ -1257,7 +1257,7 @@ export class Database {
 export class DexieWrapper extends Dexie {
   // Dexie keeps one decimal place for version() and multiplies by 10 when opening IndexedDB.
   // Use 0.1 increments here so app-level schema bumps stay readable while mapping to IDB integers.
-  private static readonly _dbVersion = 29.4;
+  private static readonly _dbVersion = 29.5;
   private static readonly dbNamePrefix = "clever-search/";
   static readonly docRegistryNextRefKey = DOC_REGISTRY_NEXT_REF_KEY;
   static readonly lexicalQueryEvidenceReadyKey = LEXICAL_QUERY_EVIDENCE_READY_KEY;
