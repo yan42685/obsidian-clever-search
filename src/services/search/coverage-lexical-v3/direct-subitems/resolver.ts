@@ -4,16 +4,20 @@ import type {
 	V3DirectSubitemsBuildParams,
 	V3DirectSubitemsBuildResult,
 } from "./contracts";
-import { buildV3DirectSubitemCandidates } from "./evidence";
+import {
+	buildV3DirectSubitemCandidates,
+	prepareV3DirectSubitemSnapshotText,
+} from "./evidence";
 import { compareV3DirectSubitemCandidates } from "./ranker";
 import { renderV3DirectSubitemCandidate } from "./renderer";
 
 export function buildV3DirectSubitems(
 	params: V3DirectSubitemsBuildParams,
 ): V3DirectSubitemsBuildResult {
+	const preparedText = prepareV3DirectSubitemSnapshotText(params.snapshotText);
 	const candidates = applyWeakFilePruneMode(
 		buildV3DirectSubitemCandidates({
-			snapshotText: params.snapshotText,
+			snapshotText: preparedText.text,
 			queryAnalysis: params.queryAnalysis,
 			candidate: params.candidate,
 			candidateRecall: params.candidateRecall,
@@ -27,7 +31,7 @@ export function buildV3DirectSubitems(
 	const limitedCandidates = candidates.slice(0, Math.max(1, params.maxSubItemResults ?? 5));
 	const renderPayloads = limitedCandidates.map((candidate) =>
 		renderV3DirectSubitemCandidate({
-			snapshotText: params.snapshotText,
+			snapshotText: preparedText.text,
 			candidate,
 		}),
 	);
