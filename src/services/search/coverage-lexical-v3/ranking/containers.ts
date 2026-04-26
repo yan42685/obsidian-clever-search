@@ -5,10 +5,11 @@ import {
 	logCoverageLexicalV3Debug,
 	shouldLogCoverageLexicalV3Debug,
 } from "../debug";
+import type { HanRescueAssessment } from "../han-rescue";
 import {
-	HAN_BODY_LOCALITY_MAX_ADJACENT_GAP,
-	type HanRescueAssessment,
-} from "../han-rescue";
+	BODY_LOCALITY_MAX_ADJACENT_GAP,
+	BODY_LOCALITY_MAX_HEAD_TAIL_SPAN,
+} from "../body-locality/constants";
 import {
 	collectHanRescueArtifacts,
 	type HanBodyRescueEvaluation,
@@ -2122,8 +2123,8 @@ function passesBodyWindowShortlistAdmission(
 		return (
 			state.coveredDistinctUnitCount >= 1 &&
 			state.boundaryCrossingCount <= 1 &&
-			state.approxMaxAdjacentGap <= 15 &&
-			state.approxHeadTailSpan <= 160
+			state.approxMaxAdjacentGap <= BODY_LOCALITY_MAX_ADJACENT_GAP &&
+			state.approxHeadTailSpan <= BODY_LOCALITY_MAX_HEAD_TAIL_SPAN
 		);
 	}
 	return passesBlockShortlistAdmission({
@@ -3580,7 +3581,7 @@ function isSingletonHanCompletionLocalityQualified(
 	}
 	return (
 		(bestAnchorDistance ?? Number.MAX_SAFE_INTEGER) <=
-		HAN_BODY_LOCALITY_MAX_ADJACENT_GAP
+		BODY_LOCALITY_MAX_ADJACENT_GAP
 	);
 }
 
@@ -3813,4 +3814,3 @@ function getHanSurfaceCompletionTierScore(tier: HanSurfaceCompletionTier): numbe
 			return 0;
 	}
 }
-

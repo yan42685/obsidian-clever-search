@@ -1,4 +1,8 @@
 import type { V3QueryFamilyMatchKind } from "../recall";
+import {
+	BODY_LOCALITY_MAX_ADJACENT_GAP,
+	BODY_LOCALITY_MAX_HEAD_TAIL_SPAN,
+} from "./constants";
 
 export type BlockShortlistRepresentative = Readonly<{
 	queryUnitIndex: number;
@@ -44,8 +48,8 @@ export function passesBlockShortlistAdmission(
 	return (
 		item.coveredDistinctUnitCount >= 2 &&
 		item.boundaryCrossingCount <= 1 &&
-		item.approxMaxAdjacentGap <= 15 &&
-		item.approxHeadTailSpan <= 160
+		item.approxMaxAdjacentGap <= BODY_LOCALITY_MAX_ADJACENT_GAP &&
+		item.approxHeadTailSpan <= BODY_LOCALITY_MAX_HEAD_TAIL_SPAN
 	);
 }
 

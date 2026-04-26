@@ -1,8 +1,6 @@
 import type { ResidentBase } from "../layout/types";
-import {
-	HAN_BODY_LOCALITY_MAX_ADJACENT_GAP,
-	type HanRescueAssessment,
-} from "../han-rescue";
+import type { HanRescueAssessment } from "../han-rescue";
+import { BODY_LOCALITY_MAX_ADJACENT_GAP } from "../body-locality/constants";
 import type { V3QueryAnalysis, V3QuerySurfaceGroup, V3QueryUnit } from "../query/analysis";
 import {
 	normalizeText,
@@ -543,7 +541,7 @@ function buildCandidateFromState(
 		totalGap += gap;
 		maxAdjacentGap = Math.max(maxAdjacentGap, gap);
 	}
-	if (maxAdjacentGap > HAN_BODY_LOCALITY_MAX_ADJACENT_GAP) {
+	if (maxAdjacentGap > BODY_LOCALITY_MAX_ADJACENT_GAP) {
 		return null;
 	}
 	const confirmedSurfaceAtoms = buildConfirmedSurfaceAtoms(
@@ -819,7 +817,7 @@ function collectSingletonHanAtomsForScope(
 			}
 			if (
 				bestOffset == null ||
-				bestGap > HAN_BODY_LOCALITY_MAX_ADJACENT_GAP
+		bestGap > BODY_LOCALITY_MAX_ADJACENT_GAP
 			) {
 				continue;
 			}
@@ -865,7 +863,7 @@ function resolveSingletonHanCompletionTierForScope(
 	if (!Number.isFinite(bestGap)) {
 		return "none";
 	}
-	return bestGap <= HAN_BODY_LOCALITY_MAX_ADJACENT_GAP ? "tight" : "none";
+	return bestGap <= BODY_LOCALITY_MAX_ADJACENT_GAP ? "tight" : "none";
 }
 
 function computeScopeAtomBoundaryGap(

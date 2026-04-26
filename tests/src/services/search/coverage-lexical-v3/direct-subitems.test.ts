@@ -367,7 +367,7 @@ describe("coverage lexical v3 direct subitems", () => {
 		});
 
 		const result = buildV3DirectSubitems({
-			snapshotText: `alpha${"x".repeat(70)}beta`,
+			snapshotText: `alpha${"x".repeat(125)}beta`,
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "gap.md",
@@ -426,7 +426,7 @@ describe("coverage lexical v3 direct subitems", () => {
 		});
 
 		const result = buildV3DirectSubitems({
-			snapshotText: `alpha${"x".repeat(70)}beta${"x".repeat(70)}gamma`,
+			snapshotText: `alpha${"x".repeat(125)}beta${"x".repeat(125)}gamma`,
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "complete.md",
