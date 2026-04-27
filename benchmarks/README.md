@@ -93,8 +93,7 @@ Measure direct local read-path timings with:
 node scripts/benchmark-big-vault-read.mjs
 ```
 
-### `coverage-lexical-automation-v1`
-### `coverage-lexical-automation-v1`
+### `coverage-lexical-v3-automation-corpus`
 
 This is the shared synthetic corpus used by `npm run benchmark:coverage-lexical` (V3).
 
@@ -107,7 +106,7 @@ npm run benchmark:coverage-lexical:materialize-corpus
 The default output directory is:
 
 ```text
-.codex-bench/corpora/coverage-lexical-automation-v1
+.codex-bench/corpora/coverage-lexical-v3-automation-corpus
 ```
 
 That export contains:
@@ -131,7 +130,7 @@ npm run benchmark:coverage-lexical
 
 The current V3 benchmark uses the automation corpus, query cases, and core summary metrics, and compares `CoverageLexical(V3)` against `MiniSearch`.
 
-The benchmark keeps `coverage-lexical-automation-v1` as the continuity anchor and reports the original intent gates:
+The benchmark keeps `coverage-lexical-v3-automation-corpus` as the continuity anchor and reports the original intent gates:
 
 - `product_guardrail_gate`
 - `exception_aware_gate`

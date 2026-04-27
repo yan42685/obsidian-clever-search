@@ -31,12 +31,18 @@ dist/
 
 .editorconfig
 cs-search-worker.js
-.codex-bench/
+
+# Keep Codex benchmark scratch data ignored, but allow the portable corpus
+# used by the coverage-lexical v3 benchmark.
+.codex-bench/*
+!.codex-bench/corpora/
+.codex-bench/corpora/*
+!.codex-bench/corpora/coverage-lexical-v3-automation-corpus/
+!.codex-bench/corpora/coverage-lexical-v3-automation-corpus/**
 
 benchmarks/*
 !benchmarks/README.md
 !benchmarks/design/
 !benchmarks/design/*.md
-benchmarks/corpora/
 
 tmp/

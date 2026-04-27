@@ -1,0 +1,1190 @@
+[
+  {
+    "query": "alphaone betatwo gammathree deltafour",
+    "relevantPath": "adversarial/ranker-lab/en/coverage-full.md",
+    "type": "coverage_guardrail",
+    "suite": "coverage_invariants"
+  },
+  {
+    "query": "alphaone betatwo gammathree delta",
+    "relevantPath": "adversarial/ranker-lab/en/coverage-full.md",
+    "type": "coverage_guardrail",
+    "suite": "coverage_invariants"
+  },
+  {
+    "query": "alphaone betatwo betatwo gammathree deltafour",
+    "relevantPath": "adversarial/ranker-lab/en/coverage-full.md",
+    "type": "coverage_guardrail",
+    "suite": "coverage_invariants"
+  },
+  {
+    "query": "config data rollout",
+    "relevantPath": "adversarial/ranker-lab/en/exact-quality-witness.md",
+    "type": "quality_guardrail",
+    "suite": "coverage_invariants"
+  },
+  {
+    "query": "政治理论",
+    "relevantPath": "general-zh/notes/政治理论笔记.md",
+    "type": "zh_short_body_vs_basename",
+    "suite": "coverage_invariants"
+  },
+  {
+    "query": "快乐定义",
+    "relevantPath": "general-zh/notes/快乐定义笔记.md",
+    "type": "zh_short_body_vs_basename",
+    "suite": "coverage_invariants"
+  },
+  {
+    "query": "projected token 运行时访问",
+    "relevantPath": "mixed/notes/projected-token-runtime-access-note.md",
+    "type": "mixed_script_anchor",
+    "suite": "coverage_invariants"
+  },
+  {
+    "query": "obsidian sync 问题",
+    "relevantPath": "mixed/notes/obsidian-sync-常见问题.md",
+    "type": "mixed_script_anchor",
+    "suite": "coverage_invariants"
+  },
+  {
+    "query": "电子技",
+    "relevantPath": "pkm-zh/books/电子技术入门.md",
+    "type": "zh_short_body_vs_basename",
+    "suite": "coverage_invariants"
+  },
+  {
+    "query": "旧名别名",
+    "relevantPath": "pkm-zh/notes/别名迁移说明.md",
+    "type": "zh_short_identity",
+    "suite": "coverage_invariants"
+  },
+  {
+    "query": "政治理论",
+    "relevantPath": "general-zh/notes/政治理论笔记.md",
+    "type": "zh_short_body_vs_basename",
+    "suite": "coverage_invariants"
+  },
+  {
+    "query": "projected token 运行时访问",
+    "relevantPath": "mixed/notes/projected-token-runtime-access-note.md",
+    "type": "mixed_script_anchor",
+    "suite": "coverage_invariants"
+  },
+  {
+    "query": "旧名别名迁移",
+    "relevantPath": "pkm-zh/notes/别名迁移说明.md",
+    "type": "zh_short_identity",
+    "suite": "coverage_invariants"
+  },
+  {
+    "query": "政治理论 学习笔记",
+    "relevantPath": "general-zh/notes/政治理论笔记.md",
+    "type": "zh_short_identity",
+    "suite": "adversarial"
+  },
+  {
+    "query": "快乐定义 心理学笔记",
+    "relevantPath": "general-zh/notes/快乐定义笔记.md",
+    "type": "zh_short_identity",
+    "suite": "adversarial"
+  },
+  {
+    "query": "projected token 运行时访问 pod",
+    "relevantPath": "mixed/notes/projected-token-runtime-access-note.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "obsidian sync 问题 排查",
+    "relevantPath": "mixed/notes/obsidian-sync-常见问题.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "guide for replay order after restore",
+    "relevantPath": "pkm-en/guides/shard-checkpoint-guide.md",
+    "type": "title_exact",
+    "suite": "core"
+  },
+  {
+    "query": "政治理论 学习笔记",
+    "relevantPath": "general-zh/notes/政治理论笔记.md",
+    "type": "zh_short_identity",
+    "suite": "adversarial"
+  },
+  {
+    "query": "projected token 运行时访问 pod",
+    "relevantPath": "mixed/notes/projected-token-runtime-access-note.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "playbook for cache eviction restore",
+    "relevantPath": "pkm-en/projects/sdk/vector-cache.md",
+    "type": "title_exact",
+    "suite": "core"
+  },
+  {
+    "query": "shard checkpoint",
+    "relevantPath": "pkm-en/guides/shard-checkpoint-guide.md",
+    "type": "title_prefix",
+    "suite": "core"
+  },
+  {
+    "query": "vector cache",
+    "relevantPath": "pkm-en/projects/sdk/vector-cache.md",
+    "type": "title_prefix",
+    "suite": "core"
+  },
+  {
+    "query": "restore notes about replay order",
+    "relevantPath": "pkm-en/guides/shard-checkpoint-guide.md",
+    "type": "content_dense",
+    "suite": "core"
+  },
+  {
+    "query": "notes about aliases when links drift",
+    "relevantPath": "pkm-en/notes/linking/aliases-deep-dive.md",
+    "type": "content_dense",
+    "suite": "core"
+  },
+  {
+    "query": "电子技术入门",
+    "relevantPath": "pkm-zh/books/电子技术入门.md",
+    "type": "zh_short_identity",
+    "suite": "adversarial"
+  },
+  {
+    "query": "别名兼容说明",
+    "relevantPath": "pkm-zh/notes/别名迁移说明.md",
+    "type": "zh_short_identity",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "incident review warm start notes",
+    "relevantPath": "pkm-en/incidents/incident-review.md",
+    "type": "ambiguous_intent",
+    "suite": "adversarial"
+  },
+  {
+    "query": "电子技术 入门 电路",
+    "relevantPath": "pkm-zh/books/电子技术入门.md",
+    "type": "zh_short_identity",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "cache restore playbook note",
+    "relevantPath": "pkm-en/projects/sdk/vector-cache.md",
+    "type": "ambiguous_intent",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "aliases note for old project names",
+    "relevantPath": "pkm-en/notes/linking/aliases-deep-dive.md",
+    "type": "ambiguous_intent",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "电子技术 基础电路 笔记",
+    "relevantPath": "pkm-zh/books/电子技术入门.md",
+    "type": "ambiguous_intent",
+    "suite": "adversarial"
+  },
+  {
+    "query": "better plu",
+    "relevantPath": "docs/plugins/better-plugins-page.md",
+    "type": "prefix_metadata",
+    "suite": "adversarial"
+  },
+  {
+    "query": "projected token runtime access guide",
+    "relevantPath": "tech-en/content/en/docs/tasks/configure-pod-container/projected-service-account-token.md",
+    "type": "ambiguous_intent",
+    "suite": "adversarial"
+  },
+  {
+    "query": "plugin compatibility migration guide",
+    "relevantPath": "docs/plugins/plugin-upgrade-guide.md",
+    "type": "ambiguous_intent",
+    "suite": "adversarial"
+  },
+  {
+    "query": "old project aliases map",
+    "relevantPath": "pkm-en/notes/linking/project-rename-map.md",
+    "type": "ambiguous_intent",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "旧名别名 迁移 规则",
+    "relevantPath": "pkm-zh/notes/别名迁移说明.md",
+    "type": "ambiguous_intent",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "电子技术 入门 电路 技巧",
+    "relevantPath": "pkm-zh/books/电子技术入门.md",
+    "type": "ambiguous_intent",
+    "suite": "adversarial"
+  },
+  {
+    "query": "better plugin road",
+    "relevantPath": "docs/plugins/better-plugins-roadmap.md",
+    "type": "prefix_metadata",
+    "suite": "adversarial"
+  },
+  {
+    "query": "beta compatibility rollout",
+    "relevantPath": "docs/releases/beta-compatibility-rollout.md",
+    "type": "prefix_body",
+    "suite": "adversarial"
+  },
+  {
+    "query": "guide to cluster object scope and namespaces",
+    "relevantPath": "tech-en/content/en/docs/concepts/overview/working-with-objects/namespaces.md",
+    "type": "body_path_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "tech-en secret pod data",
+    "relevantPath": "tech-en/content/en/docs/concepts/configuration/secret.md",
+    "type": "body_path_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "tech-en service account token",
+    "relevantPath": "tech-en/content/en/docs/tasks/configure-pod-container/configure-service-account.md",
+    "type": "body_path_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "tech-zh namespace pod object note",
+    "relevantPath": "tech-zh/content/zh-cn/docs/concepts/overview/working-with-objects/namespaces.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "tech-zh ingress service guide",
+    "relevantPath": "tech-zh/content/zh-cn/docs/concepts/services-networking/ingress.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "tech-zh service account token note",
+    "relevantPath": "tech-zh/content/zh-cn/docs/tasks/configure-pod-container/configure-service-account.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "mounted configuration data for pods",
+    "relevantPath": "tech-en/content/en/docs/concepts/configuration/configmap.md",
+    "type": "body_title_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "tech-zh configmap pod data",
+    "relevantPath": "tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+    "type": "body_title_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "secret pod data credentials",
+    "relevantPath": "tech-en/content/en/docs/concepts/configuration/secret.md",
+    "type": "body_title_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "sdk vector cache",
+    "relevantPath": "pkm-en/projects/sdk/vector-cache.md",
+    "type": "duplicate_conflict",
+    "suite": "adversarial"
+  },
+  {
+    "query": "archive vector cache",
+    "relevantPath": "pkm-en/archive/vector-cache.md",
+    "type": "duplicate_conflict",
+    "suite": "adversarial"
+  },
+  {
+    "query": "ops shard checkpoint",
+    "relevantPath": "pkm-en/ops/shard-checkpoint-runbook.md",
+    "type": "duplicate_conflict",
+    "suite": "adversarial"
+  },
+  {
+    "query": "old names still resolve through aliases",
+    "relevantPath": "pkm-en/notes/linking/aliases-deep-dive.md",
+    "type": "mixed_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "legacy wiki links after project rename",
+    "relevantPath": "pkm-en/notes/linking/wikilink-drift.md",
+    "type": "mixed_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "template incident warm-start recovery",
+    "relevantPath": "pkm-en/incidents/incident-review.md",
+    "type": "template_collision",
+    "suite": "adversarial"
+  },
+  {
+    "query": "incident review template",
+    "relevantPath": "pkm-en/templates/incident-review.md",
+    "type": "template_collision",
+    "suite": "adversarial"
+  },
+  {
+    "query": "checkpoint drift review",
+    "relevantPath": "pkm-en/incidents/incident-review.md",
+    "type": "template_collision",
+    "suite": "adversarial"
+  },
+  {
+    "query": "warm-start checkpoint drift",
+    "relevantPath": "pkm-en/incidents/incident-review.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "sdk cache restore note",
+    "relevantPath": "pkm-en/projects/sdk/vector-cache.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "aliases drift old projects",
+    "relevantPath": "pkm-en/notes/linking/aliases-deep-dive.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "cache warm start mitigation",
+    "relevantPath": "pkm-en/incidents/cache-warm-start.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "checkpoint replay after crash",
+    "relevantPath": "pkm-en/daily/2026-02-14-shard-restore-note.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "alias cleanup old wiki links",
+    "relevantPath": "pkm-en/daily/2026-02-17-alias-cleanup.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "vector cache crash note",
+    "relevantPath": "pkm-en/inbox/restart-cache-after-outage.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "incident mitigation warm start",
+    "relevantPath": "pkm-en/incidents/cache-warm-start.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "drift log recovery note",
+    "relevantPath": "pkm-en/archive/checkpoint-drift-log.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "forgot note about shard restore",
+    "relevantPath": "pkm-en/daily/2026-02-14-shard-restore-note.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "cache restore after outage replay steps",
+    "relevantPath": "pkm-en/projects/sdk/cache-restore-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "checkpoint replay verification after outage",
+    "relevantPath": "pkm-en/ops/cache-replay-runbook.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "vector cache outage follow up",
+    "relevantPath": "pkm-en/incidents/vector-cache-postmortem.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "cache replay followup note outage",
+    "relevantPath": "pkm-en/daily/2026-02-19-cache-replay-followup.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "sdk cache rollback replay issue",
+    "relevantPath": "pkm-en/notes/sdk-cache-rollback.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "warm start recovery checklist replay",
+    "relevantPath": "pkm-en/incidents/recovery-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "vector cache restart verification",
+    "relevantPath": "pkm-en/notes/cache-restart-verification.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "beta plugin compatibility faq release",
+    "relevantPath": "docs/releases/plugin-compatibility-faq.md",
+    "type": "content_dense",
+    "suite": "adversarial"
+  },
+  {
+    "query": "plugin compatibility release channels",
+    "relevantPath": "docs/releases/plugin-compatibility-faq.md",
+    "type": "content_dense",
+    "suite": "adversarial"
+  },
+  {
+    "query": "beta plugin release migration timing",
+    "relevantPath": "docs/releases/plugin-beta-release-notes.md",
+    "type": "content_dense",
+    "suite": "adversarial"
+  },
+  {
+    "query": "supported versions before plugin upgrade",
+    "relevantPath": "docs/plugins/plugin-compatibility-matrix.md",
+    "type": "mixed_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "plugin upgrade guide migration sequencing",
+    "relevantPath": "docs/plugins/plugin-upgrade-guide.md",
+    "type": "mixed_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "release checklist beta compatibility plugin",
+    "relevantPath": "docs/releases/plugin-beta-compatibility.md",
+    "type": "template_collision",
+    "suite": "adversarial"
+  },
+  {
+    "query": "projected service account token pod",
+    "relevantPath": "tech-en/content/en/docs/tasks/configure-pod-container/projected-service-account-token.md",
+    "type": "body_title_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "projected volume service account secret",
+    "relevantPath": "tech-en/content/en/docs/concepts/storage/projected-volumes.md",
+    "type": "body_path_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "tech-zh projected service account token note",
+    "relevantPath": "tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "tech-zh projected volume service account note",
+    "relevantPath": "tech-zh/content/zh-cn/docs/concepts/storage/projected-volumes.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "old project rename aliases map",
+    "relevantPath": "pkm-en/notes/linking/project-rename-map.md",
+    "type": "mixed_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "alias migration log project names",
+    "relevantPath": "pkm-en/archive/alias-migration-log.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "old project link aliases index",
+    "relevantPath": "pkm-en/notes/linking/old-project-index.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "checkpoint restore timeline lessons",
+    "relevantPath": "pkm-en/retros/shard-checkpoint-retrospective.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "checkpoint rollback operator steps",
+    "relevantPath": "pkm-en/ops/shard-checkpoint-runbook.md",
+    "type": "duplicate_conflict",
+    "suite": "adversarial"
+  },
+  {
+    "query": "warm start incident archive review",
+    "relevantPath": "pkm-en/archive/incident-review-2024.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "after outage replay validation checklist",
+    "relevantPath": "pkm-en/projects/sdk/cache-restore-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "restore verification after replay issue",
+    "relevantPath": "pkm-en/ops/cache-replay-runbook.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "follow up actions after vector cache outage",
+    "relevantPath": "pkm-en/incidents/vector-cache-postmortem.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "daily note about cache replay checks",
+    "relevantPath": "pkm-en/daily/2026-02-19-cache-replay-followup.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "fallback plan when replay fails",
+    "relevantPath": "pkm-en/notes/sdk-cache-rollback.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "warm start restart checklist after incident",
+    "relevantPath": "pkm-en/incidents/recovery-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "note confirming cache restart checks",
+    "relevantPath": "pkm-en/notes/cache-restart-verification.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "release questions about compatibility channels",
+    "relevantPath": "docs/releases/plugin-compatibility-faq.md",
+    "type": "content_dense",
+    "suite": "adversarial"
+  },
+  {
+    "query": "when beta plugin migration happens",
+    "relevantPath": "docs/releases/plugin-beta-release-notes.md",
+    "type": "content_dense",
+    "suite": "adversarial"
+  },
+  {
+    "query": "preparing plugin upgrade compatibility checks",
+    "relevantPath": "docs/plugins/plugin-upgrade-guide.md",
+    "type": "mixed_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "release compatibility checklist for beta plugins",
+    "relevantPath": "docs/releases/plugin-beta-compatibility.md",
+    "type": "template_collision",
+    "suite": "adversarial"
+  },
+  {
+    "query": "landing page for browsing better plugins",
+    "relevantPath": "docs/plugins/better-plugins-page.md",
+    "type": "prefix_metadata",
+    "suite": "adversarial"
+  },
+  {
+    "query": "roadmap for better plugins work",
+    "relevantPath": "docs/plugins/better-plugins-roadmap.md",
+    "type": "prefix_metadata",
+    "suite": "adversarial"
+  },
+  {
+    "query": "pod credentials mounted at runtime",
+    "relevantPath": "tech-en/content/en/docs/tasks/configure-pod-container/projected-service-account-token.md",
+    "type": "body_title_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "pod gets configmap and secret together",
+    "relevantPath": "tech-en/content/en/docs/concepts/storage/projected-volumes.md",
+    "type": "body_path_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "tech-zh projected token pod runtime access",
+    "relevantPath": "tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "tech-zh projected volume service account sources",
+    "relevantPath": "tech-zh/content/zh-cn/docs/concepts/storage/projected-volumes.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "canonical names for renamed projects",
+    "relevantPath": "pkm-en/notes/linking/project-rename-map.md",
+    "type": "mixed_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "cleanup log for retired project names",
+    "relevantPath": "pkm-en/archive/alias-migration-log.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "legacy project names kept during migration",
+    "relevantPath": "pkm-en/notes/linking/old-project-index.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "review with final mitigation after warm start",
+    "relevantPath": "pkm-en/incidents/incident-review.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "archived review for older warm start issue",
+    "relevantPath": "pkm-en/archive/incident-review-2024.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "timeline lessons after checkpoint restore",
+    "relevantPath": "pkm-en/retros/shard-checkpoint-retrospective.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "operator steps for rollback during restore",
+    "relevantPath": "pkm-en/ops/shard-checkpoint-runbook.md",
+    "type": "duplicate_conflict",
+    "suite": "adversarial"
+  },
+  {
+    "query": "daily note after shard replay repair",
+    "relevantPath": "pkm-en/daily/2026-02-14-shard-restore-note.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "note about restart cache after outage",
+    "relevantPath": "pkm-en/inbox/restart-cache-after-outage.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "shard checkpoint replay order guide",
+    "relevantPath": "pkm-en/guides/shard-checkpoint-guide.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "note about restoring cache after warmup failed",
+    "relevantPath": "pkm-en/projects/sdk/cache-restore-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "review of checkpoint drift and mitigation",
+    "relevantPath": "pkm-en/incidents/incident-review.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "template used for warm start incidents",
+    "relevantPath": "pkm-en/templates/incident-review.md",
+    "type": "template_collision",
+    "suite": "adversarial"
+  },
+  {
+    "query": "projected secrets and tokens in a pod",
+    "relevantPath": "tech-en/content/en/docs/concepts/storage/projected-volumes.md",
+    "type": "body_path_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "tech-zh secret pod data note",
+    "relevantPath": "tech-zh/content/zh-cn/docs/concepts/configuration/secret.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "page listing better plugins",
+    "relevantPath": "docs/plugins/better-plugins-page.md",
+    "type": "prefix_metadata",
+    "suite": "adversarial"
+  },
+  {
+    "query": "what changes during beta compatibility rollout",
+    "relevantPath": "docs/releases/beta-compatibility-rollout.md",
+    "type": "content_dense",
+    "suite": "adversarial"
+  },
+  {
+    "query": "archive log of alias cleanup",
+    "relevantPath": "pkm-en/archive/alias-migration-log.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "old project names index during migration",
+    "relevantPath": "pkm-en/notes/linking/old-project-index.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "followup note after outage replay",
+    "relevantPath": "pkm-en/daily/2026-02-19-cache-replay-followup.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "operator note for cache hotfix after crash",
+    "relevantPath": "pkm-en/ops/vector-cache-hotfix.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "vector cache incident notes after outage",
+    "relevantPath": "pkm-en/incidents/vector-cache-postmortem.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "checkpoint repair note from daily log",
+    "relevantPath": "pkm-en/daily/2026-02-14-shard-restore-note.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "restore checklist with shard verification",
+    "relevantPath": "pkm-en/projects/sdk/cache-restore-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "runbook for replay order and verification",
+    "relevantPath": "pkm-en/ops/cache-replay-runbook.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "review note with final mitigation details",
+    "relevantPath": "pkm-en/incidents/incident-review.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "tech-zh projected token runtime access",
+    "relevantPath": "tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "page for supported plugin versions before upgrade",
+    "relevantPath": "docs/plugins/plugin-compatibility-matrix.md",
+    "type": "mixed_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "warm start checklist after cache incident",
+    "relevantPath": "pkm-en/incidents/recovery-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "vector cache restore",
+    "relevantPath": "pkm-en/projects/sdk/vector-cache.md",
+    "type": "duplicate_conflict",
+    "suite": "adversarial"
+  },
+  {
+    "query": "remember vector cache restore note",
+    "relevantPath": "pkm-en/projects/sdk/vector-cache.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "looking for sdk cache replay runbook",
+    "relevantPath": "pkm-en/ops/cache-replay-runbook.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "cache restore checklist after outage note",
+    "relevantPath": "pkm-en/projects/sdk/cache-restore-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "project alias canonical wikilink note",
+    "relevantPath": "pkm-en/notes/linking/project-rename-map.md",
+    "type": "mixed_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "plugin faq compatibility fallback",
+    "relevantPath": "docs/releases/plugin-compatibility-faq.md",
+    "type": "content_dense",
+    "suite": "adversarial"
+  },
+  {
+    "query": "tech-zh projected volume checklist token configmap secret",
+    "relevantPath": "tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-volume-checklist.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "tech-zh projected token runtime access note",
+    "relevantPath": "tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "restore flow replay order checkpoint",
+    "relevantPath": "pkm-en/guides/shard-checkpoint-guide.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "what still needs warmup after cache restore",
+    "relevantPath": "pkm-en/projects/sdk/cache-restore-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "cache outage postmortem follow up",
+    "relevantPath": "pkm-en/incidents/vector-cache-postmortem.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "tech-zh projected token runtime guide",
+    "relevantPath": "tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
+    "type": "mixed_script_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "pod mounts token and secret together",
+    "relevantPath": "tech-en/content/en/docs/concepts/storage/projected-volumes.md",
+    "type": "body_path_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "plugin compatibility matrix supported versions",
+    "relevantPath": "docs/plugins/plugin-compatibility-matrix.md",
+    "type": "mixed_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "how old wiki links stayed compatible after rename",
+    "relevantPath": "pkm-en/notes/linking/wikilink-drift.md",
+    "type": "mixed_anchor",
+    "suite": "adversarial"
+  },
+  {
+    "query": "warm start review with final mitigation",
+    "relevantPath": "pkm-en/incidents/incident-review.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "did we log replay repair in a daily note",
+    "relevantPath": "pkm-en/daily/2026-02-14-shard-restore-note.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "what changed during beta compatibility rollout",
+    "relevantPath": "docs/releases/beta-compatibility-rollout.md",
+    "type": "content_dense",
+    "suite": "adversarial"
+  },
+  {
+    "query": "operator hotfix note after cache crash",
+    "relevantPath": "pkm-en/ops/vector-cache-hotfix.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "release faq compatibility fallback",
+    "relevantPath": "docs/releases/plugin-compatibility-faq.md",
+    "type": "content_dense",
+    "suite": "adversarial"
+  },
+  {
+    "query": "我记得 after outage replay validation checklist 那篇",
+    "relevantPath": "pkm-en/projects/sdk/cache-restore-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "想找 alias cleanup old wiki links 那页",
+    "relevantPath": "pkm-en/daily/2026-02-17-alias-cleanup.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "alias migration log project names 在哪个 note 里",
+    "relevantPath": "pkm-en/archive/alias-migration-log.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "aliases drift old projects 那个 markdown checklist",
+    "relevantPath": "pkm-en/notes/linking/aliases-deep-dive.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "frontmatter alias 提过 archive log of alias cleanup",
+    "relevantPath": "pkm-en/archive/alias-migration-log.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "nested list 里写的 archived review for older warm start issue",
+    "relevantPath": "pkm-en/archive/incident-review-2024.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "我记得 cache outage postmortem follow up 那篇",
+    "relevantPath": "pkm-en/incidents/vector-cache-postmortem.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "想找 cache replay followup note outage 那页",
+    "relevantPath": "pkm-en/daily/2026-02-19-cache-replay-followup.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "cache restore after outage replay steps 在哪个 note 里",
+    "relevantPath": "pkm-en/projects/sdk/cache-restore-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "cache restore checklist after outage note 那个 markdown checklist",
+    "relevantPath": "pkm-en/projects/sdk/cache-restore-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "frontmatter alias 提过 cache warm start mitigation",
+    "relevantPath": "pkm-en/incidents/cache-warm-start.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "nested list 里写的 checkpoint repair note from daily log",
+    "relevantPath": "pkm-en/daily/2026-02-14-shard-restore-note.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "我记得 checkpoint replay after crash 那篇",
+    "relevantPath": "pkm-en/daily/2026-02-14-shard-restore-note.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "想找 checkpoint replay verification after outage 那页",
+    "relevantPath": "pkm-en/ops/cache-replay-runbook.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "checkpoint restore timeline lessons 在哪个 note 里",
+    "relevantPath": "pkm-en/retros/shard-checkpoint-retrospective.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "cleanup log for retired project names 那个 markdown checklist",
+    "relevantPath": "pkm-en/archive/alias-migration-log.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "frontmatter alias 提过 daily note about cache replay checks",
+    "relevantPath": "pkm-en/daily/2026-02-19-cache-replay-followup.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "nested list 里写的 daily note after shard replay repair",
+    "relevantPath": "pkm-en/daily/2026-02-14-shard-restore-note.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "我记得 did we log replay repair in a daily note 那篇",
+    "relevantPath": "pkm-en/daily/2026-02-14-shard-restore-note.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "想找 drift log recovery note 那页",
+    "relevantPath": "pkm-en/archive/checkpoint-drift-log.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "fallback plan when replay fails 在哪个 note 里",
+    "relevantPath": "pkm-en/notes/sdk-cache-rollback.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "follow up actions after vector cache outage 那个 markdown checklist",
+    "relevantPath": "pkm-en/incidents/vector-cache-postmortem.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "frontmatter alias 提过 followup note after outage replay",
+    "relevantPath": "pkm-en/daily/2026-02-19-cache-replay-followup.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "nested list 里写的 forgot note about shard restore",
+    "relevantPath": "pkm-en/daily/2026-02-14-shard-restore-note.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "我记得 incident mitigation warm start 那篇",
+    "relevantPath": "pkm-en/incidents/cache-warm-start.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "想找 legacy project names kept during migration 那页",
+    "relevantPath": "pkm-en/notes/linking/old-project-index.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "looking for sdk cache replay runbook 在哪个 note 里",
+    "relevantPath": "pkm-en/ops/cache-replay-runbook.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "note about restart cache after outage 那个 markdown checklist",
+    "relevantPath": "pkm-en/inbox/restart-cache-after-outage.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "frontmatter alias 提过 note about restoring cache after warmup failed",
+    "relevantPath": "pkm-en/projects/sdk/cache-restore-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "nested list 里写的 note confirming cache restart checks",
+    "relevantPath": "pkm-en/notes/cache-restart-verification.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "我记得 old project link aliases index 那篇",
+    "relevantPath": "pkm-en/notes/linking/old-project-index.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "想找 old project names index during migration 那页",
+    "relevantPath": "pkm-en/notes/linking/old-project-index.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "operator hotfix note after cache crash 在哪个 note 里",
+    "relevantPath": "pkm-en/ops/vector-cache-hotfix.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "operator note for cache hotfix after crash 那个 markdown checklist",
+    "relevantPath": "pkm-en/ops/vector-cache-hotfix.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "frontmatter alias 提过 remember vector cache restore note",
+    "relevantPath": "pkm-en/projects/sdk/vector-cache.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "nested list 里写的 restore checklist with shard verification",
+    "relevantPath": "pkm-en/projects/sdk/cache-restore-checklist.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "我记得 restore flow replay order checkpoint 那篇",
+    "relevantPath": "pkm-en/guides/shard-checkpoint-guide.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "想找 restore verification after replay issue 那页",
+    "relevantPath": "pkm-en/ops/cache-replay-runbook.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "review note with final mitigation details 在哪个 note 里",
+    "relevantPath": "pkm-en/incidents/incident-review.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "review of checkpoint drift and mitigation 那个 markdown checklist",
+    "relevantPath": "pkm-en/incidents/incident-review.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "frontmatter alias 提过 review with final mitigation after warm start",
+    "relevantPath": "pkm-en/incidents/incident-review.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  },
+  {
+    "query": "nested list 里写的 runbook for replay order and verification",
+    "relevantPath": "pkm-en/ops/cache-replay-runbook.md",
+    "type": "partial_memory",
+    "suite": "messy_pkm"
+  }
+]

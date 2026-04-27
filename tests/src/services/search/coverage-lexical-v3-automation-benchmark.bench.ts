@@ -633,7 +633,7 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 
 const previousFixtureImportEnv = process.env.COVERAGE_LEXICAL_FIXTURE_IMPORT;
 process.env.COVERAGE_LEXICAL_FIXTURE_IMPORT = "1";
-const legacyFixtureModule = require("./coverage-lexical-automation-fixture") as {
+const v3FixtureModule = require("./coverage-lexical-automation-fixture") as {
 	createAutomationCorpus(): {
 		documents: Array<Record<string, unknown>>;
 		queryCases: Array<Record<string, unknown>>;
@@ -685,7 +685,7 @@ const {
 	computeQueryLanguageMix,
 	round,
 	computeRelativeRatio,
-} = legacyFixtureModule;
+} = v3FixtureModule;
 
 const LOCAL_STORAGE_DEBUG_QUERY_KEY = "coverage-lexical-v3-debug-query";
 const LOCAL_STORAGE_DEBUG_MODE_KEY = "coverage-lexical-v3-debug-mode";

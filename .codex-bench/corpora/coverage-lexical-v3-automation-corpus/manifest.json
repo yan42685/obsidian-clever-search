@@ -1,0 +1,42 @@
+{
+  "name": "coverage-lexical-automation-v1",
+  "description": "Materialized synthetic corpus used by coverage-lexical-automation-benchmark.",
+  "generatedAt": "2026-04-14T12:43:09.372Z",
+  "sourceModule": "tests/src/services/search/coverage-lexical-legacy-automation-benchmark.bench.ts#createAutomationCorpus",
+  "outputRoot": ".codex-bench/corpora/coverage-lexical-automation-v1",
+  "layout": {
+    "vaultRoot": "vault",
+    "documentsJson": "documents.json",
+    "queryCasesJson": "query-cases.json",
+    "manifestJson": "manifest.json"
+  },
+  "documentCount": 89,
+  "queryCount": 198,
+  "suites": {
+    "core": 6,
+    "coverage_invariants": 13,
+    "adversarial": 74,
+    "messy_pkm": 105
+  },
+  "queryTypes": {
+    "coverage_guardrail": 3,
+    "quality_guardrail": 1,
+    "tail_guardrail": 0,
+    "locality_guardrail": 0,
+    "title_exact": 2,
+    "title_prefix": 2,
+    "content_dense": 11,
+    "prefix_metadata": 5,
+    "prefix_body": 1,
+    "body_path_anchor": 7,
+    "body_title_anchor": 5,
+    "duplicate_conflict": 6,
+    "mixed_anchor": 11,
+    "template_collision": 6,
+    "mixed_script_anchor": 18,
+    "zh_short_identity": 8,
+    "zh_short_body_vs_basename": 4,
+    "ambiguous_intent": 9,
+    "partial_memory": 99
+  }
+}

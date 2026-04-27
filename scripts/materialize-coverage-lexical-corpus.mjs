@@ -20,7 +20,7 @@ function parseOutputArg(argv) {
 		repoRoot,
 		".codex-bench",
 		"corpora",
-		"coverage-lexical-automation-v1",
+		"coverage-lexical-v3-automation-corpus",
 	);
 }
 

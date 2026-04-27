@@ -857,7 +857,7 @@ Current branch status:
   Soft early gating reduces the need for display pruning, but does not replace
   display-tail management or final strong-witness rescue.
   migration slice has been verified against the ranking suite, recall suite,
-  and the current `coverage-lexical-automation-v1` benchmark without changing
+  and the current `coverage-lexical-v3-automation-corpus` benchmark without changing
   the benchmark gate shape.
 - Stage 5 is partially complete.
   Display pruning now derives more of its keep/rescue judgment from
@@ -876,7 +876,7 @@ Current branch status:
   The benchmark harness now reports separate intent-gate summaries for
   `product_guardrail_gate`, `exception_aware_gate`, and
   `legacy_continuity_gate` while keeping the existing
-  `coverage-lexical-automation-v1` synthetic corpus as the continuity anchor.
+  `coverage-lexical-v3-automation-corpus` synthetic corpus as the continuity anchor.
   The synthetic corpus has now also been refreshed with explicit
   short-Chinese real-word coverage conflicts such as `政治理论` and `快乐定义`,
   plus mixed-script one-sided distractors such as

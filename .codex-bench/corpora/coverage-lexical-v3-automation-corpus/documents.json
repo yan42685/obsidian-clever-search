@@ -1,0 +1,731 @@
+[
+  {
+    "path": "adversarial/ranker-lab/en/coverage-full.md",
+    "basename": "Coverage full",
+    "folder": "adversarial/ranker-lab/en",
+    "headings": "Coverage witness",
+    "content": "alphaone betatwo gammathree deltafour keeps all four family witnesses together in one compact explanation\n- 中文补充\n  - 场景: general notes\n  - path hint: en/coverage-full.md\n  - shared anchors: note context summary\n---\ntitle: \"Coverage full\"\naliases: [\"Coverage full\"]\ntags: [\"note\"]\n---\n\n# Coverage full\n\n> [!note]\n> path hint: `en/coverage-full.md`\n> heading hint: **Coverage witness**\n\n- overview\n  - [[Coverage full]]\n  - [ref](en/coverage-full.md.md)\n  - inline code: `Coverage witness`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | en/coverage-full.md |\n| alias | Coverage full |\n\n```md\n- nested bullet for en/coverage-full.md\n  - alias: Coverage full\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "adversarial/ranker-lab/en/coverage-noise.md",
+    "basename": "Coverage noise",
+    "folder": "adversarial/ranker-lab/en",
+    "headings": "Coverage witness",
+    "content": "alphaone alphaone betatwo repeats early family noise without the gammathree deltafour witness\n---\ntitle: \"Coverage noise\"\naliases: [\"Coverage noise\"]\ntags: [\"note\"]\n---\n\n# Coverage noise\n\n> [!note]\n> path hint: `en/coverage-noise.md`\n> heading hint: **Coverage witness**\n\n- overview\n  - [[Coverage noise]]\n  - [ref](en/coverage-noise.md.md)\n  - inline code: `Coverage witness`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | en/coverage-noise.md |\n| alias | Coverage noise |\n\n```md\n- nested bullet for en/coverage-noise.md\n  - alias: Coverage noise\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "adversarial/ranker-lab/en/coverage-full-loose.md",
+    "basename": "Coverage full loose",
+    "folder": "adversarial/ranker-lab/en",
+    "headings": "Coverage witness",
+    "content": "alphaone opens the note, several filler transitions hide the body, betatwo returns later, more filler appears, gammathree arrives much later, and deltafour only lands in the trailing sentence\n- 中文补充\n  - 场景: general notes\n  - path hint: en/coverage-full-loose.md\n  - shared anchors: note context summary\n---\ntitle: \"Coverage full loose\"\naliases: [\"Coverage full loose\"]\ntags: [\"note\"]\n---\n\n# Coverage full loose\n\n> [!note]\n> path hint: `en/coverage-full-loose.md`\n> heading hint: **Coverage witness**\n\n- overview\n  - [[Coverage full loose]]\n  - [ref](en/coverage-full-loose.md.md)\n  - inline code: `Coverage witness`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | en/coverage-full-loose.md |\n| alias | Coverage full loose |\n\n```md\n- nested bullet for en/coverage-full-loose.md\n  - alias: Coverage full loose\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "adversarial/ranker-lab/en/coverage-prefix-family.md",
+    "basename": "Coverage prefix family",
+    "folder": "adversarial/ranker-lab/en",
+    "headings": "Coverage witness",
+    "content": "alphaone betatwo gammafield deltaform keeps family shaped terms but not the exact target witnesses\n---\ntitle: \"Coverage prefix family\"\naliases: [\"Coverage prefix family\"]\ntags: [\"note\"]\n---\n\n# Coverage prefix family\n\n> [!note]\n> path hint: `en/coverage-prefix-family.md`\n> heading hint: **Coverage witness**\n\n- overview\n  - [[Coverage prefix family]]\n  - [ref](en/coverage-prefix-family.md.md)\n  - inline code: `Coverage witness`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | en/coverage-prefix-family.md |\n| alias | Coverage prefix family |\n\n```md\n- nested bullet for en/coverage-prefix-family.md\n  - alias: Coverage prefix family\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "adversarial/ranker-lab/en/exact-quality-witness.md",
+    "basename": "Exact quality witness",
+    "folder": "adversarial/ranker-lab/en",
+    "headings": "Quality witness",
+    "content": "config data rollout keeps exact family evidence together in one compact note\n- 中文补充\n  - 场景: general notes\n  - path hint: en/exact-quality-witness.md\n  - shared anchors: note context summary\n---\ntitle: \"Exact quality witness\"\naliases: [\"Exact quality witness\"]\ntags: [\"note\"]\n---\n\n# Exact quality witness\n\n> [!note]\n> path hint: `en/exact-quality-witness.md`\n> heading hint: **Quality witness**\n\n- overview\n  - [[Exact quality witness]]\n  - [ref](en/exact-quality-witness.md.md)\n  - inline code: `Quality witness`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | en/exact-quality-witness.md |\n| alias | Exact quality witness |\n\n```md\n- nested bullet for en/exact-quality-witness.md\n  - alias: Exact quality witness\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "adversarial/ranker-lab/en/exact-quality-loose.md",
+    "basename": "Exact quality loose",
+    "folder": "adversarial/ranker-lab/en",
+    "headings": "Quality witness",
+    "content": "config arrives early, long filler paragraphs separate the note, data comes back much later, and rollout only appears after more narrative drift\n---\ntitle: \"Exact quality loose\"\naliases: [\"Exact quality loose\"]\ntags: [\"note\"]\n---\n\n# Exact quality loose\n\n> [!note]\n> path hint: `en/exact-quality-loose.md`\n> heading hint: **Quality witness**\n\n- overview\n  - [[Exact quality loose]]\n  - [ref](en/exact-quality-loose.md.md)\n  - inline code: `Quality witness`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | en/exact-quality-loose.md |\n| alias | Exact quality loose |\n\n```md\n- nested bullet for en/exact-quality-loose.md\n  - alias: Exact quality loose\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "adversarial/ranker-lab/en/expanded-quality-noise.md",
+    "basename": "Expanded quality noise",
+    "folder": "adversarial/ranker-lab/en",
+    "headings": "Quality witness",
+    "content": "configmap datastore rollout keeps only expanded family evidence nearby\n- 中文补充\n  - 场景: general notes\n  - path hint: en/expanded-quality-noise.md\n  - shared anchors: note context summary\n---\ntitle: \"Expanded quality noise\"\naliases: [\"Expanded quality noise\"]\ntags: [\"note\"]\n---\n\n# Expanded quality noise\n\n> [!note]\n> path hint: `en/expanded-quality-noise.md`\n> heading hint: **Quality witness**\n\n- overview\n  - [[Expanded quality noise]]\n  - [ref](en/expanded-quality-noise.md.md)\n  - inline code: `Quality witness`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | en/expanded-quality-noise.md |\n| alias | Expanded quality noise |\n\n```md\n- nested bullet for en/expanded-quality-noise.md\n  - alias: Expanded quality noise\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "adversarial/ranker-lab/en/fuzzy-quality-noise.md",
+    "basename": "Fuzzy quality noise",
+    "folder": "adversarial/ranker-lab/en",
+    "headings": "Quality witness",
+    "content": "konfig darta rollot keeps typo heavy family fragments without the exact witness\n---\ntitle: \"Fuzzy quality noise\"\naliases: [\"Fuzzy quality noise\"]\ntags: [\"note\"]\n---\n\n# Fuzzy quality noise\n\n> [!note]\n> path hint: `en/fuzzy-quality-noise.md`\n> heading hint: **Quality witness**\n\n- overview\n  - [[Fuzzy quality noise]]\n  - [ref](en/fuzzy-quality-noise.md.md)\n  - inline code: `Quality witness`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | en/fuzzy-quality-noise.md |\n| alias | Fuzzy quality noise |\n\n```md\n- nested bullet for en/fuzzy-quality-noise.md\n  - alias: Fuzzy quality noise\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "adversarial/ranker-lab/en/earlier-tail.md",
+    "basename": "Earlier tail witness",
+    "folder": "adversarial/ranker-lab/en",
+    "headings": "Tail witness",
+    "content": "connection policy timeout keeps the earlier exact family stable during rollout\n- 中文补充\n  - 场景: general notes\n  - path hint: en/earlier-tail.md\n  - shared anchors: note context summary\n---\ntitle: \"Earlier tail witness\"\naliases: [\"Earlier tail witness\"]\ntags: [\"note\"]\n---\n\n# Earlier tail witness\n\n> [!note]\n> path hint: `en/earlier-tail.md`\n> heading hint: **Tail witness**\n\n- overview\n  - [[Earlier tail witness]]\n  - [ref](en/earlier-tail.md.md)\n  - inline code: `Tail witness`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | en/earlier-tail.md |\n| alias | Earlier tail witness |\n\n```md\n- nested bullet for en/earlier-tail.md\n  - alias: Earlier tail witness\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "adversarial/ranker-lab/en/middle-tail.md",
+    "basename": "Middle tail witness",
+    "folder": "adversarial/ranker-lab/en",
+    "headings": "Tail witness",
+    "content": "connection timeout policy keeps the middle exact family stable during rollout\n---\ntitle: \"Middle tail witness\"\naliases: [\"Middle tail witness\"]\ntags: [\"note\"]\n---\n\n# Middle tail witness\n\n> [!note]\n> path hint: `en/middle-tail.md`\n> heading hint: **Tail witness**\n\n- overview\n  - [[Middle tail witness]]\n  - [ref](en/middle-tail.md.md)\n  - inline code: `Tail witness`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | en/middle-tail.md |\n| alias | Middle tail witness |\n\n```md\n- nested bullet for en/middle-tail.md\n  - alias: Middle tail witness\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "adversarial/ranker-lab/en/later-tail.md",
+    "basename": "Later tail witness",
+    "folder": "adversarial/ranker-lab/en",
+    "headings": "Tail witness",
+    "content": "connection timeout recovery keeps the later exact family stable during rollout\n- 中文补充\n  - 场景: general notes\n  - path hint: en/later-tail.md\n  - shared anchors: note context summary\n---\ntitle: \"Later tail witness\"\naliases: [\"Later tail witness\"]\ntags: [\"note\"]\n---\n\n# Later tail witness\n\n> [!note]\n> path hint: `en/later-tail.md`\n> heading hint: **Tail witness**\n\n- overview\n  - [[Later tail witness]]\n  - [ref](en/later-tail.md.md)\n  - inline code: `Tail witness`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | en/later-tail.md |\n| alias | Later tail witness |\n\n```md\n- nested bullet for en/later-tail.md\n  - alias: Later tail witness\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "adversarial/ranker-lab/en/locality-compact.md",
+    "basename": "Locality compact witness",
+    "folder": "adversarial/ranker-lab/en",
+    "headings": "Locality witness",
+    "content": "stale mount restart window stays together in one compact sentence\n---\ntitle: \"Locality compact witness\"\naliases: [\"Locality compact witness\"]\ntags: [\"note\"]\n---\n\n# Locality compact witness\n\n> [!note]\n> path hint: `en/locality-compact.md`\n> heading hint: **Locality witness**\n\n- overview\n  - [[Locality compact witness]]\n  - [ref](en/locality-compact.md.md)\n  - inline code: `Locality witness`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | en/locality-compact.md |\n| alias | Locality compact witness |\n\n```md\n- nested bullet for en/locality-compact.md\n  - alias: Locality compact witness\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "adversarial/ranker-lab/en/locality-loose.md",
+    "basename": "Locality loose witness",
+    "folder": "adversarial/ranker-lab/en",
+    "headings": "Locality witness",
+    "content": "stale filler filler mount filler filler restart filler filler window drifts across a loose sentence\n- 中文补充\n  - 场景: general notes\n  - path hint: en/locality-loose.md\n  - shared anchors: note context summary\n---\ntitle: \"Locality loose witness\"\naliases: [\"Locality loose witness\"]\ntags: [\"note\"]\n---\n\n# Locality loose witness\n\n> [!note]\n> path hint: `en/locality-loose.md`\n> heading hint: **Locality witness**\n\n- overview\n  - [[Locality loose witness]]\n  - [ref](en/locality-loose.md.md)\n  - inline code: `Locality witness`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | en/locality-loose.md |\n| alias | Locality loose witness |\n\n```md\n- nested bullet for en/locality-loose.md\n  - alias: Locality loose witness\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "docs/plugins/better-plugins-page.md",
+    "basename": "better plugins page",
+    "folder": "docs/plugins",
+    "headings": "Plugin index",
+    "content": "directory landing page for plugin browsing without the answer paragraph users actually want\n---\ntitle: \"better plugins page\"\naliases: [\"better plugins page\"]\ntags: [\"note\"]\n---\n\n# better plugins page\n\n> [!note]\n> path hint: `plugins/better-plugins-page.md`\n> heading hint: **Plugin index**\n\n- overview\n  - [[better plugins page]]\n  - [ref](plugins/better-plugins-page.md.md)\n  - inline code: `Plugin index`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | plugins/better-plugins-page.md |\n| alias | better plugins page |\n\n```md\n- nested bullet for plugins/better-plugins-page.md\n  - alias: better plugins page\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "docs/plugins/better-plugins-catalog.md",
+    "basename": "better plugins catalog",
+    "folder": "docs/plugins",
+    "headings": "Plugin catalog",
+    "content": "catalog overview for plugin listings with many repeated plugin names and no compact answer\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: plugins/better-plugins-catalog.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"better plugins catalog\"\naliases: [\"better plugins catalog\"]\ntags: [\"note\"]\n---\n\n# better plugins catalog\n\n> [!note]\n> path hint: `plugins/better-plugins-catalog.md`\n> heading hint: **Plugin catalog**\n\n- overview\n  - [[better plugins catalog]]\n  - [ref](plugins/better-plugins-catalog.md.md)\n  - inline code: `Plugin catalog`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | plugins/better-plugins-catalog.md |\n| alias | better plugins catalog |\n\n```md\n- nested bullet for plugins/better-plugins-catalog.md\n  - alias: better plugins catalog\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "docs/plugins/better-plugins-roadmap.md",
+    "basename": "better plugins roadmap",
+    "folder": "docs/plugins",
+    "headings": "Plugin roadmap",
+    "content": "roadmap page for better plugins workstreams, milestones, and backlog notes\n---\ntitle: \"better plugins roadmap\"\naliases: [\"better plugins roadmap\"]\ntags: [\"note\"]\n---\n\n# better plugins roadmap\n\n> [!note]\n> path hint: `plugins/better-plugins-roadmap.md`\n> heading hint: **Plugin roadmap**\n\n- overview\n  - [[better plugins roadmap]]\n  - [ref](plugins/better-plugins-roadmap.md.md)\n  - inline code: `Plugin roadmap`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | plugins/better-plugins-roadmap.md |\n| alias | better plugins roadmap |\n\n```md\n- nested bullet for plugins/better-plugins-roadmap.md\n  - alias: better plugins roadmap\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "docs/plugins/beta-compatibility-index.md",
+    "basename": "beta compatibility index",
+    "folder": "docs/plugins",
+    "headings": "Compatibility index",
+    "content": "index page for beta plugin compatibility and release bookkeeping without the direct answer paragraph\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: plugins/beta-compatibility-index.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"beta compatibility index\"\naliases: [\"beta compatibility index\"]\ntags: [\"note\"]\n---\n\n# beta compatibility index\n\n> [!note]\n> path hint: `plugins/beta-compatibility-index.md`\n> heading hint: **Compatibility index**\n\n- overview\n  - [[beta compatibility index]]\n  - [ref](plugins/beta-compatibility-index.md.md)\n  - inline code: `Compatibility index`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | plugins/beta-compatibility-index.md |\n| alias | beta compatibility index |\n\n```md\n- nested bullet for plugins/beta-compatibility-index.md\n  - alias: beta compatibility index\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "notes/body-noise.md",
+    "basename": "release notes",
+    "folder": "notes",
+    "headings": "Plugin experiments",
+    "content": "beta plugin experiments mention one item and unrelated notes without a strong metadata completion signal\n---\ntitle: \"release notes\"\naliases: [\"release notes\"]\ntags: [\"note\"]\n---\n\n# release notes\n\n> [!note]\n> path hint: `notes/body-noise.md`\n> heading hint: **Plugin experiments**\n\n- overview\n  - [[release notes]]\n  - [ref](notes/body-noise.md.md)\n  - inline code: `Plugin experiments`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/body-noise.md |\n| alias | release notes |\n\n```md\n- nested bullet for notes/body-noise.md\n  - alias: release notes\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "docs/body-target.md",
+    "basename": "release notes",
+    "folder": "docs",
+    "headings": "Compatibility",
+    "content": "beta compatibility plugin answer stays compact in the body and directly explains the release constraint\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: docs/body-target.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"release notes\"\naliases: [\"release notes\"]\ntags: [\"note\"]\n---\n\n# release notes\n\n> [!note]\n> path hint: `docs/body-target.md`\n> heading hint: **Compatibility**\n\n- overview\n  - [[release notes]]\n  - [ref](docs/body-target.md.md)\n  - inline code: `Compatibility`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | docs/body-target.md |\n| alias | release notes |\n\n```md\n- nested bullet for docs/body-target.md\n  - alias: release notes\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "docs/releases/plugin-beta-compatibility.md",
+    "basename": "plugin beta compatibility",
+    "folder": "docs/releases",
+    "headings": "Release checklist",
+    "content": "plugin beta compatibility guidance exists here but the explanation is spread across longer rollout prose and checklist items\n---\ntitle: \"plugin beta compatibility\"\naliases: [\"plugin beta compatibility\"]\ntags: [\"note\"]\n---\n\n# plugin beta compatibility\n\n> [!note]\n> path hint: `releases/plugin-beta-compatibility.md`\n> heading hint: **Release checklist**\n\n- overview\n  - [[plugin beta compatibility]]\n  - [ref](releases/plugin-beta-compatibility.md.md)\n  - inline code: `Release checklist`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | releases/plugin-beta-compatibility.md |\n| alias | plugin beta compatibility |\n\n```md\n- nested bullet for releases/plugin-beta-compatibility.md\n  - alias: plugin beta compatibility\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "docs/releases/beta-compatibility-rollout.md",
+    "basename": "beta compatibility rollout",
+    "folder": "docs/releases",
+    "headings": "Release rollout",
+    "content": "beta compatibility rollout notes describe the staged rollout, migration timing, and communication plan\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: releases/beta-compatibility-rollout.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"beta compatibility rollout\"\naliases: [\"beta compatibility rollout\"]\ntags: [\"note\"]\n---\n\n# beta compatibility rollout\n\n> [!note]\n> path hint: `releases/beta-compatibility-rollout.md`\n> heading hint: **Release rollout**\n\n- overview\n  - [[beta compatibility rollout]]\n  - [ref](releases/beta-compatibility-rollout.md.md)\n  - inline code: `Release rollout`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | releases/beta-compatibility-rollout.md |\n| alias | beta compatibility rollout |\n\n```md\n- nested bullet for releases/beta-compatibility-rollout.md\n  - alias: beta compatibility rollout\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "tech-en/content/en/docs/concepts/overview/working-with-objects/namespaces.md",
+    "basename": "Namespaces",
+    "folder": "tech-en/content/en/docs/concepts/overview/working-with-objects",
+    "headings": "Names resources",
+    "content": "namespace pod object resources stay together in this concept guide for cluster scoping\n---\ntitle: \"Namespaces\"\naliases: [\"Namespaces\"]\ntags: [\"note\"]\n---\n\n# Namespaces\n\n> [!note]\n> path hint: `working-with-objects/namespaces.md`\n> heading hint: **Names resources**\n\n- overview\n  - [[Namespaces]]\n  - [ref](working-with-objects/namespaces.md.md)\n  - inline code: `Names resources`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | working-with-objects/namespaces.md |\n| alias | Namespaces |\n\n```md\n- nested bullet for working-with-objects/namespaces.md\n  - alias: Namespaces\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "tech-zh/content/zh-cn/docs/concepts/overview/working-with-objects/namespaces.md",
+    "basename": "Namespaces",
+    "folder": "tech-zh/content/zh-cn/docs/concepts/overview/working-with-objects",
+    "headings": "Names resources",
+    "content": "namespace pod object resources stay together in the mirrored zh concept guide\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: working-with-objects/namespaces.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"Namespaces\"\naliases: [\"Namespaces\"]\ntags: [\"note\"]\n---\n\n# Namespaces\n\n> [!note]\n> path hint: `working-with-objects/namespaces.md`\n> heading hint: **Names resources**\n\n- overview\n  - [[Namespaces]]\n  - [ref](working-with-objects/namespaces.md.md)\n  - inline code: `Names resources`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | working-with-objects/namespaces.md |\n| alias | Namespaces |\n\n```md\n- nested bullet for working-with-objects/namespaces.md\n  - alias: Namespaces\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "tech-en/content/en/docs/concepts/configuration/configmap.md",
+    "basename": "ConfigMap",
+    "folder": "tech-en/content/en/docs/concepts/configuration",
+    "headings": "Pod data",
+    "content": "configmap pod data guidance explains how pods read mounted configuration data safely\n---\ntitle: \"ConfigMap\"\naliases: [\"ConfigMap\"]\ntags: [\"note\"]\n---\n\n# ConfigMap\n\n> [!note]\n> path hint: `configuration/configmap.md`\n> heading hint: **Pod data**\n\n- overview\n  - [[ConfigMap]]\n  - [ref](configuration/configmap.md.md)\n  - inline code: `Pod data`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | configuration/configmap.md |\n| alias | ConfigMap |\n\n```md\n- nested bullet for configuration/configmap.md\n  - alias: ConfigMap\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "tech-zh/content/zh-cn/docs/concepts/configuration/configmap.md",
+    "basename": "ConfigMap",
+    "folder": "tech-zh/content/zh-cn/docs/concepts/configuration",
+    "headings": "Pod data",
+    "content": "configmap pod data guidance explains how pods read mounted configuration data safely in the zh mirror\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: configuration/configmap.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"ConfigMap\"\naliases: [\"ConfigMap\"]\ntags: [\"note\"]\n---\n\n# ConfigMap\n\n> [!note]\n> path hint: `configuration/configmap.md`\n> heading hint: **Pod data**\n\n- overview\n  - [[ConfigMap]]\n  - [ref](configuration/configmap.md.md)\n  - inline code: `Pod data`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | configuration/configmap.md |\n| alias | ConfigMap |\n\n```md\n- nested bullet for configuration/configmap.md\n  - alias: ConfigMap\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "tech-en/content/en/docs/concepts/configuration/secret.md",
+    "basename": "Secret",
+    "folder": "tech-en/content/en/docs/concepts/configuration",
+    "headings": "Pod data",
+    "content": "secret pod data guidance explains sensitive credentials and mounted secret files\n---\ntitle: \"Secret\"\naliases: [\"Secret\"]\ntags: [\"note\"]\n---\n\n# Secret\n\n> [!note]\n> path hint: `configuration/secret.md`\n> heading hint: **Pod data**\n\n- overview\n  - [[Secret]]\n  - [ref](configuration/secret.md.md)\n  - inline code: `Pod data`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | configuration/secret.md |\n| alias | Secret |\n\n```md\n- nested bullet for configuration/secret.md\n  - alias: Secret\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "tech-zh/content/zh-cn/docs/concepts/configuration/secret.md",
+    "basename": "Secret",
+    "folder": "tech-zh/content/zh-cn/docs/concepts/configuration",
+    "headings": "Pod data",
+    "content": "secret pod data guidance explains sensitive credentials in the zh mirror\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: configuration/secret.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"Secret\"\naliases: [\"Secret\"]\ntags: [\"note\"]\n---\n\n# Secret\n\n> [!note]\n> path hint: `configuration/secret.md`\n> heading hint: **Pod data**\n\n- overview\n  - [[Secret]]\n  - [ref](configuration/secret.md.md)\n  - inline code: `Pod data`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | configuration/secret.md |\n| alias | Secret |\n\n```md\n- nested bullet for configuration/secret.md\n  - alias: Secret\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "tech-en/content/en/docs/concepts/services-networking/ingress.md",
+    "basename": "Ingress",
+    "folder": "tech-en/content/en/docs/concepts/services-networking",
+    "headings": "Service routing",
+    "content": "ingress service routing sends traffic to services through cluster rules\n---\ntitle: \"Ingress\"\naliases: [\"Ingress\"]\ntags: [\"note\"]\n---\n\n# Ingress\n\n> [!note]\n> path hint: `services-networking/ingress.md`\n> heading hint: **Service routing**\n\n- overview\n  - [[Ingress]]\n  - [ref](services-networking/ingress.md.md)\n  - inline code: `Service routing`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | services-networking/ingress.md |\n| alias | Ingress |\n\n```md\n- nested bullet for services-networking/ingress.md\n  - alias: Ingress\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "tech-zh/content/zh-cn/docs/concepts/services-networking/ingress.md",
+    "basename": "Ingress",
+    "folder": "tech-zh/content/zh-cn/docs/concepts/services-networking",
+    "headings": "Service routing",
+    "content": "ingress service routing sends traffic to services through the zh mirror guide\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: services-networking/ingress.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"Ingress\"\naliases: [\"Ingress\"]\ntags: [\"note\"]\n---\n\n# Ingress\n\n> [!note]\n> path hint: `services-networking/ingress.md`\n> heading hint: **Service routing**\n\n- overview\n  - [[Ingress]]\n  - [ref](services-networking/ingress.md.md)\n  - inline code: `Service routing`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | services-networking/ingress.md |\n| alias | Ingress |\n\n```md\n- nested bullet for services-networking/ingress.md\n  - alias: Ingress\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "tech-en/content/en/docs/tasks/configure-pod-container/configure-service-account.md",
+    "basename": "Configure service account",
+    "folder": "tech-en/content/en/docs/tasks/configure-pod-container",
+    "headings": "Service account token",
+    "content": "service account token setup explains how pods mount projected credentials for runtime access\n---\ntitle: \"Configure service account\"\naliases: [\"Configure service account\"]\ntags: [\"note\"]\n---\n\n# Configure service account\n\n> [!note]\n> path hint: `configure-pod-container/configure-service-account.md`\n> heading hint: **Service account token**\n\n- overview\n  - [[Configure service account]]\n  - [ref](configure-pod-container/configure-service-account.md.md)\n  - inline code: `Service account token`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | configure-pod-container/configure-service-account.md |\n| alias | Configure service account |\n\n```md\n- nested bullet for configure-pod-container/configure-service-account.md\n  - alias: Configure service account\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "tech-zh/content/zh-cn/docs/tasks/configure-pod-container/configure-service-account.md",
+    "basename": "Configure service account",
+    "folder": "tech-zh/content/zh-cn/docs/tasks/configure-pod-container",
+    "headings": "Service account token",
+    "content": "service account token setup explains how pods mount projected credentials in the zh mirror guide\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: configure-pod-container/configure-service-account.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"Configure service account\"\naliases: [\"Configure service account\"]\ntags: [\"note\"]\n---\n\n# Configure service account\n\n> [!note]\n> path hint: `configure-pod-container/configure-service-account.md`\n> heading hint: **Service account token**\n\n- overview\n  - [[Configure service account]]\n  - [ref](configure-pod-container/configure-service-account.md.md)\n  - inline code: `Service account token`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | configure-pod-container/configure-service-account.md |\n| alias | Configure service account |\n\n```md\n- nested bullet for configure-pod-container/configure-service-account.md\n  - alias: Configure service account\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "pkm-en/projects/sdk/vector-cache.md",
+    "basename": "Vector cache playbook",
+    "folder": "pkm-en/projects/sdk",
+    "headings": "Eviction restore",
+    "content": "vector cache eviction keeps sdk search warm after shard checkpoint restore\n---\ntitle: \"Vector cache playbook\"\naliases: [\"sdk cache restore;vector cache restore note\"]\ntags: [\"sdk cache\"]\n---\n\n# Vector cache playbook\n\n> [!note]\n> path hint: `sdk/vector-cache.md`\n> heading hint: **Eviction restore**\n\n- overview\n  - [[Vector cache playbook]]\n  - [ref](sdk/vector-cache.md.md)\n  - inline code: `Eviction restore`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | sdk/vector-cache.md |\n| alias | sdk cache restore;vector cache restore note |\n\n```md\n- nested bullet for sdk/vector-cache.md\n  - alias: sdk cache restore;vector cache restore note\n  - tag: sdk cache\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "sdk cache restore;vector cache restore note",
+    "tags": "sdk cache"
+  },
+  {
+    "path": "pkm-en/archive/vector-cache.md",
+    "basename": "Vector cache playbook",
+    "folder": "pkm-en/archive",
+    "headings": "Eviction restore",
+    "content": "vector cache eviction keeps archive search warm after shard checkpoint restore\n- 中文补充\n  - 场景: cache restore / checkpoint / warmup\n  - path hint: archive/vector-cache.md\n  - shared anchors: cache replay restore\n---\ntitle: \"Vector cache playbook\"\naliases: [\"archive cache restore\"]\ntags: [\"archive cache\"]\n---\n\n# Vector cache playbook\n\n> [!note]\n> path hint: `archive/vector-cache.md`\n> heading hint: **Eviction restore**\n\n- overview\n  - [[Vector cache playbook]]\n  - [ref](archive/vector-cache.md.md)\n  - inline code: `Eviction restore`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | archive/vector-cache.md |\n| alias | archive cache restore |\n\n```md\n- nested bullet for archive/vector-cache.md\n  - alias: archive cache restore\n  - tag: archive cache\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "archive cache restore",
+    "tags": "archive cache"
+  },
+  {
+    "path": "pkm-en/guides/shard-checkpoint-guide.md",
+    "basename": "Shard checkpoint guide",
+    "folder": "pkm-en/guides",
+    "headings": "Restore flow",
+    "content": "shard checkpoint restore notes explain warm cache recovery and replay order\n---\ntitle: \"Shard checkpoint guide\"\naliases: [\"checkpoint restore guide;checkpoint guide\"]\ntags: [\"guide restore\"]\n---\n\n# Shard checkpoint guide\n\n> [!note]\n> path hint: `guides/shard-checkpoint-guide.md`\n> heading hint: **Restore flow**\n\n- overview\n  - [[Shard checkpoint guide]]\n  - [ref](guides/shard-checkpoint-guide.md.md)\n  - inline code: `Restore flow`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | guides/shard-checkpoint-guide.md |\n| alias | checkpoint restore guide;checkpoint guide |\n\n```md\n- nested bullet for guides/shard-checkpoint-guide.md\n  - alias: checkpoint restore guide;checkpoint guide\n  - tag: guide restore\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "checkpoint restore guide;checkpoint guide",
+    "tags": "guide restore"
+  },
+  {
+    "path": "pkm-en/ops/shard-checkpoint-runbook.md",
+    "basename": "Shard checkpoint runbook",
+    "folder": "pkm-en/ops",
+    "headings": "Restore flow",
+    "content": "ops runbook for shard checkpoint restore, rollback handling, and operator escalation steps\n- 中文补充\n  - 场景: cache restore / checkpoint / warmup\n  - path hint: ops/shard-checkpoint-runbook.md\n  - shared anchors: cache replay restore\n---\ntitle: \"Shard checkpoint runbook\"\naliases: [\"ops shard checkpoint\"]\ntags: [\"ops runbook\"]\n---\n\n# Shard checkpoint runbook\n\n> [!note]\n> path hint: `ops/shard-checkpoint-runbook.md`\n> heading hint: **Restore flow**\n\n- overview\n  - [[Shard checkpoint runbook]]\n  - [ref](ops/shard-checkpoint-runbook.md.md)\n  - inline code: `Restore flow`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | ops/shard-checkpoint-runbook.md |\n| alias | ops shard checkpoint |\n\n```md\n- nested bullet for ops/shard-checkpoint-runbook.md\n  - alias: ops shard checkpoint\n  - tag: ops runbook\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "ops shard checkpoint",
+    "tags": "ops runbook"
+  },
+  {
+    "path": "pkm-en/retros/shard-checkpoint-retrospective.md",
+    "basename": "Shard checkpoint retrospective",
+    "folder": "pkm-en/retros",
+    "headings": "Restore flow",
+    "content": "retrospective for shard checkpoint restore with timeline analysis, lessons, and drift commentary\n---\ntitle: \"Shard checkpoint retrospective\"\naliases: [\"Shard checkpoint retrospective\"]\ntags: [\"note\"]\n---\n\n# Shard checkpoint retrospective\n\n> [!note]\n> path hint: `retros/shard-checkpoint-retrospective.md`\n> heading hint: **Restore flow**\n\n- overview\n  - [[Shard checkpoint retrospective]]\n  - [ref](retros/shard-checkpoint-retrospective.md.md)\n  - inline code: `Restore flow`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | retros/shard-checkpoint-retrospective.md |\n| alias | Shard checkpoint retrospective |\n\n```md\n- nested bullet for retros/shard-checkpoint-retrospective.md\n  - alias: Shard checkpoint retrospective\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "pkm-en/notes/linking/aliases-deep-dive.md",
+    "basename": "Aliases deep dive",
+    "folder": "pkm-en/notes/linking",
+    "headings": "Link example",
+    "content": "aliases let one note answer to multiple names when link text drifts across old projects\n- 中文补充\n  - 场景: general notes\n  - path hint: linking/aliases-deep-dive.md\n  - shared anchors: note context summary\n---\ntitle: \"Aliases deep dive\"\naliases: [\"alias drift;old project aliases\"]\ntags: [\"links aliases\"]\n---\n\n# Aliases deep dive\n\n> [!note]\n> path hint: `linking/aliases-deep-dive.md`\n> heading hint: **Link example**\n\n- overview\n  - [[Aliases deep dive]]\n  - [ref](linking/aliases-deep-dive.md.md)\n  - inline code: `Link example`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | linking/aliases-deep-dive.md |\n| alias | alias drift;old project aliases |\n\n```md\n- nested bullet for linking/aliases-deep-dive.md\n  - alias: alias drift;old project aliases\n  - tag: links aliases\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "alias drift;old project aliases",
+    "tags": "links aliases"
+  },
+  {
+    "path": "pkm-en/notes/linking/internal-links-playbook.md",
+    "basename": "Internal links playbook",
+    "folder": "pkm-en/notes/linking",
+    "headings": "Link example",
+    "content": "internal link examples explain how one note references another with stable wikilinks\n---\ntitle: \"Internal links playbook\"\naliases: [\"Internal links playbook\"]\ntags: [\"note\"]\n---\n\n# Internal links playbook\n\n> [!note]\n> path hint: `linking/internal-links-playbook.md`\n> heading hint: **Link example**\n\n- overview\n  - [[Internal links playbook]]\n  - [ref](linking/internal-links-playbook.md.md)\n  - inline code: `Link example`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | linking/internal-links-playbook.md |\n| alias | Internal links playbook |\n\n```md\n- nested bullet for linking/internal-links-playbook.md\n  - alias: Internal links playbook\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "pkm-en/notes/linking/wikilink-drift.md",
+    "basename": "Wikilink drift",
+    "folder": "pkm-en/notes/linking",
+    "headings": "Link example",
+    "content": "wikilink drift notes explain how old project names linger while aliases keep links stable\n- 中文补充\n  - 场景: general notes\n  - path hint: linking/wikilink-drift.md\n  - shared anchors: note context summary\n---\ntitle: \"Wikilink drift\"\naliases: [\"old project wikilink drift\"]\ntags: [\"links drift\"]\n---\n\n# Wikilink drift\n\n> [!note]\n> path hint: `linking/wikilink-drift.md`\n> heading hint: **Link example**\n\n- overview\n  - [[Wikilink drift]]\n  - [ref](linking/wikilink-drift.md.md)\n  - inline code: `Link example`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | linking/wikilink-drift.md |\n| alias | old project wikilink drift |\n\n```md\n- nested bullet for linking/wikilink-drift.md\n  - alias: old project wikilink drift\n  - tag: links drift\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "old project wikilink drift",
+    "tags": "links drift"
+  },
+  {
+    "path": "pkm-en/templates/incident-review.md",
+    "basename": "Incident review",
+    "folder": "pkm-en/templates",
+    "headings": "Warm start template",
+    "content": "template incident review placeholder with warm start checklist and empty recovery notes\n---\ntitle: \"Incident review\"\naliases: [\"incident review template\"]\ntags: [\"template\"]\n---\n\n# Incident review\n\n> [!note]\n> path hint: `templates/incident-review.md`\n> heading hint: **Warm start template**\n\n- overview\n  - [[Incident review]]\n  - [ref](templates/incident-review.md.md)\n  - inline code: `Warm start template`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | templates/incident-review.md |\n| alias | incident review template |\n\n```md\n- nested bullet for templates/incident-review.md\n  - alias: incident review template\n  - tag: template\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "incident review template",
+    "tags": "template"
+  },
+  {
+    "path": "pkm-en/incidents/incident-review.md",
+    "basename": "Incident review",
+    "folder": "pkm-en/incidents",
+    "headings": "Warm start recovery",
+    "content": "incident review documents warm start recovery, checkpoint drift, and the final mitigation notes\n- 中文补充\n  - 场景: incident / retrospective / mitigation\n  - path hint: incidents/incident-review.md\n  - shared anchors: incident replay recovery\n---\ntitle: \"Incident review\"\naliases: [\"checkpoint drift review;warm start review\"]\ntags: [\"incident review\"]\n---\n\n# Incident review\n\n> [!note]\n> path hint: `incidents/incident-review.md`\n> heading hint: **Warm start recovery**\n\n- overview\n  - [[Incident review]]\n  - [ref](incidents/incident-review.md.md)\n  - inline code: `Warm start recovery`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | incidents/incident-review.md |\n| alias | checkpoint drift review;warm start review |\n\n```md\n- nested bullet for incidents/incident-review.md\n  - alias: checkpoint drift review;warm start review\n  - tag: incident review\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "checkpoint drift review;warm start review",
+    "tags": "incident review"
+  },
+  {
+    "path": "pkm-en/incidents/cache-warm-start.md",
+    "basename": "Cache warm start",
+    "folder": "pkm-en/incidents",
+    "headings": "Mitigation",
+    "content": "cache warm start incident note explains outage recovery, mitigation steps, and restart sequencing\n---\ntitle: \"Cache warm start\"\naliases: [\"incident mitigation warm start\"]\ntags: [\"incident cache\"]\n---\n\n# Cache warm start\n\n> [!note]\n> path hint: `incidents/cache-warm-start.md`\n> heading hint: **Mitigation**\n\n- overview\n  - [[Cache warm start]]\n  - [ref](incidents/cache-warm-start.md.md)\n  - inline code: `Mitigation`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | incidents/cache-warm-start.md |\n| alias | incident mitigation warm start |\n\n```md\n- nested bullet for incidents/cache-warm-start.md\n  - alias: incident mitigation warm start\n  - tag: incident cache\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "incident mitigation warm start",
+    "tags": "incident cache"
+  },
+  {
+    "path": "pkm-en/archive/checkpoint-drift-log.md",
+    "basename": "Checkpoint drift log",
+    "folder": "pkm-en/archive",
+    "headings": "Recovery log",
+    "content": "checkpoint drift recovery log captures terse notes, timestamps, and replay checkpoints from the incident\n- 中文补充\n  - 场景: cache restore / checkpoint / warmup\n  - path hint: archive/checkpoint-drift-log.md\n  - shared anchors: cache replay restore\n---\ntitle: \"Checkpoint drift log\"\naliases: [\"drift log recovery note\"]\ntags: [\"archive drift\"]\n---\n\n# Checkpoint drift log\n\n> [!note]\n> path hint: `archive/checkpoint-drift-log.md`\n> heading hint: **Recovery log**\n\n- overview\n  - [[Checkpoint drift log]]\n  - [ref](archive/checkpoint-drift-log.md.md)\n  - inline code: `Recovery log`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | archive/checkpoint-drift-log.md |\n| alias | drift log recovery note |\n\n```md\n- nested bullet for archive/checkpoint-drift-log.md\n  - alias: drift log recovery note\n  - tag: archive drift\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "drift log recovery note",
+    "tags": "archive drift"
+  },
+  {
+    "path": "pkm-en/archive/incident-review-2024.md",
+    "basename": "Incident review 2024",
+    "folder": "pkm-en/archive",
+    "headings": "Warm start archive",
+    "content": "older archived incident review for a separate warm start issue with incomplete mitigation notes\n---\ntitle: \"Incident review 2024\"\naliases: [\"Incident review 2024\"]\ntags: [\"note\"]\n---\n\n# Incident review 2024\n\n> [!note]\n> path hint: `archive/incident-review-2024.md`\n> heading hint: **Warm start archive**\n\n- overview\n  - [[Incident review 2024]]\n  - [ref](archive/incident-review-2024.md.md)\n  - inline code: `Warm start archive`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | archive/incident-review-2024.md |\n| alias | Incident review 2024 |\n\n```md\n- nested bullet for archive/incident-review-2024.md\n  - alias: Incident review 2024\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "pkm-en/inbox/restart-cache-after-outage.md",
+    "basename": "restart cache after outage",
+    "folder": "pkm-en/inbox",
+    "headings": "Inbox note",
+    "content": "remember to restart cache after outage, restore vector cache shards, and verify checkpoint replay\n- 中文补充\n  - 场景: cache restore / checkpoint / warmup\n  - path hint: inbox/restart-cache-after-outage.md\n  - shared anchors: cache replay restore\n---\ntitle: \"restart cache after outage\"\naliases: [\"vector cache crash note\"]\ntags: [\"inbox outage\"]\n---\n\n# restart cache after outage\n\n> [!note]\n> path hint: `inbox/restart-cache-after-outage.md`\n> heading hint: **Inbox note**\n\n- overview\n  - [[restart cache after outage]]\n  - [ref](inbox/restart-cache-after-outage.md.md)\n  - inline code: `Inbox note`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | inbox/restart-cache-after-outage.md |\n| alias | vector cache crash note |\n\n```md\n- nested bullet for inbox/restart-cache-after-outage.md\n  - alias: vector cache crash note\n  - tag: inbox outage\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "vector cache crash note",
+    "tags": "inbox outage"
+  },
+  {
+    "path": "pkm-en/daily/2026-02-14-shard-restore-note.md",
+    "basename": "2026-02-14 shard restore note",
+    "folder": "pkm-en/daily",
+    "headings": "Daily note",
+    "content": "forgot note about shard restore, replay after crash, and cache warmup following the checkpoint repair\n---\ntitle: \"2026-02-14 shard restore note\"\naliases: [\"forgot note about shard restore\"]\ntags: [\"daily restore\"]\n---\n\n# 2026-02-14 shard restore note\n\n> [!note]\n> path hint: `daily/2026-02-14-shard-restore-note.md`\n> heading hint: **Daily note**\n\n- overview\n  - [[2026-02-14 shard restore note]]\n  - [ref](daily/2026-02-14-shard-restore-note.md.md)\n  - inline code: `Daily note`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | daily/2026-02-14-shard-restore-note.md |\n| alias | forgot note about shard restore |\n\n```md\n- nested bullet for daily/2026-02-14-shard-restore-note.md\n  - alias: forgot note about shard restore\n  - tag: daily restore\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "forgot note about shard restore",
+    "tags": "daily restore"
+  },
+  {
+    "path": "pkm-en/daily/2026-02-17-alias-cleanup.md",
+    "basename": "2026-02-17 alias cleanup",
+    "folder": "pkm-en/daily",
+    "headings": "Daily note",
+    "content": "alias cleanup old wiki links and retired project names after the migration landed\n- 中文补充\n  - 场景: general notes\n  - path hint: daily/2026-02-17-alias-cleanup.md\n  - shared anchors: note context summary\n---\ntitle: \"2026-02-17 alias cleanup\"\naliases: [\"alias cleanup old wiki links\"]\ntags: [\"daily aliases\"]\n---\n\n# 2026-02-17 alias cleanup\n\n> [!note]\n> path hint: `daily/2026-02-17-alias-cleanup.md`\n> heading hint: **Daily note**\n\n- overview\n  - [[2026-02-17 alias cleanup]]\n  - [ref](daily/2026-02-17-alias-cleanup.md.md)\n  - inline code: `Daily note`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | daily/2026-02-17-alias-cleanup.md |\n| alias | alias cleanup old wiki links |\n\n```md\n- nested bullet for daily/2026-02-17-alias-cleanup.md\n  - alias: alias cleanup old wiki links\n  - tag: daily aliases\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "alias cleanup old wiki links",
+    "tags": "daily aliases"
+  },
+  {
+    "path": "pkm-en/scratch/vector-cache-migration.md",
+    "basename": "Vector cache migration",
+    "folder": "pkm-en/scratch",
+    "headings": "Scratch note",
+    "content": "scratch thoughts about vector cache migration, hotfixes, and unstable warm restart ideas\n---\ntitle: \"Vector cache migration\"\naliases: [\"Vector cache migration\"]\ntags: [\"note\"]\n---\n\n# Vector cache migration\n\n> [!note]\n> path hint: `scratch/vector-cache-migration.md`\n> heading hint: **Scratch note**\n\n- overview\n  - [[Vector cache migration]]\n  - [ref](scratch/vector-cache-migration.md.md)\n  - inline code: `Scratch note`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | scratch/vector-cache-migration.md |\n| alias | Vector cache migration |\n\n```md\n- nested bullet for scratch/vector-cache-migration.md\n  - alias: Vector cache migration\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "pkm-en/ops/vector-cache-hotfix.md",
+    "basename": "Vector cache hotfix",
+    "folder": "pkm-en/ops",
+    "headings": "Ops note",
+    "content": "ops hotfix for vector cache crash handling after outage with follow up verification steps\n- 中文补充\n  - 场景: cache restore / checkpoint / warmup\n  - path hint: ops/vector-cache-hotfix.md\n  - shared anchors: cache replay restore\n---\ntitle: \"Vector cache hotfix\"\naliases: [\"Vector cache hotfix\"]\ntags: [\"note\"]\n---\n\n# Vector cache hotfix\n\n> [!note]\n> path hint: `ops/vector-cache-hotfix.md`\n> heading hint: **Ops note**\n\n- overview\n  - [[Vector cache hotfix]]\n  - [ref](ops/vector-cache-hotfix.md.md)\n  - inline code: `Ops note`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | ops/vector-cache-hotfix.md |\n| alias | Vector cache hotfix |\n\n```md\n- nested bullet for ops/vector-cache-hotfix.md\n  - alias: Vector cache hotfix\n  - tag: note\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers."
+  },
+  {
+    "path": "pkm-en/projects/sdk/cache-restore-checklist.md",
+    "basename": "Cache restore checklist",
+    "folder": "pkm-en/projects/sdk",
+    "headings": "Recovery checklist",
+    "content": "sdk cache restore checklist after outage covers checkpoint replay, shard verification, and warmup\n---\ntitle: \"Cache restore checklist\"\naliases: [\"cache restore after outage\"]\ntags: [\"sdk restore checklist\"]\n---\n\n# Cache restore checklist\n\n> [!note]\n> path hint: `sdk/cache-restore-checklist.md`\n> heading hint: **Recovery checklist**\n\n- overview\n  - [[Cache restore checklist]]\n  - [ref](sdk/cache-restore-checklist.md.md)\n  - inline code: `Recovery checklist`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | sdk/cache-restore-checklist.md |\n| alias | cache restore after outage |\n\n```md\n- nested bullet for sdk/cache-restore-checklist.md\n  - alias: cache restore after outage\n  - tag: sdk restore checklist\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "cache restore after outage",
+    "tags": "sdk restore checklist"
+  },
+  {
+    "path": "pkm-en/ops/cache-replay-runbook.md",
+    "basename": "Cache replay runbook",
+    "folder": "pkm-en/ops",
+    "headings": "Replay verification",
+    "content": "cache replay runbook explains checkpoint verification, replay order, and operator steps after outage recovery\n- 中文补充\n  - 场景: cache restore / checkpoint / warmup\n  - path hint: ops/cache-replay-runbook.md\n  - shared anchors: cache replay restore\n---\ntitle: \"Cache replay runbook\"\naliases: [\"checkpoint replay verification\"]\ntags: [\"ops replay runbook\"]\n---\n\n# Cache replay runbook\n\n> [!note]\n> path hint: `ops/cache-replay-runbook.md`\n> heading hint: **Replay verification**\n\n- overview\n  - [[Cache replay runbook]]\n  - [ref](ops/cache-replay-runbook.md.md)\n  - inline code: `Replay verification`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | ops/cache-replay-runbook.md |\n| alias | checkpoint replay verification |\n\n```md\n- nested bullet for ops/cache-replay-runbook.md\n  - alias: checkpoint replay verification\n  - tag: ops replay runbook\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "checkpoint replay verification",
+    "tags": "ops replay runbook"
+  },
+  {
+    "path": "pkm-en/incidents/vector-cache-postmortem.md",
+    "basename": "Vector cache postmortem",
+    "folder": "pkm-en/incidents",
+    "headings": "Outage analysis",
+    "content": "vector cache outage postmortem covers warm restart, replay gaps, mitigation, and follow up actions\n---\ntitle: \"Vector cache postmortem\"\naliases: [\"vector cache outage follow up\"]\ntags: [\"incident postmortem\"]\n---\n\n# Vector cache postmortem\n\n> [!note]\n> path hint: `incidents/vector-cache-postmortem.md`\n> heading hint: **Outage analysis**\n\n- overview\n  - [[Vector cache postmortem]]\n  - [ref](incidents/vector-cache-postmortem.md.md)\n  - inline code: `Outage analysis`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | incidents/vector-cache-postmortem.md |\n| alias | vector cache outage follow up |\n\n```md\n- nested bullet for incidents/vector-cache-postmortem.md\n  - alias: vector cache outage follow up\n  - tag: incident postmortem\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "vector cache outage follow up",
+    "tags": "incident postmortem"
+  },
+  {
+    "path": "pkm-en/daily/2026-02-19-cache-replay-followup.md",
+    "basename": "2026-02-19 cache replay followup",
+    "folder": "pkm-en/daily",
+    "headings": "Daily note",
+    "content": "followup on cache replay after outage, checkpoint verification, and sdk restore checks\n- 中文补充\n  - 场景: cache restore / checkpoint / warmup\n  - path hint: daily/2026-02-19-cache-replay-followup.md\n  - shared anchors: cache replay restore\n---\ntitle: \"2026-02-19 cache replay followup\"\naliases: [\"cache replay followup note\"]\ntags: [\"daily replay followup\"]\n---\n\n# 2026-02-19 cache replay followup\n\n> [!note]\n> path hint: `daily/2026-02-19-cache-replay-followup.md`\n> heading hint: **Daily note**\n\n- overview\n  - [[2026-02-19 cache replay followup]]\n  - [ref](daily/2026-02-19-cache-replay-followup.md.md)\n  - inline code: `Daily note`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | daily/2026-02-19-cache-replay-followup.md |\n| alias | cache replay followup note |\n\n```md\n- nested bullet for daily/2026-02-19-cache-replay-followup.md\n  - alias: cache replay followup note\n  - tag: daily replay followup\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "cache replay followup note",
+    "tags": "daily replay followup"
+  },
+  {
+    "path": "pkm-en/notes/sdk-cache-rollback.md",
+    "basename": "SDK cache rollback",
+    "folder": "pkm-en/notes",
+    "headings": "Rollback plan",
+    "content": "sdk cache rollback plan covers replay issues, restart sequencing, checkpoint fallback, and operator notes\n---\ntitle: \"SDK cache rollback\"\naliases: [\"sdk cache rollback replay issue\"]\ntags: [\"sdk rollback\"]\n---\n\n# SDK cache rollback\n\n> [!note]\n> path hint: `notes/sdk-cache-rollback.md`\n> heading hint: **Rollback plan**\n\n- overview\n  - [[SDK cache rollback]]\n  - [ref](notes/sdk-cache-rollback.md.md)\n  - inline code: `Rollback plan`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/sdk-cache-rollback.md |\n| alias | sdk cache rollback replay issue |\n\n```md\n- nested bullet for notes/sdk-cache-rollback.md\n  - alias: sdk cache rollback replay issue\n  - tag: sdk rollback\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "sdk cache rollback replay issue",
+    "tags": "sdk rollback"
+  },
+  {
+    "path": "pkm-en/incidents/recovery-checklist.md",
+    "basename": "Recovery checklist",
+    "folder": "pkm-en/incidents",
+    "headings": "Warm start steps",
+    "content": "incident recovery checklist for warm start, cache restart, and checkpoint replay validation\n- 中文补充\n  - 场景: incident / retrospective / mitigation\n  - path hint: incidents/recovery-checklist.md\n  - shared anchors: incident replay recovery\n---\ntitle: \"Recovery checklist\"\naliases: [\"warm start recovery checklist\"]\ntags: [\"incident checklist\"]\n---\n\n# Recovery checklist\n\n> [!note]\n> path hint: `incidents/recovery-checklist.md`\n> heading hint: **Warm start steps**\n\n- overview\n  - [[Recovery checklist]]\n  - [ref](incidents/recovery-checklist.md.md)\n  - inline code: `Warm start steps`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | incidents/recovery-checklist.md |\n| alias | warm start recovery checklist |\n\n```md\n- nested bullet for incidents/recovery-checklist.md\n  - alias: warm start recovery checklist\n  - tag: incident checklist\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "warm start recovery checklist",
+    "tags": "incident checklist"
+  },
+  {
+    "path": "pkm-en/notes/cache-restart-verification.md",
+    "basename": "Cache restart verification",
+    "folder": "pkm-en/notes",
+    "headings": "Verification note",
+    "content": "verification note for cache restart after outage with replay checks, shard health, and warmup confirmation\n---\ntitle: \"Cache restart verification\"\naliases: [\"vector cache restart verification\"]\ntags: [\"cache verification\"]\n---\n\n# Cache restart verification\n\n> [!note]\n> path hint: `notes/cache-restart-verification.md`\n> heading hint: **Verification note**\n\n- overview\n  - [[Cache restart verification]]\n  - [ref](notes/cache-restart-verification.md.md)\n  - inline code: `Verification note`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/cache-restart-verification.md |\n| alias | vector cache restart verification |\n\n```md\n- nested bullet for notes/cache-restart-verification.md\n  - alias: vector cache restart verification\n  - tag: cache verification\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "vector cache restart verification",
+    "tags": "cache verification"
+  },
+  {
+    "path": "docs/releases/plugin-compatibility-faq.md",
+    "basename": "plugin compatibility faq",
+    "folder": "docs/releases",
+    "headings": "FAQ",
+    "content": "faq about beta plugin compatibility, release channels, migration timing, and fallback expectations\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: releases/plugin-compatibility-faq.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"plugin compatibility faq\"\naliases: [\"plugin compatibility release channels\"]\ntags: [\"plugin faq\"]\n---\n\n# plugin compatibility faq\n\n> [!note]\n> path hint: `releases/plugin-compatibility-faq.md`\n> heading hint: **FAQ**\n\n- overview\n  - [[plugin compatibility faq]]\n  - [ref](releases/plugin-compatibility-faq.md.md)\n  - inline code: `FAQ`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | releases/plugin-compatibility-faq.md |\n| alias | plugin compatibility release channels |\n\n```md\n- nested bullet for releases/plugin-compatibility-faq.md\n  - alias: plugin compatibility release channels\n  - tag: plugin faq\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "plugin compatibility release channels",
+    "tags": "plugin faq"
+  },
+  {
+    "path": "docs/releases/plugin-beta-release-notes.md",
+    "basename": "plugin beta release notes",
+    "folder": "docs/releases",
+    "headings": "Release notes",
+    "content": "beta plugin release notes explain migration timing, compatibility caveats, and rollout messaging\n---\ntitle: \"plugin beta release notes\"\naliases: [\"beta plugin release migration timing\"]\ntags: [\"plugin release notes\"]\n---\n\n# plugin beta release notes\n\n> [!note]\n> path hint: `releases/plugin-beta-release-notes.md`\n> heading hint: **Release notes**\n\n- overview\n  - [[plugin beta release notes]]\n  - [ref](releases/plugin-beta-release-notes.md.md)\n  - inline code: `Release notes`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | releases/plugin-beta-release-notes.md |\n| alias | beta plugin release migration timing |\n\n```md\n- nested bullet for releases/plugin-beta-release-notes.md\n  - alias: beta plugin release migration timing\n  - tag: plugin release notes\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "beta plugin release migration timing",
+    "tags": "plugin release notes"
+  },
+  {
+    "path": "docs/plugins/plugin-compatibility-matrix.md",
+    "basename": "plugin compatibility matrix",
+    "folder": "docs/plugins",
+    "headings": "Matrix",
+    "content": "matrix for plugin compatibility across release channels, supported versions, and upgrade readiness\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: plugins/plugin-compatibility-matrix.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"plugin compatibility matrix\"\naliases: [\"plugin compatibility matrix upgrade\"]\ntags: [\"plugin matrix\"]\n---\n\n# plugin compatibility matrix\n\n> [!note]\n> path hint: `plugins/plugin-compatibility-matrix.md`\n> heading hint: **Matrix**\n\n- overview\n  - [[plugin compatibility matrix]]\n  - [ref](plugins/plugin-compatibility-matrix.md.md)\n  - inline code: `Matrix`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | plugins/plugin-compatibility-matrix.md |\n| alias | plugin compatibility matrix upgrade |\n\n```md\n- nested bullet for plugins/plugin-compatibility-matrix.md\n  - alias: plugin compatibility matrix upgrade\n  - tag: plugin matrix\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "plugin compatibility matrix upgrade",
+    "tags": "plugin matrix"
+  },
+  {
+    "path": "docs/plugins/plugin-upgrade-guide.md",
+    "basename": "plugin upgrade guide",
+    "folder": "docs/plugins",
+    "headings": "Upgrade guide",
+    "content": "guide for plugin upgrades, compatibility checks, migration sequencing, and release preparation\n---\ntitle: \"plugin upgrade guide\"\naliases: [\"plugin upgrade compatibility guide\"]\ntags: [\"plugin upgrade\"]\n---\n\n# plugin upgrade guide\n\n> [!note]\n> path hint: `plugins/plugin-upgrade-guide.md`\n> heading hint: **Upgrade guide**\n\n- overview\n  - [[plugin upgrade guide]]\n  - [ref](plugins/plugin-upgrade-guide.md.md)\n  - inline code: `Upgrade guide`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | plugins/plugin-upgrade-guide.md |\n| alias | plugin upgrade compatibility guide |\n\n```md\n- nested bullet for plugins/plugin-upgrade-guide.md\n  - alias: plugin upgrade compatibility guide\n  - tag: plugin upgrade\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "plugin upgrade compatibility guide",
+    "tags": "plugin upgrade"
+  },
+  {
+    "path": "tech-en/content/en/docs/concepts/storage/projected-volumes.md",
+    "basename": "Projected volumes",
+    "folder": "tech-en/content/en/docs/concepts/storage",
+    "headings": "Projected data",
+    "content": "projected volumes combine service account token, configmap, and secret sources for pods\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: storage/projected-volumes.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"Projected volumes\"\naliases: [\"projected volume service account secret\"]\ntags: [\"projected volume\"]\n---\n\n# Projected volumes\n\n> [!note]\n> path hint: `storage/projected-volumes.md`\n> heading hint: **Projected data**\n\n- overview\n  - [[Projected volumes]]\n  - [ref](storage/projected-volumes.md.md)\n  - inline code: `Projected data`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | storage/projected-volumes.md |\n| alias | projected volume service account secret |\n\n```md\n- nested bullet for storage/projected-volumes.md\n  - alias: projected volume service account secret\n  - tag: projected volume\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "projected volume service account secret",
+    "tags": "projected volume"
+  },
+  {
+    "path": "tech-zh/content/zh-cn/docs/concepts/storage/projected-volumes.md",
+    "basename": "Projected volumes",
+    "folder": "tech-zh/content/zh-cn/docs/concepts/storage",
+    "headings": "Projected data",
+    "content": "projected volumes combine service account token, configmap, and secret sources for pods in the zh mirror\n---\ntitle: \"Projected volumes\"\naliases: [\"tech-zh projected volume service account note\"]\ntags: [\"zh projected volume\"]\n---\n\n# Projected volumes\n\n> [!note]\n> path hint: `storage/projected-volumes.md`\n> heading hint: **Projected data**\n\n- overview\n  - [[Projected volumes]]\n  - [ref](storage/projected-volumes.md.md)\n  - inline code: `Projected data`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | storage/projected-volumes.md |\n| alias | tech-zh projected volume service account note |\n\n```md\n- nested bullet for storage/projected-volumes.md\n  - alias: tech-zh projected volume service account note\n  - tag: zh projected volume\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "tech-zh projected volume service account note",
+    "tags": "zh projected volume"
+  },
+  {
+    "path": "tech-en/content/en/docs/tasks/configure-pod-container/projected-service-account-token.md",
+    "basename": "Projected service account token",
+    "folder": "tech-en/content/en/docs/tasks/configure-pod-container",
+    "headings": "Projected token",
+    "content": "projected service account token setup shows how a pod mounts projected credentials for runtime access\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: configure-pod-container/projected-service-account-token.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"Projected service account token\"\naliases: [\"projected service account token pod\"]\ntags: [\"projected token\"]\n---\n\n# Projected service account token\n\n> [!note]\n> path hint: `configure-pod-container/projected-service-account-token.md`\n> heading hint: **Projected token**\n\n- overview\n  - [[Projected service account token]]\n  - [ref](configure-pod-container/projected-service-account-token.md.md)\n  - inline code: `Projected token`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | configure-pod-container/projected-service-account-token.md |\n| alias | projected service account token pod |\n\n```md\n- nested bullet for configure-pod-container/projected-service-account-token.md\n  - alias: projected service account token pod\n  - tag: projected token\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "projected service account token pod",
+    "tags": "projected token"
+  },
+  {
+    "path": "tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
+    "basename": "Projected service account token",
+    "folder": "tech-zh/content/zh-cn/docs/tasks/configure-pod-container",
+    "headings": "Projected token",
+    "content": "projected service account token setup shows how a pod mounts projected credentials in the zh mirror guide\n---\ntitle: \"Projected service account token\"\naliases: [\"tech-zh projected service account token note\"]\ntags: [\"zh projected token\"]\n---\n\n# Projected service account token\n\n> [!note]\n> path hint: `configure-pod-container/projected-service-account-token.md`\n> heading hint: **Projected token**\n\n- overview\n  - [[Projected service account token]]\n  - [ref](configure-pod-container/projected-service-account-token.md.md)\n  - inline code: `Projected token`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | configure-pod-container/projected-service-account-token.md |\n| alias | tech-zh projected service account token note |\n\n```md\n- nested bullet for configure-pod-container/projected-service-account-token.md\n  - alias: tech-zh projected service account token note\n  - tag: zh projected token\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "tech-zh projected service account token note",
+    "tags": "zh projected token"
+  },
+  {
+    "path": "pkm-en/notes/linking/project-rename-map.md",
+    "basename": "Project rename map",
+    "folder": "pkm-en/notes/linking",
+    "headings": "Rename map",
+    "content": "map of old project names to new canonical names with aliases used for link migration\n- 中文补充\n  - 场景: general notes\n  - path hint: linking/project-rename-map.md\n  - shared anchors: note context summary\n---\ntitle: \"Project rename map\"\naliases: [\"old project rename aliases map\"]\ntags: [\"rename aliases\"]\n---\n\n# Project rename map\n\n> [!note]\n> path hint: `linking/project-rename-map.md`\n> heading hint: **Rename map**\n\n- overview\n  - [[Project rename map]]\n  - [ref](linking/project-rename-map.md.md)\n  - inline code: `Rename map`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | linking/project-rename-map.md |\n| alias | old project rename aliases map |\n\n```md\n- nested bullet for linking/project-rename-map.md\n  - alias: old project rename aliases map\n  - tag: rename aliases\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "old project rename aliases map",
+    "tags": "rename aliases"
+  },
+  {
+    "path": "pkm-en/archive/alias-migration-log.md",
+    "basename": "Alias migration log",
+    "folder": "pkm-en/archive",
+    "headings": "Migration log",
+    "content": "log of alias migration work, retired names, and cleanup steps across old project links\n---\ntitle: \"Alias migration log\"\naliases: [\"alias migration log project names\"]\ntags: [\"alias migration\"]\n---\n\n# Alias migration log\n\n> [!note]\n> path hint: `archive/alias-migration-log.md`\n> heading hint: **Migration log**\n\n- overview\n  - [[Alias migration log]]\n  - [ref](archive/alias-migration-log.md.md)\n  - inline code: `Migration log`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | archive/alias-migration-log.md |\n| alias | alias migration log project names |\n\n```md\n- nested bullet for archive/alias-migration-log.md\n  - alias: alias migration log project names\n  - tag: alias migration\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "alias migration log project names",
+    "tags": "alias migration"
+  },
+  {
+    "path": "pkm-en/notes/linking/old-project-index.md",
+    "basename": "Old project index",
+    "folder": "pkm-en/notes/linking",
+    "headings": "Legacy index",
+    "content": "index of old project names, wiki link aliases, and landing pages kept during migration\n- 中文补充\n  - 场景: general notes\n  - path hint: linking/old-project-index.md\n  - shared anchors: note context summary\n---\ntitle: \"Old project index\"\naliases: [\"old project link aliases index\"]\ntags: [\"legacy aliases\"]\n---\n\n# Old project index\n\n> [!note]\n> path hint: `linking/old-project-index.md`\n> heading hint: **Legacy index**\n\n- overview\n  - [[Old project index]]\n  - [ref](linking/old-project-index.md.md)\n  - inline code: `Legacy index`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | linking/old-project-index.md |\n| alias | old project link aliases index |\n\n```md\n- nested bullet for linking/old-project-index.md\n  - alias: old project link aliases index\n  - tag: legacy aliases\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "old project link aliases index",
+    "tags": "legacy aliases"
+  },
+  {
+    "path": "general-zh/notes/政治理论笔记.md",
+    "basename": "政治理论笔记",
+    "folder": "general-zh/notes",
+    "headings": "政治理论",
+    "content": "政治理论 笔记 讨论 国家 制度 意识形态 与 政治 理论 的核心概念\n---\ntitle: \"政治理论笔记\"\naliases: [\"政治理论 学习笔记\"]\ntags: [\"政治理论\"]\n---\n\n# 政治理论笔记\n\n> [!note]\n> path hint: `notes/政治理论笔记.md`\n> heading hint: **政治理论**\n\n- overview\n  - [[政治理论笔记]]\n  - [ref](notes/政治理论笔记.md.md)\n  - inline code: `政治理论`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/政治理论笔记.md |\n| alias | 政治理论 学习笔记 |\n\n```md\n- nested bullet for notes/政治理论笔记.md\n  - alias: 政治理论 学习笔记\n  - tag: 政治理论\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "政治理论 学习笔记",
+    "tags": "政治理论"
+  },
+  {
+    "path": "general-zh/notes/理论学习方法.md",
+    "basename": "理论学习方法",
+    "folder": "general-zh/notes",
+    "headings": "理论方法",
+    "content": "理论 理论 学习 方法 侧重 抽象 理论 框架 与 复习 节奏\n- 中文补充\n  - 场景: general notes\n  - path hint: notes/理论学习方法.md\n  - shared anchors: note context summary\n---\ntitle: \"理论学习方法\"\naliases: [\"理论 学习 方法\"]\ntags: [\"理论 学习\"]\n---\n\n# 理论学习方法\n\n> [!note]\n> path hint: `notes/理论学习方法.md`\n> heading hint: **理论方法**\n\n- overview\n  - [[理论学习方法]]\n  - [ref](notes/理论学习方法.md.md)\n  - inline code: `理论方法`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/理论学习方法.md |\n| alias | 理论 学习 方法 |\n\n```md\n- nested bullet for notes/理论学习方法.md\n  - alias: 理论 学习 方法\n  - tag: 理论 学习\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "理论 学习 方法",
+    "tags": "理论 学习"
+  },
+  {
+    "path": "general-zh/notes/政治观察摘要.md",
+    "basename": "政治观察摘要",
+    "folder": "general-zh/notes",
+    "headings": "政治观察",
+    "content": "政治 政治 观察 摘要 记录 现实 政治 事件 与 新闻 讨论\n---\ntitle: \"政治观察摘要\"\naliases: [\"政治 观察 记录\"]\ntags: [\"政治 观察\"]\n---\n\n# 政治观察摘要\n\n> [!note]\n> path hint: `notes/政治观察摘要.md`\n> heading hint: **政治观察**\n\n- overview\n  - [[政治观察摘要]]\n  - [ref](notes/政治观察摘要.md.md)\n  - inline code: `政治观察`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/政治观察摘要.md |\n| alias | 政治 观察 记录 |\n\n```md\n- nested bullet for notes/政治观察摘要.md\n  - alias: 政治 观察 记录\n  - tag: 政治 观察\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "政治 观察 记录",
+    "tags": "政治 观察"
+  },
+  {
+    "path": "general-zh/notes/快乐定义笔记.md",
+    "basename": "快乐定义笔记",
+    "folder": "general-zh/notes",
+    "headings": "快乐定义",
+    "content": "快乐 定义 讨论 概念 边界 心理学 语境 与 快乐 的适用范围\n- 中文补充\n  - 场景: general notes\n  - path hint: notes/快乐定义笔记.md\n  - shared anchors: note context summary\n---\ntitle: \"快乐定义笔记\"\naliases: [\"快乐定义 心理学笔记\"]\ntags: [\"快乐 定义\"]\n---\n\n# 快乐定义笔记\n\n> [!note]\n> path hint: `notes/快乐定义笔记.md`\n> heading hint: **快乐定义**\n\n- overview\n  - [[快乐定义笔记]]\n  - [ref](notes/快乐定义笔记.md.md)\n  - inline code: `快乐定义`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/快乐定义笔记.md |\n| alias | 快乐定义 心理学笔记 |\n\n```md\n- nested bullet for notes/快乐定义笔记.md\n  - alias: 快乐定义 心理学笔记\n  - tag: 快乐 定义\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "快乐定义 心理学笔记",
+    "tags": "快乐 定义"
+  },
+  {
+    "path": "general-zh/notes/快乐习惯清单.md",
+    "basename": "快乐习惯清单",
+    "folder": "general-zh/notes",
+    "headings": "快乐习惯",
+    "content": "快乐 快乐 习惯 清单 记录 睡眠 运动 感恩 与 每日 练习\n---\ntitle: \"快乐习惯清单\"\naliases: [\"快乐 练习 清单\"]\ntags: [\"快乐 习惯\"]\n---\n\n# 快乐习惯清单\n\n> [!note]\n> path hint: `notes/快乐习惯清单.md`\n> heading hint: **快乐习惯**\n\n- overview\n  - [[快乐习惯清单]]\n  - [ref](notes/快乐习惯清单.md.md)\n  - inline code: `快乐习惯`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/快乐习惯清单.md |\n| alias | 快乐 练习 清单 |\n\n```md\n- nested bullet for notes/快乐习惯清单.md\n  - alias: 快乐 练习 清单\n  - tag: 快乐 习惯\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "快乐 练习 清单",
+    "tags": "快乐 习惯"
+  },
+  {
+    "path": "general-zh/notes/定义适用范围说明.md",
+    "basename": "定义适用范围说明",
+    "folder": "general-zh/notes",
+    "headings": "定义范围",
+    "content": "定义 适用范围 说明 讨论 抽象概念 的 使用边界 与 语义限定\n- 中文补充\n  - 场景: general notes\n  - path hint: notes/定义适用范围说明.md\n  - shared anchors: note context summary\n---\ntitle: \"定义适用范围说明\"\naliases: [\"定义 适用范围 说明\"]\ntags: [\"定义 适用范围\"]\n---\n\n# 定义适用范围说明\n\n> [!note]\n> path hint: `notes/定义适用范围说明.md`\n> heading hint: **定义范围**\n\n- overview\n  - [[定义适用范围说明]]\n  - [ref](notes/定义适用范围说明.md.md)\n  - inline code: `定义范围`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/定义适用范围说明.md |\n| alias | 定义 适用范围 说明 |\n\n```md\n- nested bullet for notes/定义适用范围说明.md\n  - alias: 定义 适用范围 说明\n  - tag: 定义 适用范围\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "定义 适用范围 说明",
+    "tags": "定义 适用范围"
+  },
+  {
+    "path": "mixed/notes/projected-token-runtime-access-note.md",
+    "basename": "projected token runtime access note",
+    "folder": "mixed/notes",
+    "headings": "运行时访问",
+    "content": "projected token runtime access note explains pod credential reads and 运行时访问 flow\n---\ntitle: \"projected token runtime access note\"\naliases: [\"projected token 运行时访问\"]\ntags: [\"projected token 运行时访问\"]\n---\n\n# projected token runtime access note\n\n> [!note]\n> path hint: `notes/projected-token-runtime-access-note.md`\n> heading hint: **运行时访问**\n\n- overview\n  - [[projected token runtime access note]]\n  - [ref](notes/projected-token-runtime-access-note.md.md)\n  - inline code: `运行时访问`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/projected-token-runtime-access-note.md |\n| alias | projected token 运行时访问 |\n\n```md\n- nested bullet for notes/projected-token-runtime-access-note.md\n  - alias: projected token 运行时访问\n  - tag: projected token 运行时访问\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "projected token 运行时访问",
+    "tags": "projected token 运行时访问"
+  },
+  {
+    "path": "mixed/notes/projected-token-overview.md",
+    "basename": "projected token overview",
+    "folder": "mixed/notes",
+    "headings": "Projected token",
+    "content": "projected token projected token projected token pod credential rotation overview\n- 中文补充\n  - 场景: general notes\n  - path hint: notes/projected-token-overview.md\n  - shared anchors: note context summary\n---\ntitle: \"projected token overview\"\naliases: [\"projected token pod credentials\"]\ntags: [\"projected token\"]\n---\n\n# projected token overview\n\n> [!note]\n> path hint: `notes/projected-token-overview.md`\n> heading hint: **Projected token**\n\n- overview\n  - [[projected token overview]]\n  - [ref](notes/projected-token-overview.md.md)\n  - inline code: `Projected token`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/projected-token-overview.md |\n| alias | projected token pod credentials |\n\n```md\n- nested bullet for notes/projected-token-overview.md\n  - alias: projected token pod credentials\n  - tag: projected token\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "projected token pod credentials",
+    "tags": "projected token"
+  },
+  {
+    "path": "mixed/notes/运行时访问说明.md",
+    "basename": "运行时访问说明",
+    "folder": "mixed/notes",
+    "headings": "运行时访问",
+    "content": "运行时访问 说明 介绍 容器 凭证 读取 与 访问 流程\n---\ntitle: \"运行时访问说明\"\naliases: [\"运行时访问 pod 凭证\"]\ntags: [\"运行时 访问\"]\n---\n\n# 运行时访问说明\n\n> [!note]\n> path hint: `notes/运行时访问说明.md`\n> heading hint: **运行时访问**\n\n- overview\n  - [[运行时访问说明]]\n  - [ref](notes/运行时访问说明.md.md)\n  - inline code: `运行时访问`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/运行时访问说明.md |\n| alias | 运行时访问 pod 凭证 |\n\n```md\n- nested bullet for notes/运行时访问说明.md\n  - alias: 运行时访问 pod 凭证\n  - tag: 运行时 访问\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "运行时访问 pod 凭证",
+    "tags": "运行时 访问"
+  },
+  {
+    "path": "mixed/notes/obsidian-sync-常见问题.md",
+    "basename": "obsidian sync 常见问题",
+    "folder": "mixed/notes",
+    "headings": "obsidian sync 问题",
+    "content": "obsidian sync 常见问题 说明 同步冲突 限额 报错 与 排查步骤\n- 中文补充\n  - 场景: general notes\n  - path hint: notes/obsidian-sync-常见问题.md\n  - shared anchors: note context summary\n---\ntitle: \"obsidian sync 常见问题\"\naliases: [\"obsidian sync 问题\"]\ntags: [\"obsidian sync 问题\"]\n---\n\n# obsidian sync 常见问题\n\n> [!note]\n> path hint: `notes/obsidian-sync-常见问题.md`\n> heading hint: **obsidian sync 问题**\n\n- overview\n  - [[obsidian sync 常见问题]]\n  - [ref](notes/obsidian-sync-常见问题.md.md)\n  - inline code: `obsidian sync 问题`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/obsidian-sync-常见问题.md |\n| alias | obsidian sync 问题 |\n\n```md\n- nested bullet for notes/obsidian-sync-常见问题.md\n  - alias: obsidian sync 问题\n  - tag: obsidian sync 问题\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "obsidian sync 问题",
+    "tags": "obsidian sync 问题"
+  },
+  {
+    "path": "mixed/notes/obsidian-sync-overview.md",
+    "basename": "obsidian sync overview",
+    "folder": "mixed/notes",
+    "headings": "obsidian sync",
+    "content": "obsidian sync overview introduces setup limits pricing and vault restore guidance\n---\ntitle: \"obsidian sync overview\"\naliases: [\"obsidian sync\"]\ntags: [\"obsidian sync\"]\n---\n\n# obsidian sync overview\n\n> [!note]\n> path hint: `notes/obsidian-sync-overview.md`\n> heading hint: **obsidian sync**\n\n- overview\n  - [[obsidian sync overview]]\n  - [ref](notes/obsidian-sync-overview.md.md)\n  - inline code: `obsidian sync`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/obsidian-sync-overview.md |\n| alias | obsidian sync |\n\n```md\n- nested bullet for notes/obsidian-sync-overview.md\n  - alias: obsidian sync\n  - tag: obsidian sync\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "obsidian sync",
+    "tags": "obsidian sync"
+  },
+  {
+    "path": "mixed/notes/同步问题排查.md",
+    "basename": "同步问题排查",
+    "folder": "mixed/notes",
+    "headings": "同步问题排查",
+    "content": "同步 问题 排查 记录 常见报错 网络波动 与 重试步骤\n- 中文补充\n  - 场景: general notes\n  - path hint: notes/同步问题排查.md\n  - shared anchors: note context summary\n---\ntitle: \"同步问题排查\"\naliases: [\"问题 排查\"]\ntags: [\"同步 问题 排查\"]\n---\n\n# 同步问题排查\n\n> [!note]\n> path hint: `notes/同步问题排查.md`\n> heading hint: **同步问题排查**\n\n- overview\n  - [[同步问题排查]]\n  - [ref](notes/同步问题排查.md.md)\n  - inline code: `同步问题排查`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/同步问题排查.md |\n| alias | 问题 排查 |\n\n```md\n- nested bullet for notes/同步问题排查.md\n  - alias: 问题 排查\n  - tag: 同步 问题 排查\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "问题 排查",
+    "tags": "同步 问题 排查"
+  },
+  {
+    "path": "pkm-zh/ops/缓存恢复清单.md",
+    "basename": "缓存恢复清单",
+    "folder": "pkm-zh/ops",
+    "headings": "恢复步骤",
+    "content": "- 故障恢复\n  - restart cache\n  - 校验 checkpoint replay\n  - warmup shards\n- 收尾\n  - 更新 incident review\n  - 记录 replay validation\n---\ntitle: \"缓存恢复清单\"\naliases: [\"缓存 恢复 checkpoint replay 清单\"]\ntags: [\"缓存 恢复 清单\"]\n---\n\n# 缓存恢复清单\n\n> [!note]\n> path hint: `ops/缓存恢复清单.md`\n> heading hint: **恢复步骤**\n\n- overview\n  - [[缓存恢复清单]]\n  - [ref](ops/缓存恢复清单.md.md)\n  - inline code: `恢复步骤`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | ops/缓存恢复清单.md |\n| alias | 缓存 恢复 checkpoint replay 清单 |\n\n```md\n- nested bullet for ops/缓存恢复清单.md\n  - alias: 缓存 恢复 checkpoint replay 清单\n  - tag: 缓存 恢复 清单\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "缓存 恢复 checkpoint replay 清单",
+    "tags": "缓存 恢复 清单"
+  },
+  {
+    "path": "pkm-zh/daily/缓存回放记录.md",
+    "basename": "缓存回放记录",
+    "folder": "pkm-zh/daily",
+    "headings": "Daily note",
+    "content": "- 今天处理 cache replay\n  - replay 后校验 shard 状态\n  - warm start 后补写 daily note\n- followup\n  - 记录 restore verification\n- 中文补充\n  - 场景: general notes\n  - path hint: daily/缓存回放记录.md\n  - shared anchors: note context summary\n---\ntitle: \"缓存回放记录\"\naliases: [\"daily replay note 校验\"]\ntags: [\"回放 daily replay\"]\n---\n\n# 缓存回放记录\n\n> [!note]\n> path hint: `daily/缓存回放记录.md`\n> heading hint: **Daily note**\n\n- overview\n  - [[缓存回放记录]]\n  - [ref](daily/缓存回放记录.md.md)\n  - inline code: `Daily note`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | daily/缓存回放记录.md |\n| alias | daily replay note 校验 |\n\n```md\n- nested bullet for daily/缓存回放记录.md\n  - alias: daily replay note 校验\n  - tag: 回放 daily replay\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "daily replay note 校验",
+    "tags": "回放 daily replay"
+  },
+  {
+    "path": "pkm-zh/incidents/缓存预热事故.md",
+    "basename": "缓存预热事故",
+    "folder": "pkm-zh/incidents",
+    "headings": "事故摘要",
+    "content": "- 事故摘要\n  - cache warm start 失败\n  - mitigation: replay checkpoint\n  - final note: restart verification\n- 行动项\n  - 补写 incident review\n---\ntitle: \"缓存预热事故\"\naliases: [\"cache warm start 失败 mitigation\"]\ntags: [\"事故 预热 replay\"]\n---\n\n# 缓存预热事故\n\n> [!note]\n> path hint: `incidents/缓存预热事故.md`\n> heading hint: **事故摘要**\n\n- overview\n  - [[缓存预热事故]]\n  - [ref](incidents/缓存预热事故.md.md)\n  - inline code: `事故摘要`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | incidents/缓存预热事故.md |\n| alias | cache warm start 失败 mitigation |\n\n```md\n- nested bullet for incidents/缓存预热事故.md\n  - alias: cache warm start 失败 mitigation\n  - tag: 事故 预热 replay\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "cache warm start 失败 mitigation",
+    "tags": "事故 预热 replay"
+  },
+  {
+    "path": "pkm-zh/links/项目别名迁移.md",
+    "basename": "项目别名迁移",
+    "folder": "pkm-zh/links",
+    "headings": "迁移记录",
+    "content": "- 链接迁移\n  - 旧项目名 -> new canonical name\n  - 保留 alias 和 [[wikilink]]\n- 清理\n  - retired names\n  - old project links\n- 中文补充\n  - 场景: old names / alias / wikilink migration\n  - path hint: links/项目别名迁移.md\n  - shared anchors: alias migration old-project\n---\ntitle: \"项目别名迁移\"\naliases: [\"project alias 迁移 旧名称\"]\ntags: [\"别名 迁移 wikilink\"]\n---\n\n# 项目别名迁移\n\n> [!note]\n> path hint: `links/项目别名迁移.md`\n> heading hint: **迁移记录**\n\n- overview\n  - [[项目别名迁移]]\n  - [ref](links/项目别名迁移.md.md)\n  - inline code: `迁移记录`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | links/项目别名迁移.md |\n| alias | project alias 迁移 旧名称 |\n\n```md\n- nested bullet for links/项目别名迁移.md\n  - alias: project alias 迁移 旧名称\n  - tag: 别名 迁移 wikilink\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "project alias 迁移 旧名称",
+    "tags": "别名 迁移 wikilink"
+  },
+  {
+    "path": "docs/zh/plugins/插件兼容问答.md",
+    "basename": "插件兼容问答",
+    "folder": "docs/zh/plugins",
+    "headings": "FAQ",
+    "content": "- 插件兼容 FAQ\n  - beta release channel\n  - migration timing\n  - fallback plugin upgrade\n- 补充\n  - release notes\n  - compatibility matrix\n---\ntitle: \"插件兼容问答\"\naliases: [\"插件 beta 兼容 发布 问答\"]\ntags: [\"插件 兼容 faq\"]\n---\n\n# 插件兼容问答\n\n> [!note]\n> path hint: `plugins/插件兼容问答.md`\n> heading hint: **FAQ**\n\n- overview\n  - [[插件兼容问答]]\n  - [ref](plugins/插件兼容问答.md.md)\n  - inline code: `FAQ`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | plugins/插件兼容问答.md |\n| alias | 插件 beta 兼容 发布 问答 |\n\n```md\n- nested bullet for plugins/插件兼容问答.md\n  - alias: 插件 beta 兼容 发布 问答\n  - tag: 插件 兼容 faq\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "插件 beta 兼容 发布 问答",
+    "tags": "插件 兼容 faq"
+  },
+  {
+    "path": "tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-volume-checklist.md",
+    "basename": "Projected volume checklist",
+    "folder": "tech-zh/content/zh-cn/docs/tasks/configure-pod-container",
+    "headings": "Pod 凭证清单",
+    "content": "- pod 凭证\n  - projected token\n  - configmap\n  - secret\n- checklist\n  - runtime access\n  - mounted sources\n- 中文补充\n  - 场景: release / compatibility / upgrade\n  - path hint: configure-pod-container/projected-volume-checklist.md\n  - shared anchors: plugin compatibility rollout migration\n---\ntitle: \"Projected volume checklist\"\naliases: [\"pod 凭证 projected token secret\"]\ntags: [\"projected volume checklist\"]\n---\n\n# Projected volume checklist\n\n> [!note]\n> path hint: `configure-pod-container/projected-volume-checklist.md`\n> heading hint: **Pod 凭证清单**\n\n- overview\n  - [[Projected volume checklist]]\n  - [ref](configure-pod-container/projected-volume-checklist.md.md)\n  - inline code: `Pod 凭证清单`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | configure-pod-container/projected-volume-checklist.md |\n| alias | pod 凭证 projected token secret |\n\n```md\n- nested bullet for configure-pod-container/projected-volume-checklist.md\n  - alias: pod 凭证 projected token secret\n  - tag: projected volume checklist\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "pod 凭证 projected token secret",
+    "tags": "projected volume checklist"
+  },
+  {
+    "path": "pkm-zh/books/电子技术入门.md",
+    "basename": "电子技术入门",
+    "folder": "pkm-zh/books",
+    "headings": "电子技术入门",
+    "content": "电子技术入门讲基础电路、常见元件、信号路径和实验安全，不是游戏设计技巧摘录。\n---\ntitle: \"电子技术入门\"\naliases: [\"电子技术 电路 入门\"]\ntags: [\"电子技术 电路 入门\"]\n---\n\n# 电子技术入门\n\n> [!note]\n> path hint: `books/电子技术入门.md`\n> heading hint: **电子技术入门**\n\n- overview\n  - [[电子技术入门]]\n  - [ref](books/电子技术入门.md.md)\n  - inline code: `电子技术入门`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | books/电子技术入门.md |\n| alias | 电子技术 电路 入门 |\n\n```md\n- nested bullet for books/电子技术入门.md\n  - alias: 电子技术 电路 入门\n  - tag: 电子技术 电路 入门\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "电子技术 电路 入门",
+    "tags": "电子技术 电路 入门"
+  },
+  {
+    "path": "pkm-zh/books/游戏设计技巧摘录.md",
+    "basename": "游戏设计技巧摘录",
+    "folder": "pkm-zh/books",
+    "headings": "游戏设计技巧",
+    "content": "这页主要摘录电子游戏设计技巧、关卡技巧、玩家技能反馈和战斗技巧，不是电子技术教材。\n- 中文补充\n  - 场景: general notes\n  - path hint: books/游戏设计技巧摘录.md\n  - shared anchors: note context summary\n---\ntitle: \"游戏设计技巧摘录\"\naliases: [\"游戏设计 技巧 摘录\"]\ntags: [\"游戏设计 技巧\"]\n---\n\n# 游戏设计技巧摘录\n\n> [!note]\n> path hint: `books/游戏设计技巧摘录.md`\n> heading hint: **游戏设计技巧**\n\n- overview\n  - [[游戏设计技巧摘录]]\n  - [ref](books/游戏设计技巧摘录.md.md)\n  - inline code: `游戏设计技巧`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | books/游戏设计技巧摘录.md |\n| alias | 游戏设计 技巧 摘录 |\n\n```md\n- nested bullet for books/游戏设计技巧摘录.md\n  - alias: 游戏设计 技巧 摘录\n  - tag: 游戏设计 技巧\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "游戏设计 技巧 摘录",
+    "tags": "游戏设计 技巧"
+  },
+  {
+    "path": "pkm-zh/notes/别名迁移说明.md",
+    "basename": "别名迁移说明",
+    "folder": "pkm-zh/notes",
+    "headings": "别名迁移说明",
+    "content": "记录旧名兼容、别名映射、链接迁移和历史名称回收规则，专门回答旧名与别名如何兼容。\n---\ntitle: \"别名迁移说明\"\naliases: [\"旧名 别名 兼容\"]\ntags: [\"别名 迁移 旧名\"]\n---\n\n# 别名迁移说明\n\n> [!note]\n> path hint: `notes/别名迁移说明.md`\n> heading hint: **别名迁移说明**\n\n- overview\n  - [[别名迁移说明]]\n  - [ref](notes/别名迁移说明.md.md)\n  - inline code: `别名迁移说明`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/别名迁移说明.md |\n| alias | 旧名 别名 兼容 |\n\n```md\n- nested bullet for notes/别名迁移说明.md\n  - alias: 旧名 别名 兼容\n  - tag: 别名 迁移 旧名\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "旧名 别名 兼容",
+    "tags": "别名 迁移 旧名"
+  },
+  {
+    "path": "pkm-zh/notes/旧项目整理.md",
+    "basename": "旧项目整理",
+    "folder": "pkm-zh/notes",
+    "headings": "旧项目整理",
+    "content": "这页整理旧项目背景、历史命名和零散兼容备注，但不专门讲别名迁移规则。\n- 中文补充\n  - 场景: general notes\n  - path hint: notes/旧项目整理.md\n  - shared anchors: note context summary\n---\ntitle: \"旧项目整理\"\naliases: [\"旧项目 历史\"]\ntags: [\"旧项目 整理\"]\n---\n\n# 旧项目整理\n\n> [!note]\n> path hint: `notes/旧项目整理.md`\n> heading hint: **旧项目整理**\n\n- overview\n  - [[旧项目整理]]\n  - [ref](notes/旧项目整理.md.md)\n  - inline code: `旧项目整理`\n  - tasks\n    - [ ] revisit ranking note\n    - [x] keep markdown noise in corpus\n\n1. capture note\n2. compare aliases\n3. check nested bullets\n\n| field | value |\n| --- | --- |\n| path | notes/旧项目整理.md |\n| alias | 旧项目 历史 |\n\n```md\n- nested bullet for notes/旧项目整理.md\n  - alias: 旧项目 历史\n  - tag: 旧项目 整理\n```\n\nText with **bold**, _italic_, ~~strike~~, and `inline-code` markers.",
+    "aliases": "旧项目 历史",
+    "tags": "旧项目 整理"
+  }
+]
