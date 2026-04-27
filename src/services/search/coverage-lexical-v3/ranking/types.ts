@@ -39,6 +39,8 @@ export type BodyWindowContainer = EvidenceContainer &
 		windowWidth: number;
 		gapCount: number;
 		density: number;
+		isLocalityTight: boolean;
+		localityTightness: number;
 		headingCorroboration: HeadingCorroboration;
 	}>;
 

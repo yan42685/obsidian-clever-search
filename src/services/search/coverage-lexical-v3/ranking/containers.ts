@@ -9,6 +9,8 @@ import type { HanRescueAssessment } from "../han-rescue";
 import {
 	BODY_LOCALITY_MAX_ADJACENT_GAP,
 	BODY_LOCALITY_MAX_HEAD_TAIL_SPAN,
+	BODY_LOCALITY_STRONG_ADJACENT_GAP,
+	BODY_LOCALITY_TIGHTNESS_EXPONENT,
 } from "../body-locality/constants";
 import {
 	collectHanRescueArtifacts,
@@ -112,6 +114,7 @@ const CHAIN_BOUNDARY_PENALTY = 0;
 const WITNESS_MATCH_FAMILY_ID_OFFSET = 1;
 const BLOCK_SHORTLIST_LIMIT = 6;
 const BODY_WINDOW_PREFILTER_PER_BUCKET = 4;
+const BODY_LOCALITY_TIGHTNESS_COMPACTNESS_WEIGHT = 90;
 
 export type CandidateDocEvidence = Readonly<{
 	identityFamilyIds: readonly number[];
@@ -731,12 +734,12 @@ export function buildPackingProfile(
 	const routeProvidesNovelCoverage = routeContainerProvidesNovelCoverage(
 		routeContainer,
 		identityContainer,
-		bodyWindowContainer,
+		bodyWindowContainer?.isLocalityTight ? bodyWindowContainer : null,
 	);
 	const mainContainers = [
 		identityContainer,
 		routeProvidesNovelCoverage ? routeContainer : null,
-		bodyWindowContainer,
+		bodyWindowContainer?.isLocalityTight ? bodyWindowContainer : null,
 	]
 		.filter(
 			(container): container is IdentityContainer | RouteContainer | BodyWindowContainer =>
@@ -2051,11 +2054,16 @@ function materializeBodyWindowCandidateFromShortlistState(
 			state.approxHeadTailSpan * 16 -
 			state.approxTotalGapMass * 10 -
 			state.approxMaxAdjacentGap * 12 -
-			state.boundaryCrossingCount * 80,
+			state.boundaryCrossingCount * 80 +
+			computeBodyLocalityTightness(state.approxMaxAdjacentGap) *
+				BODY_LOCALITY_TIGHTNESS_COMPACTNESS_WEIGHT,
 		exactUnitCount: state.exactUnitCount,
 		windowWidth: ordinalSummary.windowWidth,
 		gapCount: ordinalSummary.gapCount,
 		density: coveredUnitIndices.length / Math.max(state.approxHeadTailSpan, 1),
+		isLocalityTight:
+			state.approxMaxAdjacentGap <= BODY_LOCALITY_STRONG_ADJACENT_GAP,
+		localityTightness: computeBodyLocalityTightness(state.approxMaxAdjacentGap),
 		maxAdjacentGap: ordinalSummary.maxAdjacentGap,
 		preservesQueryOrder: state.preservesQueryOrder,
 		windowStart: ordinalSummary.windowStart,
@@ -2070,6 +2078,18 @@ function materializeBodyWindowCandidateFromShortlistState(
 			unitCount: headingCorroborationUnitIndices.length,
 		},
 	};
+}
+
+function computeBodyLocalityTightness(maxAdjacentGap: number): number {
+	if (!Number.isFinite(maxAdjacentGap)) {
+		return 0;
+	}
+	const clampedGap = Math.max(
+		0,
+		Math.min(maxAdjacentGap, BODY_LOCALITY_MAX_ADJACENT_GAP),
+	);
+	const ratio = clampedGap / BODY_LOCALITY_MAX_ADJACENT_GAP;
+	return 1 - Math.pow(ratio, BODY_LOCALITY_TIGHTNESS_EXPONENT);
 }
 
 function buildOrdinalWindowSummary(

@@ -2219,3 +2219,41 @@ Validation completed for this phase:
 
 - `npm run benchmark:coverage-lexical` passes on 2026-04-27
 - benchmark log captured at `.codex-bench/coverage-lexical-0.3.3-anchor.log`
+
+### Phase 47
+
+Status: Completed on 2026-04-27
+
+This phase keeps the widened same-subitem body-locality admission path while
+making loose locality evidence secondary:
+
+- multi-shard evidence hydration now routes through the public
+  `CoverageLexicalV3Engine.hydrateCandidateEvidenceByShard(...)` path so
+  file-search-engine ranking and engine-side shard hydration stay aligned
+- body locality still admits adjacent body evidence up to gap `30`, preserving
+  same-subitem visible-text recall when users extend a query with nearby words
+- body windows now distinguish tight locality (`<= 15`) from loose locality
+  (`16..30`), and apply a continuous tightness bonus inside body-window
+  selection rather than narrowing the recall gate
+- loose body-locality windows remain available as evidence, but they no longer
+  become main ranking containers or suppress route/metadata novel coverage
+- the rejected metadata-query special case (`frontmatter` / `alias` tokens)
+  remains removed; the one remaining top5 miss exposes a real English
+  morphology gap (`restoring` does not currently match `restore`) rather than
+  relying on query-token intent hacks
+
+Quality anchor for the 0.3.4 release candidate on 2026-04-27:
+
+- corpus: 89 notes, 198 queries, 55 Han docs, 15 zh queries, 48 mixed queries
+- `CoverageLexical(V3)`: objective 0.886, top1 0.818, top3 0.949, top5 0.995,
+  zeroRate 0.000, mrr 0.888
+- timing anchor: avg 16.992 ms/query, p50 12.503 ms, p100 57.934 ms,
+  estimated index 736.436 KB
+- relative to MiniSearch: avg ratio 2.907, p50 ratio 2.171, p100 ratio 4.105,
+  index ratio 9.634
+
+Validation completed for this phase:
+
+- `npm run benchmark:coverage-lexical` passes on 2026-04-27
+- benchmark log captured locally at
+  `.codex-bench/coverage-lexical-0.3.4-anchor.log`
