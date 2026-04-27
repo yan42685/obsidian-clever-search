@@ -264,6 +264,7 @@ describe("HybridEngine search fallback notices", () => {
 				startOffset: 0,
 				endOffset: 11,
 			},
+			"notes/a.md",
 			0.91,
 			"hello world",
 			[0],

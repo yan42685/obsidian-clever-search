@@ -714,6 +714,29 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 			},
 		]);
 		expect(dataProvider.readPlainText).not.toHaveBeenCalled();
+		expect(lexicalEngine.searchLinesByFileItem).toHaveBeenCalledWith(
+			expect.arrayContaining([
+				expect.objectContaining({ text: "shadow body line", row: 0 }),
+			]),
+			"subItem",
+			"shadow",
+			expect.objectContaining({ path: "notes/stale.md" }),
+			60,
+		);
+		expect(lineHighlighter.parseAll).toHaveBeenCalledWith(
+			expect.arrayContaining([
+				expect.objectContaining({ text: "shadow body line", row: 0 }),
+			]),
+			[
+				{
+					text: "shadow body line",
+					row: 0,
+					positions: new Set([0, 1, 2]),
+				},
+			],
+			expect.anything(),
+			false,
+		);
 		expect(subItems).toHaveLength(1);
 		expect(subItems[0]).toBeInstanceOf(FileSubItem);
 		expect(subItems[0].text).toBe("shadow body line");

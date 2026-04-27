@@ -267,4 +267,193 @@ describe("HybridEngine per-file atomic commit", () => {
     ).resolves.toEqual([{ filePath }]);
     expect(engine.buildDenseDisplayCandidate).toHaveBeenCalledTimes(1);
   });
+
+  test("serves stale dense candidates only with a matching unexpired shadow", async () => {
+    const filePath = "notes/stale-shadow.md";
+    const engine = Object.create(HybridEngine.prototype) as {
+      isDenseCandidateCoveredByLexical: jest.Mock;
+      buildDenseDisplayCandidate: jest.Mock;
+      recallDenseDisplayCandidates(
+        query: string,
+        lexicalCandidates: readonly unknown[],
+        limit: number,
+      ): Promise<unknown[]>;
+      _canSearch: boolean;
+      setting: { hybrid: { vectorCompression: string } };
+      embedder: { embedQuery: jest.Mock };
+      hnswSmall: { search: jest.Mock };
+      db: {
+        db: {
+          hybridChunks: { bulkGet: jest.Mock };
+          docRegistry: { bulkGet: jest.Mock };
+          hybridIndexedFileRefs: { bulkGet: jest.Mock };
+          hybridDirtyShadows: { get: jest.Mock };
+        };
+      };
+      fileSnapshotStore: {
+        readIndexedTextSnapshots: jest.Mock;
+      };
+    };
+
+    engine._canSearch = true;
+    engine.setting = { hybrid: { vectorCompression: "int8" } };
+    engine.embedder = { embedQuery: jest.fn(async () => new Float32Array([1])) };
+    engine.hnswSmall = { search: jest.fn(() => [{ id: 7, score: 0.8 }]) };
+    engine.db = {
+      db: {
+        hybridChunks: {
+          bulkGet: jest.fn(async () => [
+            {
+              id: 7,
+              docRef: 42,
+              generation: 7,
+              chunkIndex: 0,
+              startOffset: 0,
+              endOffset: 11,
+              startLine: 0,
+              startCol: 0,
+              endLine: 0,
+              embedKey: "k",
+            },
+          ]),
+        },
+        docRegistry: {
+          bulkGet: jest.fn(async () => [
+            {
+              docRef: 42,
+              path: filePath,
+              deleted: false,
+              liveGeneration: 8,
+              denseServeUntil: Date.now() + 60_000,
+            },
+          ]),
+        },
+        hybridIndexedFileRefs: {
+          bulkGet: jest.fn(async () => [
+            {
+              docRef: 42,
+              state: "ready",
+              generation: 7,
+            },
+          ]),
+        },
+        hybridDirtyShadows: {
+          get: jest.fn(async () => ({
+            id: "42:7",
+            docRef: 42,
+            generation: 7,
+            plainText: "shadow body",
+          })),
+        },
+      },
+    };
+    engine.fileSnapshotStore = {
+      readIndexedTextSnapshots: jest.fn(async () => new Map()),
+    };
+    engine.isDenseCandidateCoveredByLexical = jest.fn(() => false);
+    engine.buildDenseDisplayCandidate = jest.fn(() => ({ filePath }));
+
+    await expect(
+      engine.recallDenseDisplayCandidates("query", [], 10),
+    ).resolves.toEqual([{ filePath }]);
+    expect(engine.buildDenseDisplayCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ docRef: 42, generation: 7 }),
+      filePath,
+      0.8,
+      "shadow body",
+      expect.any(Array),
+      7,
+      "shadow",
+    );
+  });
+
+  test("rejects stale dense candidates when shadow is missing, mismatched, or expired", async () => {
+    const filePath = "notes/stale-shadow-missing.md";
+    const makeEngine = (options: {
+      denseServeUntil?: number;
+      shadow?: unknown;
+    }) => {
+      const engine = Object.create(HybridEngine.prototype) as any;
+      engine._canSearch = true;
+      engine.setting = { hybrid: { vectorCompression: "int8" } };
+      engine.embedder = { embedQuery: jest.fn(async () => new Float32Array([1])) };
+      engine.hnswSmall = { search: jest.fn(() => [{ id: 7, score: 0.8 }]) };
+      engine.db = {
+        db: {
+          hybridChunks: {
+            bulkGet: jest.fn(async () => [
+              {
+                id: 7,
+                docRef: 42,
+                generation: 7,
+                chunkIndex: 0,
+                startOffset: 0,
+                endOffset: 11,
+                startLine: 0,
+                startCol: 0,
+                endLine: 0,
+                embedKey: "k",
+              },
+            ]),
+          },
+          docRegistry: {
+            bulkGet: jest.fn(async () => [
+              {
+                docRef: 42,
+                path: filePath,
+                deleted: false,
+                liveGeneration: 8,
+                denseServeUntil: options.denseServeUntil,
+              },
+            ]),
+          },
+          hybridIndexedFileRefs: {
+            bulkGet: jest.fn(async () => [
+              {
+                docRef: 42,
+                state: "ready",
+                generation: 7,
+              },
+            ]),
+          },
+          hybridDirtyShadows: {
+            get: jest.fn(async () => options.shadow),
+          },
+        },
+      };
+      engine.fileSnapshotStore = {
+        readIndexedTextSnapshots: jest.fn(async () => new Map()),
+      };
+      engine.isDenseCandidateCoveredByLexical = jest.fn(() => false);
+      engine.buildDenseDisplayCandidate = jest.fn(() => ({ filePath }));
+      return engine;
+    };
+
+    for (const engine of [
+      makeEngine({ denseServeUntil: Date.now() + 60_000 }),
+      makeEngine({
+        denseServeUntil: Date.now() + 60_000,
+        shadow: {
+          id: "42:6",
+          docRef: 42,
+          generation: 6,
+          plainText: "wrong generation",
+        },
+      }),
+      makeEngine({
+        denseServeUntil: Date.now() - 1,
+        shadow: {
+          id: "42:7",
+          docRef: 42,
+          generation: 7,
+          plainText: "expired",
+        },
+      }),
+    ]) {
+      await expect(
+        engine.recallDenseDisplayCandidates("query", [], 10),
+      ).resolves.toEqual([]);
+      expect(engine.buildDenseDisplayCandidate).not.toHaveBeenCalled();
+    }
+  });
 });

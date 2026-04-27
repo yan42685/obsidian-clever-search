@@ -175,4 +175,87 @@ describe("Hybrid stored file consistency", () => {
 
     expect(result.reuseBlockedReasons).toContain("indexed_file_state_pending");
   });
+
+  test("treats pending dense artifacts as startup-repairable residue", () => {
+    const result = analyzeHybridStoredFileConsistency({
+      existsInVault: true,
+      hasChunks: true,
+      chunkCount: 2,
+      snapshot: { generation: 70 },
+      vectorInfo: { precision: "int8", chunkCount: 2, generation: 70 },
+      indexedFileRef: {
+        docRef: 1,
+        state: "pending",
+        chunkCount: 2,
+        generation: 70,
+      },
+      currentPrecision: "int8",
+    });
+
+    expect(result.reuseBlockedReasons).toEqual(
+      expect.arrayContaining(["indexed_file_state_pending"]),
+    );
+    expect(result.repairReasons).toEqual(
+      expect.arrayContaining(["indexed_file_state_pending"]),
+    );
+  });
+
+  test("treats dirty shadow generation mismatch as startup-repairable", () => {
+    const result = analyzeHybridStoredFileConsistency({
+      existsInVault: true,
+      hasChunks: true,
+      chunkCount: 1,
+      snapshot: { generation: 81 },
+      shadowSnapshot: { generation: 79 },
+      vectorInfo: { precision: "int8", chunkCount: 1, generation: 80 },
+      indexedFileRef: {
+        docRef: 1,
+        state: "ready",
+        chunkCount: 1,
+        generation: 80,
+      },
+      currentPrecision: "int8",
+    });
+
+    expect(result.reuseBlockedReasons).toContain("snapshot_generation_mismatch");
+    expect(result.repairReasons).toContain("snapshot_generation_mismatch");
+  });
+
+  test("treats ready refs missing chunks or vectors as startup-repairable", () => {
+    const missingChunks = analyzeHybridStoredFileConsistency({
+      existsInVault: true,
+      hasChunks: false,
+      chunkCount: 0,
+      snapshot: { generation: 90 },
+      vectorInfo: { precision: "int8", chunkCount: 1, generation: 90 },
+      indexedFileRef: {
+        docRef: 1,
+        state: "ready",
+        chunkCount: 1,
+        generation: 90,
+      },
+      currentPrecision: "int8",
+    });
+    const missingVector = analyzeHybridStoredFileConsistency({
+      existsInVault: true,
+      hasChunks: true,
+      chunkCount: 1,
+      snapshot: { generation: 91 },
+      indexedFileRef: {
+        docRef: 1,
+        state: "ready",
+        chunkCount: 1,
+        generation: 91,
+      },
+      currentPrecision: "int8",
+    });
+
+    expect(missingChunks.repairReasons).toEqual(
+      expect.arrayContaining([
+        "indexed_file_ref_missing_chunks",
+        "ready_missing_data",
+      ]),
+    );
+    expect(missingVector.repairReasons).toContain("ready_missing_data");
+  });
 });

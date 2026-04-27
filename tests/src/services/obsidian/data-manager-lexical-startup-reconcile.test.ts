@@ -847,7 +847,7 @@ describe("DataManager lexical startup reconcile", () => {
     expect(lines).toEqual(
       expect.arrayContaining([
         expect.stringContaining("Coverage V3 cold storage: artifacts"),
-        expect.stringContaining("Coverage V3 cold slices: snapshot"),
+        expect.stringContaining("Coverage V3 cold slices: legacy-serialized-snapshot"),
         expect.stringContaining("Coverage V3 cold evidence tables:"),
         expect.stringContaining("Coverage V3 cold evidence payloads:"),
         expect.stringContaining("Coverage V3 cold evidence fields:"),

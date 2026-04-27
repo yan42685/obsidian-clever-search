@@ -160,6 +160,7 @@ type CoverageLexicalV3PersistedStorageBreakdown = {
   artifactBytes: number;
   registryBytes: number;
   snapshotBytes: number;
+  snapshotManifestBytes: number;
   shardArtifactBytes: number;
   overlayJournalBytes: number;
   compactBytes: number;
@@ -227,7 +228,22 @@ export async function logStartupLexicalMemorySummary(dataManager: DataManager): 
 }
 
 export function sampleJsHeapUsage(dataManager: DataManager): unknown {
+  const dataManagerSampler = (dataManager as DataManager & {
+    sampleJsHeapUsage?: () => unknown;
+  }).sampleJsHeapUsage;
+  if (typeof dataManagerSampler === "function") {
+    return dataManagerSampler.call(dataManager);
+  }
   return new DataManagerDevDiagnostics(dataManager).sampleJsHeapUsage();
+}
+
+export function buildStartupLexicalMemorySummaryLines(
+  dataManager: DataManager,
+  report: LexicalRuntimeReport,
+): string[] {
+  return new DataManagerDevDiagnostics(dataManager).buildStartupLexicalMemorySummaryLines(
+    report,
+  );
 }
 
 export function summarizeLexicalHeapDelta(
@@ -436,6 +452,8 @@ class DataManagerDevDiagnostics {
     const sumBytes = (tableNames: readonly string[]) =>
       tableNames.reduce((sum, tableName) => sum + (bytesByName.get(tableName) ?? 0), 0);
     const snapshotBytes = bytesByName.get("lexicalSearchSnapshots") ?? 0;
+    const snapshotManifestBytes =
+      bytesByName.get("coverageLexicalV3SnapshotManifests") ?? 0;
     const shardArtifactBytes = bytesByName.get("coverageLexicalV3ResidentShardArtifacts") ?? 0;
     const overlayJournalBytes = bytesByName.get("coverageLexicalV3ActiveOverlayJournal") ?? 0;
     const compactBytes =
@@ -452,6 +470,7 @@ class DataManagerDevDiagnostics {
       artifactBytes,
       registryBytes,
       snapshotBytes,
+      snapshotManifestBytes,
       shardArtifactBytes,
       overlayJournalBytes,
       compactBytes,
@@ -528,24 +547,33 @@ class DataManagerDevDiagnostics {
             ) +
             " of vault)",
         );
-          const coldSliceParts = [
-            persistedColdStorage.snapshotBytes > 0
-              ? "legacy-snapshot " + this.formatBytes(persistedColdStorage.snapshotBytes)
-              : null,
-            persistedColdStorage.shardArtifactBytes > 0
-              ? "shard-artifacts " + this.formatBytes(persistedColdStorage.shardArtifactBytes)
-              : null,
-            persistedColdStorage.overlayJournalBytes > 0
-              ? "overlay-journal " + this.formatBytes(persistedColdStorage.overlayJournalBytes)
-              : null,
-            persistedColdStorage.compactBytes > 0
-              ? "compact-state " + this.formatBytes(persistedColdStorage.compactBytes)
-              : null,
-            persistedColdStorage.invalidationBytes > 0
-              ? "invalidations " + this.formatBytes(persistedColdStorage.invalidationBytes)
-              : null,
-            persistedColdStorage.evidenceBytes > 0
-              ? "evidence " + this.formatBytes(persistedColdStorage.evidenceBytes)
+        const coldSliceParts = [
+          persistedColdStorage.snapshotBytes > 0
+            ? "legacy-serialized-snapshot " +
+              this.formatBytes(persistedColdStorage.snapshotBytes)
+            : null,
+          persistedColdStorage.snapshotManifestBytes > 0
+            ? "snapshot-manifests " +
+              this.formatBytes(persistedColdStorage.snapshotManifestBytes)
+            : null,
+          persistedColdStorage.shardArtifactBytes > 0
+            ? "resident-shard-artifacts " +
+              this.formatBytes(persistedColdStorage.shardArtifactBytes)
+            : null,
+          persistedColdStorage.overlayJournalBytes > 0
+            ? "overlay-journal " +
+              this.formatBytes(persistedColdStorage.overlayJournalBytes)
+            : null,
+          persistedColdStorage.compactBytes > 0
+            ? "compact-jobs-temp " +
+              this.formatBytes(persistedColdStorage.compactBytes)
+            : null,
+          persistedColdStorage.invalidationBytes > 0
+            ? "invalidations " +
+              this.formatBytes(persistedColdStorage.invalidationBytes)
+            : null,
+          persistedColdStorage.evidenceBytes > 0
+            ? "evidence " + this.formatBytes(persistedColdStorage.evidenceBytes)
             : null,
           persistedColdStorage.metadataBytes > 0
             ? "metadata " + this.formatBytes(persistedColdStorage.metadataBytes)

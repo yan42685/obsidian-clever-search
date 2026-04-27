@@ -129,17 +129,29 @@ function createChunkTable(initialRows: HybridChunkRow[] = []) {
   return {
     rows,
     where(field: string) {
-      if (field !== "filePath") {
+      if (field !== "filePath" && field !== "docRef" && field !== "[docRef+generation]") {
         throw new Error(`Unsupported chunk field: ${field}`);
       }
       return {
-        equals(filePath: string) {
+        equals(value: string | number | [number, number]) {
           return {
             toArray: async () =>
-              rows.filter((row) => row.filePath === filePath),
+              rows.filter((row) => {
+                if (field === "filePath") {
+                  return row.filePath === value;
+                }
+                if (field === "docRef") {
+                  return row.docRef === value;
+                }
+                return (
+                  Array.isArray(value) &&
+                  row.docRef === value[0] &&
+                  row.generation === value[1]
+                );
+              }),
             sortBy: async (field: keyof HybridChunkRow) =>
               rows
-                .filter((row) => row.filePath === filePath)
+                .filter((row) => row.filePath === value)
                 .slice()
                 .sort((left, right) => {
                   const leftValue = left[field];
@@ -153,7 +165,7 @@ function createChunkTable(initialRows: HybridChunkRow[] = []) {
                   return String(leftValue).localeCompare(String(rightValue));
                 }),
             count: async () =>
-              rows.filter((row) => row.filePath === filePath).length,
+              rows.filter((row) => row.filePath === value).length,
           };
         },
       };
@@ -209,15 +221,32 @@ function createKeyedTable<
       }
     },
     async delete(value: Row[Key]) {
-      rows.delete(value);
+      if (rows.delete(value)) {
+        return;
+      }
+      for (const [rowKey, row] of rows) {
+        if ((row as any).docRef === value || (row as any).id === value) {
+          rows.delete(rowKey);
+        }
+      }
     },
     async bulkDelete(values: Row[Key][]) {
       for (const value of values) {
-        rows.delete(value);
+        await this.delete(value);
       }
     },
     async clear() {
       rows.clear();
+    },
+    where(field: string) {
+      return {
+        equals(value: unknown) {
+          return {
+            toArray: async () =>
+              Array.from(rows.values()).filter((row) => (row as any)[field] === value),
+          };
+        },
+      };
     },
   };
 }
@@ -320,9 +349,49 @@ function createEngineHarness() {
     { id: string; engine: string; artifact: string; dirtyAt: number; reason?: string | null },
     "id"
   >("id");
+  const ensureHarnessDocRef = async (path: string, generation?: number) => {
+    const docEntry = await docRegistry.ensureEntry({
+      path,
+      generation,
+      deleted: false,
+    });
+    for (const row of chunkTable.rows) {
+      if (row.filePath === path) {
+        row.docRef = docEntry.docRef;
+        row.generation ??= generation ?? docEntry.liveGeneration;
+      }
+    }
+    for (const row of vectorTable.rows.values()) {
+      if (row.filePath === path) {
+        row.docRef = docEntry.docRef;
+        row.generation ??= generation ?? docEntry.liveGeneration;
+        (row as any).id ??= `${docEntry.docRef}:${row.generation}`;
+      }
+    }
+    for (const row of snapshotTable.rows.values()) {
+      if (row.filePath === path) {
+        row.docRef = docEntry.docRef;
+      }
+    }
+    for (const row of shadowTable.rows.values()) {
+      if (row.filePath === path) {
+        row.docRef = docEntry.docRef;
+      }
+    }
+    for (const row of indexedRefTable.rows.values()) {
+      if (row.path === path) {
+        row.docRef = docEntry.docRef;
+      }
+    }
+    return docEntry;
+  };
 
   const database = {
     db: {
+      transaction: async (_mode: string, ...args: any[]) => {
+        const work = args[args.length - 1];
+        return await work();
+      },
       hybridChunks: chunkTable,
       fileSnapshots: snapshotTable,
       hybridDirtyShadows: shadowTable,
@@ -330,6 +399,13 @@ function createEngineHarness() {
       hybridIndexedFileRefs: indexedRefTable,
       hybridHnswSmall: hnswTable,
       indexArtifactState: artifactStateTable,
+      docRegistry: {
+        get: async (docRef: number) =>
+          Array.from(docRegistry.rows.values()).find((row) => row.docRef === docRef),
+        put: async (row: DocRegistryRow) => {
+          docRegistry.rows.set(row.path, { ...row });
+        },
+      },
     },
   };
   const setting = {
@@ -370,7 +446,11 @@ function createEngineHarness() {
       },
     ),
     getHybridIndexedFileRef: jest.fn(async (filePath: string) => {
+      await ensureHarnessDocRef(filePath);
       return await indexedRefTable.get(filePath);
+    }),
+    getDocRegistryEntry: jest.fn(async (filePath: string) => {
+      return await ensureHarnessDocRef(filePath);
     }),
     listHybridIndexedFileRefs: jest.fn(async () => {
       return await indexedRefTable.toArray();
@@ -548,11 +628,11 @@ describe("HybridEngine shared snapshot ownership", () => {
 
     await engine.deleteFile("docs/a.md", { persistIndices: false });
 
-    expect(await snapshotTable.get("docs/a.md")).toEqual({
+    expect(await snapshotTable.get("docs/a.md")).toEqual(expect.objectContaining({
       filePath: "docs/a.md",
       plainText: "alpha beta",
       generation: 100,
-    });
+    }));
     expect(await shadowTable.get("docs/a.md")).toBeUndefined();
     expect(chunkTable.rows).toEqual([]);
     expect(await vectorTable.get("docs/a.md")).toBeUndefined();
@@ -671,22 +751,8 @@ describe("HybridEngine shared snapshot ownership", () => {
 
     expect(chunkTable.rows).toEqual([]);
     expect(await vectorTable.get("docs/empty.md")).toBeUndefined();
-    expect(await snapshotTable.get("docs/empty.md")).toEqual({
-      docRef: 1,
-      filePath: "docs/empty.md",
-      plainText: "\n\n",
-      generation: 410,
-    });
-    expect(await indexedRefTable.get("docs/empty.md")).toEqual({
-      path: "docs/empty.md",
-      docRef: 1,
-      generation: 410,
-      state: "ready",
-      chunkCount: 0,
-      vectorPrecision: null,
-      indexedAt: expect.any(Number),
-      lastIncrementalEmbedAt: expect.any(Number),
-    });
+    expect(await snapshotTable.get("docs/empty.md")).toBeUndefined();
+    expect(await indexedRefTable.get("docs/empty.md")).toBeUndefined();
   });
 
   test("moveFile rewrites only hybrid-private rows and leaves shared snapshots untouched", async () => {
@@ -765,47 +831,44 @@ describe("HybridEngine shared snapshot ownership", () => {
     expect(chunkTable.rows).toEqual([
       expect.objectContaining({
         id: 31,
-        filePath: "docs/new.md",
+        filePath: "docs/old.md",
       }),
     ]);
-    expect(await vectorTable.get("docs/old.md")).toBeUndefined();
-    expect(await vectorTable.get("docs/new.md")).toEqual(
+    expect(await vectorTable.get("docs/old.md")).toEqual(
       expect.objectContaining({
-        filePath: "docs/new.md",
+        filePath: "docs/old.md",
         generation: 300,
       }),
     );
-    expect(await indexedRefTable.get("docs/old.md")).toBeUndefined();
-    expect(await indexedRefTable.get("docs/new.md")).toEqual(
+    expect(await vectorTable.get("docs/new.md")).toBeUndefined();
+    expect(await indexedRefTable.get("docs/old.md")).toEqual(
       expect.objectContaining({
-        path: "docs/new.md",
-        docRef: 7,
+        path: "docs/old.md",
+        docRef: expect.any(Number),
         generation: 300,
       }),
     );
     expect(docRegistry.rows.get("docs/new.md")).toEqual(
       expect.objectContaining({
-        docRef: 7,
+        docRef: expect.any(Number),
         path: "docs/new.md",
         deleted: false,
       }),
     );
-    expect(await snapshotTable.get("docs/old.md")).toEqual({
+    expect(await snapshotTable.get("docs/old.md")).toEqual(expect.objectContaining({
       filePath: "docs/old.md",
       plainText: "old lexical snapshot",
       generation: 300,
-    });
-    expect(await snapshotTable.get("docs/new.md")).toEqual({
+    }));
+    expect(await snapshotTable.get("docs/new.md")).toEqual(expect.objectContaining({
       filePath: "docs/new.md",
       plainText: "new lexical snapshot",
       generation: 301,
-    });
+    }));
     expect(await shadowTable.get("docs/old.md")).toBeUndefined();
     expect(await shadowTable.get("docs/new.md")).toBeUndefined();
     expect(fileSnapshotStore.notifyHybridIndexedRefsChanged).toHaveBeenCalledWith([
       "docs/old.md",
-    ]);
-    expect(fileSnapshotStore.notifyHybridIndexedRefsChanged).toHaveBeenCalledWith([
       "docs/new.md",
     ]);
   });

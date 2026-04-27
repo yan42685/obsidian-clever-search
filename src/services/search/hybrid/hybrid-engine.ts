@@ -908,7 +908,12 @@ export class HybridEngine {
               buildHybridGenerationKey(denseRow.row.docRef, indexedFileRef.generation),
             )
           : undefined;
-      if (isStaleDense && staleShadow == null) {
+      if (
+        isStaleDense &&
+        (staleShadow == null ||
+          staleShadow.docRef !== denseRow.row.docRef ||
+          staleShadow.generation !== indexedFileRef.generation)
+      ) {
         continue;
       }
       if (!isStaleDense && !snapshot) {

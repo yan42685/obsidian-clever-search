@@ -5006,6 +5006,38 @@ export class DataManager {
     await showDevStorageAndRuntimeStats(this);
   }
 
+  private sampleJsHeapUsage(): unknown {
+    const memory = (
+      performance as typeof performance & {
+        memory?: {
+          usedJSHeapSize?: number;
+          totalJSHeapSize?: number;
+          jsHeapSizeLimit?: number;
+        };
+      }
+    ).memory;
+    if (
+      !memory ||
+      typeof memory.usedJSHeapSize !== "number" ||
+      typeof memory.totalJSHeapSize !== "number" ||
+      typeof memory.jsHeapSizeLimit !== "number"
+    ) {
+      return null;
+    }
+    return {
+      usedBytes: memory.usedJSHeapSize,
+      totalBytes: memory.totalJSHeapSize,
+      limitBytes: memory.jsHeapSizeLimit,
+    };
+  }
+
+  private buildStartupLexicalMemorySummaryLines(report: unknown): string[] {
+    const {
+      buildStartupLexicalMemorySummaryLines,
+    } = require("./data-manager.dev") as typeof import("./data-manager.dev");
+    return buildStartupLexicalMemorySummaryLines(this, report as never);
+  }
+
   private async logStartupLexicalMemorySummary(): Promise<void> {
     const { logStartupLexicalMemorySummary } = await import("./data-manager.dev");
     await logStartupLexicalMemorySummary(this);

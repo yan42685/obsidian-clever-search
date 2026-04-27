@@ -493,6 +493,7 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
   > = [];
   const fileSnapshots: Array<Record<string, any> & { filePath: string }> = [];
   const hybridDirtyShadows: Array<Record<string, any> & { filePath: string }> = [];
+  const docRegistryRows: Array<Record<string, any> & { docRef: number; path: string }> = [];
   const indexRecoveryStates: Array<Record<string, any>> = [];
   const indexArtifactStates: Array<Record<string, any>> = [];
   const state = {
@@ -549,6 +550,58 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
     rows.push({ ...row });
   };
 
+  const rowPath = (row: Record<string, any>) => row.path ?? row.filePath;
+  const ensureMockDocRegistryEntry = (path: string, generation?: number) => {
+    const existing = docRegistryRows.find((row) => row.path === path);
+    if (existing) {
+      if (generation !== undefined) {
+        existing.liveGeneration = generation;
+      }
+      return existing;
+    }
+    const created = {
+      docRef: docRegistryRows.length + 1,
+      path,
+      deleted: false,
+      liveGeneration: generation,
+      updatedAt: generation ?? 0,
+    };
+    docRegistryRows.push(created);
+    return created;
+  };
+  const ensureDocRegistryFromStoredRows = () => {
+    for (const row of [
+      ...hybridIndexedFileRefs,
+      ...hybridChunks,
+      ...hybridChunkVectors,
+      ...fileSnapshots,
+      ...hybridDirtyShadows,
+    ]) {
+      const path = rowPath(row);
+      if (path) {
+        const entry = ensureMockDocRegistryEntry(path, row.generation);
+        row.docRef ??= entry.docRef;
+        row.id ??= `${entry.docRef}:${row.generation ?? entry.liveGeneration ?? 0}`;
+      }
+    }
+  };
+  const generationKeyForRow = (row: Record<string, any>) => {
+    if (typeof row.id === "string") {
+      return row.id;
+    }
+    if (row.docRef !== undefined && row.generation !== undefined) {
+      return `${row.docRef}:${row.generation}`;
+    }
+    return rowPath(row);
+  };
+  const findByGenerationKey = <T extends Record<string, any>>(
+    rows: readonly T[],
+    key: string,
+  ) => {
+    ensureDocRegistryFromStoredRows();
+    return rows.find((row) => generationKeyForRow(row) === key);
+  };
+
   return {
     openAndConsumeSchemaUpgradeReport: jest.fn(async () => ({
       schemaUpgradeDetected: false,
@@ -574,7 +627,38 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
       state.lexicalSearchSnapshot = snapshot;
     }),
     getLexicalIndexedFileRefs: jest.fn(async () => [...lexicalIndexedFileRefs]),
-    listDocRegistryEntries: jest.fn(async () => []),
+    ensureDocRegistryEntry: jest.fn(async (entry: Record<string, any>) => ({
+      ...ensureMockDocRegistryEntry(entry.path, entry.generation),
+    })),
+    ensureDocRegistryEntries: jest.fn(async (entries: ReadonlyArray<Record<string, any>>) => {
+      const result = new Map<string, Record<string, any>>();
+      for (const entry of entries) {
+        result.set(entry.path, {
+          ...ensureMockDocRegistryEntry(entry.path, entry.generation),
+        });
+      }
+      return result;
+    }),
+    getDocRegistryEntry: jest.fn(async (path: string) => {
+      ensureDocRegistryFromStoredRows();
+      const row = docRegistryRows.find((item) => item.path === path);
+      return row ? { ...row } : undefined;
+    }),
+    getDocRegistryEntries: jest.fn(async (paths: readonly string[]) => {
+      ensureDocRegistryFromStoredRows();
+      const result = new Map<string, Record<string, any>>();
+      for (const path of paths) {
+        const row = docRegistryRows.find((item) => item.path === path);
+        if (row) {
+          result.set(path, { ...row });
+        }
+      }
+      return result;
+    }),
+    listDocRegistryEntries: jest.fn(async () => {
+      ensureDocRegistryFromStoredRows();
+      return docRegistryRows.map((row) => ({ ...row }));
+    }),
     setLexicalIndexedFileRefs: jest.fn(async (refs: BaseIndexedFileRef[]) => {
       lexicalIndexedFileRefs.splice(
         0,
@@ -655,19 +739,26 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
     __hybridChunkVectors: hybridChunkVectors,
     __fileSnapshots: fileSnapshots,
     __hybridDirtyShadows: hybridDirtyShadows,
+    __docRegistryRows: docRegistryRows,
     __indexRecoveryStates: indexRecoveryStates,
     __indexArtifactStates: indexArtifactStates,
     db: {
       hybridChunks: {
+        toArray: jest.fn(async () => {
+          ensureDocRegistryFromStoredRows();
+          return hybridChunks.map((row) => ({ ...row }));
+        }),
         orderBy: jest.fn((_field: string) => ({
           limit: (batchSize: number) => ({
-            toArray: async () =>
-              toPagedRows(
+            toArray: async () => {
+              ensureDocRegistryFromStoredRows();
+              return toPagedRows(
                 hybridChunks,
                 (row) => Number(row.id ?? 0),
                 null,
                 batchSize,
-              ),
+              );
+            },
           }),
         })),
         where: jest.fn((field: string) => {
@@ -696,21 +787,48 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
                     .map((row) => ({ ...row }));
                 },
               }),
+              };
+            }
+          if (field === "docRef") {
+            return {
+              anyOf: (docRefs: readonly number[]) => ({
+                toArray: async () => {
+                  ensureDocRegistryFromStoredRows();
+                  const docRefSet = new Set(docRefs);
+                  return hybridChunks
+                    .filter((row) => docRefSet.has(row.docRef))
+                    .map((row) => ({ ...row }));
+                },
+              }),
             };
           }
           throw new Error(`Unsupported hybridChunks.where field: ${field}`);
         }),
+        bulkDelete: jest.fn(async (ids: readonly number[]) => {
+          const idSet = new Set(ids);
+          for (let index = hybridChunks.length - 1; index >= 0; index--) {
+            if (idSet.has(hybridChunks[index].id)) {
+              hybridChunks.splice(index, 1);
+            }
+          }
+        }),
       },
       hybridChunkVectors: {
+        toArray: jest.fn(async () => {
+          ensureDocRegistryFromStoredRows();
+          return hybridChunkVectors.map((row) => ({ ...row }));
+        }),
         orderBy: jest.fn((_field: string) => ({
           limit: (batchSize: number) => ({
-            toArray: async () =>
-              toPagedRows(
+            toArray: async () => {
+              ensureDocRegistryFromStoredRows();
+              return toPagedRows(
                 hybridChunkVectors,
-                (row) => row.filePath,
+                (row) => generationKeyForRow(row),
                 null,
                 batchSize,
-              ),
+              );
+            },
           }),
         })),
         where: jest.fn((_field: string) => ({
@@ -719,7 +837,7 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
               toArray: async () =>
                 toPagedRows(
                   hybridChunkVectors,
-                  (row) => row.filePath,
+                  (row) => generationKeyForRow(row),
                   lastPath,
                   batchSize,
                 ),
@@ -728,7 +846,9 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
         })),
         bulkGet: jest.fn(async (paths: readonly string[]) =>
           paths.map((path) => {
-            const row = hybridChunkVectors.find((item) => item.filePath === path);
+            const row =
+              findByGenerationKey(hybridChunkVectors, path) ??
+              hybridChunkVectors.find((item) => item.filePath === path);
             return row ? { ...row } : undefined;
           }),
         ),
@@ -739,29 +859,59 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
         put: jest.fn(async (row: Record<string, any> & { filePath: string }) => {
           upsertFilePathRow(hybridChunkVectors, row);
         }),
+        bulkDelete: jest.fn(async (ids: readonly string[]) => {
+          const idSet = new Set(ids);
+          for (let index = hybridChunkVectors.length - 1; index >= 0; index--) {
+            if (idSet.has(generationKeyForRow(hybridChunkVectors[index]))) {
+              hybridChunkVectors.splice(index, 1);
+            }
+          }
+        }),
       },
       fileSnapshots: {
         get: jest.fn(async (filePath: string) => {
-          const row = fileSnapshots.find((item) => item.filePath === filePath);
+          const row =
+            findByGenerationKey(fileSnapshots, filePath) ??
+            fileSnapshots.find((item) => item.filePath === filePath);
           return row ? { ...row } : undefined;
         }),
         bulkGet: jest.fn(async (paths: readonly string[]) =>
           paths.map((path) => {
-            const row = fileSnapshots.find((item) => item.filePath === path);
+            const row =
+              findByGenerationKey(fileSnapshots, path) ??
+              fileSnapshots.find((item) => item.filePath === path);
             return row ? { ...row } : undefined;
           }),
         ),
+        toArray: jest.fn(async () => {
+          ensureDocRegistryFromStoredRows();
+          return fileSnapshots.map((row) => ({ ...row }));
+        }),
+        bulkDelete: jest.fn(async (ids: readonly string[]) => {
+          const idSet = new Set(ids);
+          for (let index = fileSnapshots.length - 1; index >= 0; index--) {
+            if (idSet.has(generationKeyForRow(fileSnapshots[index]))) {
+              fileSnapshots.splice(index, 1);
+            }
+          }
+        }),
       },
       hybridDirtyShadows: {
+        toArray: jest.fn(async () => {
+          ensureDocRegistryFromStoredRows();
+          return hybridDirtyShadows.map((row) => ({ ...row }));
+        }),
         orderBy: jest.fn((_field: string) => ({
           limit: (batchSize: number) => ({
-            toArray: async () =>
-              toPagedRows(
+            toArray: async () => {
+              ensureDocRegistryFromStoredRows();
+              return toPagedRows(
                 hybridDirtyShadows,
-                (row) => row.filePath,
+                (row) => generationKeyForRow(row),
                 null,
                 batchSize,
-              ),
+              );
+            },
           }),
         })),
         where: jest.fn((_field: string) => ({
@@ -770,60 +920,83 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
               toArray: async () =>
                 toPagedRows(
                   hybridDirtyShadows,
-                  (row) => row.filePath,
-                  lastPath,
-                  batchSize,
-                ),
+                    (row) => generationKeyForRow(row),
+                    lastPath,
+                    batchSize,
+                  ),
             }),
           }),
         })),
         get: jest.fn(async (filePath: string) => {
-          const row = hybridDirtyShadows.find((item) => item.filePath === filePath);
+          const row =
+            findByGenerationKey(hybridDirtyShadows, filePath) ??
+            hybridDirtyShadows.find((item) => item.filePath === filePath);
           return row ? { ...row } : undefined;
         }),
         bulkGet: jest.fn(async (paths: readonly string[]) =>
           paths.map((path) => {
-            const row = hybridDirtyShadows.find((item) => item.filePath === path);
+            const row =
+              findByGenerationKey(hybridDirtyShadows, path) ??
+              hybridDirtyShadows.find((item) => item.filePath === path);
             return row ? { ...row } : undefined;
           }),
         ),
+        bulkDelete: jest.fn(async (ids: readonly string[]) => {
+          const idSet = new Set(ids);
+          for (let index = hybridDirtyShadows.length - 1; index >= 0; index--) {
+            if (idSet.has(generationKeyForRow(hybridDirtyShadows[index]))) {
+              hybridDirtyShadows.splice(index, 1);
+            }
+          }
+        }),
       },
       hybridIndexedFileRefs: {
-        toArray: jest.fn(async () =>
-          hybridIndexedFileRefs.map((ref) => ({ ...ref })),
-        ),
+        toArray: jest.fn(async () => {
+          ensureDocRegistryFromStoredRows();
+          return hybridIndexedFileRefs.map((ref) => ({ ...ref }));
+        }),
         bulkGet: jest.fn(async (paths: readonly string[]) =>
           paths.map((path) => {
-            const row = hybridIndexedFileRefs.find((item) => item.path === path);
+            ensureDocRegistryFromStoredRows();
+            const row =
+              hybridIndexedFileRefs.find((item) => item.docRef === path) ??
+              hybridIndexedFileRefs.find((item) => item.path === path);
             return row ? { ...row } : undefined;
           }),
         ),
         orderBy: jest.fn((_field: string) => ({
           limit: (batchSize: number) => ({
-            toArray: async () =>
-              toPagedRows(
+            toArray: async () => {
+              ensureDocRegistryFromStoredRows();
+              return toPagedRows(
                 hybridIndexedFileRefs,
-                (row) => row.path,
+                (row) => row.docRef ?? row.path,
                 null,
                 batchSize,
-              ),
+              );
+            },
           }),
         })),
         where: jest.fn((_field: string) => ({
-          above: (lastPath: string) => ({
+          above: (lastPath: string | number) => ({
             limit: (batchSize: number) => ({
-              toArray: async () =>
-                toPagedRows(
+              toArray: async () => {
+                ensureDocRegistryFromStoredRows();
+                return toPagedRows(
                   hybridIndexedFileRefs,
-                  (row) => row.path,
+                  (row) => row.docRef ?? row.path,
                   lastPath,
                   batchSize,
-                ),
+                );
+              },
             }),
           }),
         })),
         get: jest.fn(async (path: string) => {
-          const row = hybridIndexedFileRefs.find((item) => item.path === path);
+          ensureDocRegistryFromStoredRows();
+          const row =
+            hybridIndexedFileRefs.find((item) => item.docRef === path) ??
+            hybridIndexedFileRefs.find((item) => item.path === path);
           return row ? { ...row } : undefined;
         }),
         put: jest.fn(async (row: Record<string, any> & { path: string }) => {
@@ -836,6 +1009,14 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
             }
           },
         ),
+        bulkDelete: jest.fn(async (docRefs: readonly number[]) => {
+          const docRefSet = new Set(docRefs);
+          for (let index = hybridIndexedFileRefs.length - 1; index >= 0; index--) {
+            if (docRefSet.has(hybridIndexedFileRefs[index].docRef)) {
+              hybridIndexedFileRefs.splice(index, 1);
+            }
+          }
+        }),
       },
       indexArtifactState: {
         get: jest.fn(async (id: string) => {
@@ -1549,7 +1730,7 @@ describe("DataManager integration", () => {
 
     const latestNotice = MyNotice.messages[MyNotice.messages.length - 1];
     expect(latestNotice).toContain("Lexical memory report");
-    expect(latestNotice).toContain("Persisted lexical snapshot: 3.48 KB");
+    expect(latestNotice).toContain("Persisted lexical snapshot: 3.5 KB");
     expect(latestNotice).toContain("Coverage resident hot");
     expect(latestNotice).toContain("Coverage cold owned");
     expect(latestNotice).toContain("Coverage resident major groups");
@@ -3025,8 +3206,8 @@ describe("DataManager integration", () => {
     );
 
     expect(database.db.hybridIndexedFileRefs.bulkGet).toHaveBeenCalledWith([
-      corruptFile.path,
-      healthyFile.path,
+      expect.any(Number),
+      expect.any(Number),
     ]);
     expect(hybridEngine.deleteFile).toHaveBeenCalledWith(corruptFile.path, {
       persistIndices: false,
@@ -3495,4 +3676,3 @@ describe("DataManager integration", () => {
     expect(lexicalEngine.buildBodyHanExactSidecarDocument).not.toHaveBeenCalled();
   });
 });
-
