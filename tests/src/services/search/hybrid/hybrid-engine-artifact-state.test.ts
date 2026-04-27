@@ -112,12 +112,16 @@ jest.mock("src/services/search/hybrid/hybrid-profiler", () => ({
   recordHybridProfileMetric: jest.fn(),
 }));
 
-import { chunkVectorShardToRow } from "src/services/search/hybrid/hybrid-store";
+import {
+  chunkVectorShardToRow,
+  type ChunkVectorShardRow,
+} from "src/services/search/hybrid/hybrid-store";
 import { buildIndexArtifactStateId } from "src/services/obsidian/user-data/index-artifact-state";
 
 type HybridChunkRow = {
   id?: number;
-  filePath: string;
+  docRef: number;
+  generation: number;
   chunkIndex: number;
   startOffset: number;
   endOffset: number;
@@ -147,14 +151,14 @@ function createChunkTable(initialRows: HybridChunkRow[] = []) {
       return ids.map((id) => cloneRow(rows.find((row) => row.id === id)));
     },
     where(field: string) {
-      if (field !== "filePath") {
+      if (field !== "docRef") {
         throw new Error(`Unsupported chunk field: ${field}`);
       }
       return {
-        equals(filePath: string) {
+        equals(docRef: number) {
           const filtered = () =>
             rows
-              .filter((row) => row.filePath === filePath)
+              .filter((row) => row.docRef === docRef)
               .map((row) => ({ ...row }));
           return {
             toArray: async () => filtered(),
@@ -288,7 +292,8 @@ describe("HybridEngine artifact state", () => {
     const chunkTable = createChunkTable([
       {
         id: 11,
-        filePath: "notes/a.md",
+        docRef: 1,
+        generation: 100,
         chunkIndex: 0,
         startOffset: 0,
         endOffset: 5,
@@ -299,20 +304,11 @@ describe("HybridEngine artifact state", () => {
       },
     ]);
     const vectorTable = createKeyedTable<
-      {
-        filePath: string;
-        precision: string;
-        dim: number;
-        chunkCount: number;
-        generation?: number;
-        chunkIds: Blob;
-        vectorData: Blob;
-        scaleData?: Blob;
-      },
-      "filePath"
-    >("filePath", [
+      ChunkVectorShardRow,
+      "id"
+    >("id", [
       chunkVectorShardToRow({
-        filePath: "notes/a.md",
+        docRef: 1,
         precision: "int8",
         dim: 3,
         chunkCount: 1,
@@ -323,13 +319,14 @@ describe("HybridEngine artifact state", () => {
       }),
     ]);
     const indexedRefTable = createKeyedTable<
-      { path: string; generation: number; state?: string },
-      "path"
-    >("path", [
+      { docRef: number; generation: number; state?: string; chunkCount: number },
+      "docRef"
+    >("docRef", [
       {
-        path: "notes/a.md",
+        docRef: 1,
         generation: 100,
         state: "ready",
+        chunkCount: 1,
       },
     ]);
     const artifactStateTable = createKeyedTable<
@@ -347,6 +344,10 @@ describe("HybridEngine artifact state", () => {
 
     mockInstanceMap.set(require("src/services/database/database").Database, {
       db: {
+        transaction: async (_mode: string, ...args: any[]) => {
+          const work = args[args.length - 1];
+          return await work();
+        },
         hybridChunks: chunkTable,
         hybridChunkVectors: vectorTable,
         hybridIndexedFileRefs: indexedRefTable,

@@ -1,4 +1,4 @@
-import {
+﻿import {
   analyzeHybridStoredFileConsistency,
   normalizeHybridIndexedFileState,
 } from "src/services/search/hybrid/hybrid-consistency";
@@ -34,7 +34,7 @@ describe("Hybrid stored file consistency", () => {
       chunkCount: 2,
       snapshot: { generation: 12 },
       indexedFileRef: {
-        path: "a.md",
+        docRef: 1,
         state: "ready",
         chunkCount: 2,
         generation: 12,
@@ -52,7 +52,7 @@ describe("Hybrid stored file consistency", () => {
       chunkCount: 0,
       snapshot: { generation: 15 },
       indexedFileRef: {
-        path: "empty.md",
+        docRef: 1,
         state: "ready",
         chunkCount: 0,
         generation: 15,
@@ -72,7 +72,7 @@ describe("Hybrid stored file consistency", () => {
       snapshot: { generation: 22 },
       vectorInfo: { precision: "int8", chunkCount: 2, generation: 22 },
       indexedFileRef: {
-        path: "b.md",
+        docRef: 1,
         state: "lexical_only",
         chunkCount: 2,
         generation: 22,
@@ -91,7 +91,7 @@ describe("Hybrid stored file consistency", () => {
       snapshot: { generation: 30 },
       vectorInfo: { precision: "float16", chunkCount: 4, generation: 31 },
       indexedFileRef: {
-        path: "c.md",
+        docRef: 1,
         state: "ready",
         chunkCount: 4,
         generation: 30,
@@ -112,7 +112,7 @@ describe("Hybrid stored file consistency", () => {
       shadowSnapshot: { generation: 35 },
       vectorInfo: { precision: "int8", chunkCount: 2, generation: 35 },
       indexedFileRef: {
-        path: "shadow.md",
+        docRef: 1,
         state: "ready",
         chunkCount: 2,
         generation: 35,
@@ -134,7 +134,7 @@ describe("Hybrid stored file consistency", () => {
       shadowSnapshot: { generation: 42 },
       vectorInfo: { precision: "int8", chunkCount: 2, generation: 40 },
       indexedFileRef: {
-        path: "mismatch.md",
+        docRef: 1,
         state: "ready",
         chunkCount: 2,
         generation: 40,
@@ -165,7 +165,7 @@ describe("Hybrid stored file consistency", () => {
       chunkCount: 1,
       snapshot: { generation: 60 },
       indexedFileRef: {
-        path: "d.md",
+        docRef: 1,
         state: "pending",
         chunkCount: 1,
         generation: 60,

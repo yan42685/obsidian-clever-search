@@ -20,8 +20,8 @@ export type HeadingOutlineEntry = {
 
 export type Chunk = {
 	id: number;
-	docRef?: DocRef;
-	generation?: number;
+	docRef: DocRef;
+	generation: number;
 	filePath: string;
 	chunkIndex: number;
 	text: string;
@@ -47,12 +47,11 @@ export type Float16Vector = {
 export type StoredVector = Int8Vector | Float16Vector;
 
 export type ChunkVectorShard = {
-	docRef?: DocRef;
-	filePath: string;
+	docRef: DocRef;
 	precision: VectorPrecision;
 	dim: number;
 	chunkCount: number;
-	generation?: number;
+	generation: number;
 	chunkIds: Uint32Array;
 	vectorData: Int8Array | Uint16Array;
 	scaleData?: Float32Array;

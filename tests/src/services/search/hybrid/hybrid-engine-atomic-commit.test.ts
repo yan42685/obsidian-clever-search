@@ -54,16 +54,18 @@ import { HybridEngine } from "src/services/search/hybrid/hybrid-engine";
 describe("HybridEngine per-file atomic commit", () => {
   let db: Dexie & {
     fileSnapshots: Dexie.Table<any, string>;
-    hybridIndexedFileRefs: Dexie.Table<any, string>;
+    hybridIndexedFileRefs: Dexie.Table<any, number>;
     hybridDirtyShadows: Dexie.Table<any, string>;
+    docRegistry: Dexie.Table<any, number>;
   };
 
   beforeEach(async () => {
     db = new Dexie(`hybrid-atomic-commit-${Date.now()}-${Math.random()}`) as typeof db;
     db.version(1).stores({
-      fileSnapshots: "filePath",
-      hybridIndexedFileRefs: "path",
-      hybridDirtyShadows: "filePath",
+      fileSnapshots: "id, docRef, generation, [docRef+generation]",
+      hybridIndexedFileRefs: "docRef, generation, state",
+      hybridDirtyShadows: "id, docRef, generation, [docRef+generation]",
+      docRegistry: "docRef, path, deleted, liveGeneration, denseReadyGeneration, denseTargetGeneration, denseState, denseServeUntil, updatedAt",
     });
     await db.open();
   });
@@ -94,29 +96,37 @@ describe("HybridEngine per-file atomic commit", () => {
     };
     engine._hasStoredLexicalFallbackData = false;
 
-    await db.hybridIndexedFileRefs.put({
+    await db.docRegistry.put({
+      docRef: 42,
       path: filePath,
-      state: "pending",
+      deleted: false,
+      liveGeneration: 7,
+      updatedAt: 50,
+    });
+    await db.hybridIndexedFileRefs.put({
+      docRef: 42,
+      state: "ready",
       generation: 6,
-      chunkCount: 0,
+      chunkCount: 1,
       vectorPrecision: null,
       indexedAt: 100,
     });
     await db.hybridDirtyShadows.put({
-      filePath,
-      updatedAt: 100,
+      id: "42:7",
+      docRef: 42,
+      generation: 7,
+      plainText: "dirty",
     });
 
     await engine.commitHybridFileIndex({
       snapshot: {
-        filePath,
+        id: "42:7",
         plainText: "atomic commit body",
         generation: 7,
         docRef: 42,
       },
       ref: {
         docRef: 42,
-        path: filePath,
         state: "ready",
         generation: 7,
         chunkCount: 3,
@@ -126,20 +136,26 @@ describe("HybridEngine per-file atomic commit", () => {
       },
     });
 
-    await expect(db.fileSnapshots.get(filePath)).resolves.toMatchObject({
-      filePath,
+    await expect(db.fileSnapshots.get("42:7")).resolves.toMatchObject({
+      id: "42:7",
       plainText: "atomic commit body",
       generation: 7,
       docRef: 42,
     });
-    await expect(db.hybridIndexedFileRefs.get(filePath)).resolves.toMatchObject({
-      path: filePath,
+    await expect(db.hybridIndexedFileRefs.get(42)).resolves.toMatchObject({
+      docRef: 42,
       state: "ready",
       generation: 7,
       chunkCount: 3,
     });
-    await expect(db.hybridDirtyShadows.get(filePath)).resolves.toBeUndefined();
-    expect(notifyHybridIndexedRefsChanged).toHaveBeenCalledWith([filePath]);
+    await expect(db.hybridDirtyShadows.get("42:7")).resolves.toBeUndefined();
+    await expect(db.docRegistry.get(42)).resolves.toMatchObject({
+      denseReadyGeneration: 7,
+      denseTargetGeneration: 7,
+      denseState: "ready",
+      lastDenseSuccessAt: 200,
+    });
+    expect(notifyHybridIndexedRefsChanged).toHaveBeenCalled();
     expect(engine._hasStoredLexicalFallbackData).toBe(true);
   });
 
@@ -157,9 +173,15 @@ describe("HybridEngine per-file atomic commit", () => {
       setting: { hybrid: { vectorCompression: string } };
       embedder: { embedQuery: jest.Mock };
       hnswSmall: { search: jest.Mock };
-      db: { db: { hybridChunks: { bulkGet: jest.Mock } } };
+      db: {
+        db: {
+          hybridChunks: { bulkGet: jest.Mock };
+          docRegistry: { bulkGet: jest.Mock };
+          hybridIndexedFileRefs: { bulkGet: jest.Mock };
+          hybridDirtyShadows: { get: jest.Mock };
+        };
+      };
       fileSnapshotStore: {
-        getHybridIndexedFileRefs: jest.Mock;
         readIndexedTextSnapshots: jest.Mock;
       };
     };
@@ -174,7 +196,7 @@ describe("HybridEngine per-file atomic commit", () => {
           bulkGet: jest.fn(async () => [
             {
               id: 1,
-              filePath,
+              docRef: 42,
               generation: 7,
               chunkIndex: 0,
               startOffset: 0,
@@ -186,21 +208,31 @@ describe("HybridEngine per-file atomic commit", () => {
             },
           ]),
         },
-      },
-    };
-    engine.fileSnapshotStore = {
-      getHybridIndexedFileRefs: jest.fn(async () =>
-        new Map([
-          [
-            filePath,
+        docRegistry: {
+          bulkGet: jest.fn(async () => [
             {
+              docRef: 42,
               path: filePath,
+              deleted: false,
+              liveGeneration: 7,
+            },
+          ]),
+        },
+        hybridIndexedFileRefs: {
+          bulkGet: jest.fn(async () => [
+            {
+              docRef: 42,
               state: "pending",
               generation: 7,
             },
-          ],
-        ]),
-      ),
+          ]),
+        },
+        hybridDirtyShadows: {
+          get: jest.fn(async () => undefined),
+        },
+      },
+    };
+    engine.fileSnapshotStore = {
       readIndexedTextSnapshots: jest.fn(async () =>
         new Map([
           [
@@ -222,18 +254,13 @@ describe("HybridEngine per-file atomic commit", () => {
     ).resolves.toEqual([]);
     expect(engine.buildDenseDisplayCandidate).not.toHaveBeenCalled();
 
-    engine.fileSnapshotStore.getHybridIndexedFileRefs.mockResolvedValueOnce(
-      new Map([
-        [
-          filePath,
-          {
-            path: filePath,
-            state: "ready",
-            generation: 7,
-          },
-        ],
-      ]),
-    );
+    engine.db.db.hybridIndexedFileRefs.bulkGet.mockResolvedValueOnce([
+      {
+        docRef: 42,
+        state: "ready",
+        generation: 7,
+      },
+    ]);
 
     await expect(
       engine.recallDenseDisplayCandidates("query", [], 10),

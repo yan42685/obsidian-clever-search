@@ -1,4 +1,4 @@
-jest.mock("obsidian", () => ({
+﻿jest.mock("obsidian", () => ({
   TFile: class TFile {},
 }));
 
@@ -118,10 +118,10 @@ describe("HybridBootstrapCoordinator", () => {
       [
         "docs/old.md",
         {
-          path: "docs/old.md",
           docRef: 7,
           generation: 150,
           state: "ready",
+          chunkCount: 1,
         },
       ],
     ]);

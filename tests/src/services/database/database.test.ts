@@ -56,7 +56,7 @@ describe("Database Dexie upgrade recovery", () => {
     }
   });
 
-  test("upgrades the old lexical evidence primary keys through the 28.3 bridge", async () => {
+  test("rebuilds an old path-keyed database instead of keeping bridge compatibility", async () => {
     const appId = `db-upgrade-${Date.now()}`;
     const dbName = `clever-search/${appId}`;
     createdDbNames.push(dbName);
@@ -118,9 +118,14 @@ describe("Database Dexie upgrade recovery", () => {
 
     const report = await database.openAndConsumeSchemaUpgradeReport();
 
-    expect(report).toEqual({
+    expect(report).toMatchObject({
       schemaUpgradeDetected: true,
-      recovery: null,
+      recovery: {
+        mode: "full-reset",
+        targetVersion: database.db.dbVersion,
+        initialErrorName: "UpgradeError",
+        preservedTokenStats: true,
+      },
     });
     await expect(database.db.lexicalBodyEvidence.count()).resolves.toBe(0);
     await expect(database.db.lexicalHanDocEvidence.count()).resolves.toBe(0);
@@ -130,7 +135,7 @@ describe("Database Dexie upgrade recovery", () => {
     database.db.close();
   });
 
-  test("upgrades a 29.4 database by creating the V3 shard and snapshot stores", async () => {
+  test("rebuilds a 29.4 path-keyed Hybrid database and creates production stores", async () => {
     const appId = `db-v3-stores-${Date.now()}`;
     const dbName = `clever-search/${appId}`;
     createdDbNames.push(dbName);
@@ -169,9 +174,13 @@ describe("Database Dexie upgrade recovery", () => {
 
     const report = await database.openAndConsumeSchemaUpgradeReport();
 
-    expect(report).toEqual({
+    expect(report).toMatchObject({
       schemaUpgradeDetected: true,
-      recovery: null,
+      recovery: {
+        mode: "full-reset",
+        targetVersion: database.db.dbVersion,
+        initialErrorName: "UpgradeError",
+      },
     });
     await expect(database.db.coverageLexicalV3ShardRegistry.count()).resolves.toBe(0);
     await expect(database.db.coverageLexicalV3Invalidations.count()).resolves.toBe(0);

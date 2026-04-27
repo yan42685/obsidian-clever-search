@@ -20,6 +20,7 @@ export function buildHybridLexicalLaneDisplayCandidate(params: {
 		candidate,
 	});
 	return {
+		docRef: candidate.docRef,
 		filePath: candidate.filePath,
 		snapshotGeneration: candidate.snapshotGeneration,
 		snapshotSource: candidate.snapshotSource,

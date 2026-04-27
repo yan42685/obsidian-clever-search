@@ -7,7 +7,10 @@ import type {
 	LexicalFuzzyRescueRow,
 	LexicalIndexedMetadataRow,
 } from "src/services/database/database";
-import type { HybridIndexedFileRef } from "src/services/search/hybrid/hybrid-store";
+import {
+	buildHybridGenerationKey,
+	type HybridIndexedFileRef,
+} from "src/services/search/hybrid/hybrid-store";
 import type {
 	ResidentFuzzyRescueIndex,
 } from "src/services/search/coverage-lexical-v3/layout/types";
@@ -18,10 +21,10 @@ import type { Database } from "src/services/database/database";
 const textEncoder = new TextEncoder();
 
 type PersistedFileSnapshotRow = {
-	docRef?: number;
-	filePath: string;
+	id: string;
+	docRef: number;
 	plainText: string;
-	generation?: number;
+	generation: number;
 };
 
 function estimateUtf8Bytes(text: string): number {
@@ -197,10 +200,10 @@ function unpackUnsignedLane(
 }
 
 type PersistedFileShadowRow = {
-	docRef?: number;
-	filePath: string;
+	id: string;
+	docRef: number;
 	plainText: string;
-	generation?: number;
+	generation: number;
 };
 
 type IndexedTextRequest = {
@@ -434,9 +437,18 @@ export class FileSnapshotStore {
 	): Promise<FileSnapshotAvailabilityDebugInfo> {
 		const file = this.resolveFile(path);
 		const current = this.getCurrentFile(path, false);
+		const docRegistryEntry = await this.database.getDocRegistryEntry(path);
+		const expectedKey =
+			docRegistryEntry == null || expectedGeneration == null
+				? undefined
+				: buildHybridGenerationKey(docRegistryEntry.docRef, expectedGeneration);
 		const [persistedRow, shadowRow] = await Promise.all([
-			this.database.db.fileSnapshots.get(path),
-			this.database.db.hybridDirtyShadows.get(path),
+			expectedKey == null
+				? Promise.resolve(undefined)
+				: this.database.db.fileSnapshots.get(expectedKey),
+			expectedKey == null
+				? Promise.resolve(undefined)
+				: this.database.db.hybridDirtyShadows.get(expectedKey),
 		]);
 		return {
 			path,
@@ -766,25 +778,39 @@ export class FileSnapshotStore {
 	async notifyHybridIndexedRefsChanged(
 		filePaths?: readonly string[],
 	): Promise<void> {
+		const shadowRowsForAll =
+			filePaths === undefined
+				? await this.database.db.hybridDirtyShadows.orderBy(":id").toArray()
+				: [];
 		const paths =
 			filePaths !== undefined
 				? Array.from(new Set(filePaths))
-				: (
-						await this.database.db.hybridDirtyShadows
-							.orderBy(":id")
-							.toArray()
-					).map((row) => row.filePath);
+				: this.pathsForDocRefs(
+						await this.database.listDocRegistryEntries(),
+						shadowRowsForAll.map((row) => row.docRef),
+					);
 		if (paths.length === 0) {
 			return;
 		}
 
-		const [shadowRows, indexedRefs, snapshotRows] = await Promise.all([
-			this.database.db.hybridDirtyShadows.bulkGet(paths),
-			this.database.db.hybridIndexedFileRefs.bulkGet(paths),
-			this.database.db.fileSnapshots.bulkGet(paths),
+		const registryRowsByPath = await this.database.getDocRegistryEntries(paths);
+		const docRefs = paths.map((path) => registryRowsByPath.get(path)?.docRef ?? -1);
+		const indexedRefs = await this.database.db.hybridIndexedFileRefs.bulkGet(docRefs);
+		const shadowKeys = paths.map((path, index) => {
+			const docRef = docRefs[index];
+			const generation = indexedRefs[index]?.generation;
+			return docRef == null || generation == null
+				? undefined
+				: buildHybridGenerationKey(docRef, generation);
+		});
+		const safeShadowKeys = shadowKeys.map((key) => key ?? "__missing__");
+		const snapshotKeys = safeShadowKeys;
+		const [shadowRows, snapshotRows] = await Promise.all([
+			this.database.db.hybridDirtyShadows.bulkGet(safeShadowKeys),
+			this.database.db.fileSnapshots.bulkGet(snapshotKeys),
 		]);
 
-		const stalePaths: string[] = [];
+		const staleKeys: string[] = [];
 		for (let index = 0; index < paths.length; index++) {
 			const shadowRow = shadowRows[index];
 			if (!shadowRow) {
@@ -800,14 +826,14 @@ export class FileSnapshotStore {
 				shadowGeneration === indexedGeneration &&
 				snapshotGeneration !== indexedGeneration;
 			if (!shouldKeep) {
-				stalePaths.push(paths[index]);
+				staleKeys.push(shadowRow.id);
 			}
 		}
 
-		if (stalePaths.length === 0) {
+		if (staleKeys.length === 0) {
 			return;
 		}
-		await this.database.db.hybridDirtyShadows.bulkDelete(stalePaths);
+		await this.database.db.hybridDirtyShadows.bulkDelete(staleKeys);
 	}
 
 	async ensureDocRegistryEntry(
@@ -841,25 +867,58 @@ export class FileSnapshotStore {
 	}
 
 	async putHybridIndexedFileRef(ref: HybridIndexedFileRef): Promise<void> {
-		const docRegistryEntry = await this.database.ensureDocRegistryEntry({
-			docRef: ref.docRef,
-			path: ref.path,
-			generation: ref.generation,
-			deleted: false,
-		});
-		await this.database.db.hybridIndexedFileRefs.put({
-			...ref,
-			docRef: ref.docRef ?? docRegistryEntry.docRef,
-		});
-		if (ref.state !== "pending") {
-			await this.notifyHybridIndexedRefsChanged([ref.path]);
+		const docRegistryEntry = await this.database.db.docRegistry.get(ref.docRef);
+		const now = Date.now();
+		if (ref.state === "pending" || ref.state === "failed") {
+			if (docRegistryEntry != null) {
+				await this.database.db.docRegistry.put({
+					...docRegistryEntry,
+					denseTargetGeneration: ref.generation,
+					denseState: ref.state,
+					lastDenseAttemptAt:
+						ref.state === "pending"
+							? ref.indexedAt ?? now
+							: docRegistryEntry.lastDenseAttemptAt,
+					nextDenseAttemptAt:
+						ref.state === "failed" ? ref.indexedAt ?? now : docRegistryEntry.nextDenseAttemptAt,
+					denseAttemptCount:
+						ref.state === "pending"
+							? (docRegistryEntry.denseAttemptCount ?? 0) + 1
+							: docRegistryEntry.denseAttemptCount,
+					denseFailureKind:
+						ref.state === "failed" ? "embedding_failed" : undefined,
+					updatedAt: now,
+				});
+			}
+			return;
 		}
+		await this.database.db.hybridIndexedFileRefs.put(ref);
+		if (docRegistryEntry != null) {
+			await this.database.db.docRegistry.put({
+				...docRegistryEntry,
+				denseReadyGeneration:
+					ref.state === "ready" ? ref.generation : docRegistryEntry.denseReadyGeneration,
+				denseTargetGeneration: ref.generation,
+				denseState: ref.state,
+				lastDenseSuccessAt:
+					ref.state === "ready" ? ref.indexedAt ?? now : docRegistryEntry.lastDenseSuccessAt,
+				lastDenseAttemptAt: ref.indexedAt ?? docRegistryEntry.lastDenseAttemptAt,
+				denseFailureKind: undefined,
+				updatedAt: now,
+			});
+		}
+		await this.notifyHybridIndexedRefsChanged(
+			docRegistryEntry == null ? undefined : [docRegistryEntry.path],
+		);
 	}
 
 	async getHybridIndexedFileRef(
 		filePath: string,
 	): Promise<HybridIndexedFileRef | undefined> {
-		return await this.database.db.hybridIndexedFileRefs.get(filePath);
+		const docRegistryEntry = await this.database.getDocRegistryEntry(filePath);
+		return docRegistryEntry == null
+			? undefined
+			: await this.database.db.hybridIndexedFileRefs.get(docRegistryEntry.docRef);
 	}
 
 	async getHybridIndexedFileRefs(
@@ -869,7 +928,10 @@ export class FileSnapshotStore {
 		if (uniquePaths.length === 0) {
 			return new Map<string, HybridIndexedFileRef>();
 		}
-		const rows = await this.database.db.hybridIndexedFileRefs.bulkGet(uniquePaths);
+		const registryRowsByPath = await this.database.getDocRegistryEntries(uniquePaths);
+		const rows = await this.database.db.hybridIndexedFileRefs.bulkGet(
+			uniquePaths.map((path) => registryRowsByPath.get(path)?.docRef ?? -1),
+		);
 		const refs = new Map<string, HybridIndexedFileRef>();
 		for (let index = 0; index < uniquePaths.length; index++) {
 			const row = rows[index];
@@ -885,13 +947,34 @@ export class FileSnapshotStore {
 	}
 
 	async deleteHybridIndexedFileRef(filePath: string): Promise<void> {
-		await this.database.db.hybridIndexedFileRefs.delete(filePath);
+		const docRegistryEntry = await this.database.getDocRegistryEntry(filePath);
+		if (docRegistryEntry != null) {
+			await this.database.db.hybridIndexedFileRefs.delete(docRegistryEntry.docRef);
+		}
 		await this.notifyHybridIndexedRefsChanged([filePath]);
 	}
 
 	async clearHybridIndexedFileRefs(): Promise<void> {
 		await this.database.db.hybridIndexedFileRefs.clear();
 		await this.notifyHybridIndexedRefsChanged();
+	}
+
+	private pathsForDocRefs(
+		registryRows: readonly DocRegistryRow[],
+		docRefs: readonly number[],
+	): string[] {
+		const pathByDocRef = new Map(
+			registryRows
+				.filter((row) => !row.deleted)
+				.map((row) => [row.docRef, row.path] as const),
+		);
+		return Array.from(
+			new Set(
+				docRefs
+					.map((docRef) => pathByDocRef.get(docRef))
+					.filter((path): path is string => typeof path === "string"),
+			),
+		);
 	}
 
 	async removeFiles(filePaths: readonly string[]): Promise<void> {
@@ -912,11 +995,17 @@ export class FileSnapshotStore {
 				this.deleteCurrentFile(path);
 			}
 		}
-		await this.deleteRowsNotIn(
+		const docRegistryEntries = await this.database.listDocRegistryEntries();
+		const validDocRefs = new Set(
+			docRegistryEntries
+				.filter((row) => validPaths.has(row.path) && !row.deleted)
+				.map((row) => row.docRef),
+		);
+		await this.deleteDocRefRowsNotIn(
 			() => this.database.db.fileSnapshots,
-			(paths) => this.database.db.fileSnapshots.bulkDelete(paths),
-			validPaths,
-			(row: { filePath: string }) => row.filePath,
+			(keys) => this.database.db.fileSnapshots.bulkDelete(keys),
+			validDocRefs,
+			(row: PersistedFileSnapshotRow) => row.id,
 		);
 		await this.deleteRowsNotIn(
 			() => this.database.db.lexicalIndexedMetadata,
@@ -924,19 +1013,18 @@ export class FileSnapshotStore {
 			validPaths,
 			(row: { filePath: string }) => row.filePath,
 		);
-		await this.deleteRowsNotIn(
+		await this.deleteDocRefRowsNotIn(
 			() => this.database.db.hybridIndexedFileRefs,
-			(paths) => this.database.db.hybridIndexedFileRefs.bulkDelete(paths),
-			validPaths,
-			(row: { path: string }) => row.path,
+			(keys) => this.database.db.hybridIndexedFileRefs.bulkDelete(keys),
+			validDocRefs,
+			(row: HybridIndexedFileRef) => row.docRef,
 		);
-		await this.deleteRowsNotIn(
+		await this.deleteDocRefRowsNotIn(
 			() => this.database.db.hybridDirtyShadows,
-			(paths) => this.database.db.hybridDirtyShadows.bulkDelete(paths),
-			validPaths,
-			(row: { filePath: string }) => row.filePath,
+			(keys) => this.database.db.hybridDirtyShadows.bulkDelete(keys),
+			validDocRefs,
+			(row: PersistedFileShadowRow) => row.id,
 		);
-		const docRegistryEntries = await this.database.listDocRegistryEntries();
 		await Promise.all(
 			docRegistryEntries
 				.filter((row) => !validPaths.has(row.path))
@@ -962,7 +1050,13 @@ export class FileSnapshotStore {
 		) {
 			return cachedText;
 		}
-		const indexedSnapshot = await this.database.db.fileSnapshots.get(file.path);
+		const docRegistryEntry = await this.database.getDocRegistryEntry(file.path);
+		const indexedSnapshot =
+			docRegistryEntry == null
+				? undefined
+				: await this.database.db.fileSnapshots.get(
+						buildHybridGenerationKey(docRegistryEntry.docRef, docRegistryEntry.liveGeneration),
+					);
 		if (
 			indexedSnapshot &&
 			this.isIndexedSnapshotAligned(
@@ -1117,37 +1211,46 @@ export class FileSnapshotStore {
 		files: ReadonlyArray<IndexedTextPublishRequest>,
 	): Promise<void> {
 		await this.ensureCurrentEntriesForPublish(files);
-		const rows: PersistedFileSnapshotRow[] = [];
-		const persistedFiles: Array<{ path: string; generation?: number }> = [];
+		const candidates: Array<{
+			path: string;
+			text: string;
+			generation: number;
+		}> = [];
 		for (const file of files) {
 			const candidate = this.resolveIndexedPublishCandidate(file);
-			if (!candidate) {
+			if (!candidate || candidate.generation === undefined) {
 				continue;
 			}
-			rows.push({
-				filePath: file.path,
-				plainText: candidate.text,
-				generation: candidate.generation,
-			});
-			persistedFiles.push({
+			candidates.push({
 				path: file.path,
+				text: candidate.text,
 				generation: candidate.generation,
 			});
 		}
-		if (rows.length === 0) {
+		if (candidates.length === 0) {
 			return;
 		}
 		const docRegistryEntries = await this.database.ensureDocRegistryEntries(
-			persistedFiles.map((file) => ({
+			candidates.map((file) => ({
 				path: file.path,
 				generation: file.generation,
 				deleted: false,
 			})),
 		);
-		for (const row of rows) {
-			row.docRef = docRegistryEntries.get(row.filePath)?.docRef;
+		const rows: PersistedFileSnapshotRow[] = [];
+		for (const candidate of candidates) {
+			const docRegistryEntry = docRegistryEntries.get(candidate.path);
+			if (docRegistryEntry == null) {
+				continue;
+			}
+			rows.push({
+				id: buildHybridGenerationKey(docRegistryEntry.docRef, candidate.generation),
+				docRef: docRegistryEntry.docRef,
+				plainText: candidate.text,
+				generation: candidate.generation,
+			});
 		}
-		await this.preserveIndexedGenerationShadows(persistedFiles);
+		await this.preserveIndexedGenerationShadows(candidates);
 		await this.database.db.fileSnapshots.bulkPut(rows);
 	}
 
@@ -1177,10 +1280,19 @@ export class FileSnapshotStore {
 			return;
 		}
 		const uniquePaths = Array.from(new Set(filePaths));
+		const registryRowsByPath = await this.database.getDocRegistryEntries(uniquePaths);
+		const generationKeys = uniquePaths
+			.map((path) => {
+				const row = registryRowsByPath.get(path);
+				return row == null
+					? undefined
+					: buildHybridGenerationKey(row.docRef, row.liveGeneration);
+			})
+			.filter((key): key is string => key !== undefined);
 		await Promise.all([
-			this.database.db.fileSnapshots.bulkDelete(uniquePaths),
+			this.database.db.fileSnapshots.bulkDelete(generationKeys),
 			this.database.db.lexicalIndexedMetadata.bulkDelete(uniquePaths),
-			this.database.db.hybridDirtyShadows.bulkDelete(uniquePaths),
+			this.database.db.hybridDirtyShadows.bulkDelete(generationKeys),
 		]);
 	}
 
@@ -1224,7 +1336,18 @@ export class FileSnapshotStore {
 			return snapshots;
 		}
 
-		const persistedRows = await this.database.db.fileSnapshots.bulkGet(missingPaths);
+		const registryRowsByPath = await this.database.getDocRegistryEntries(missingPaths);
+		const persistedKeys = missingPaths.map((filePath) => {
+			const row = registryRowsByPath.get(filePath);
+			const expectedGeneration =
+				expectedGenerations?.get(filePath) ?? row?.liveGeneration;
+			return row == null || expectedGeneration == null
+				? undefined
+				: buildHybridGenerationKey(row.docRef, expectedGeneration);
+		});
+		const persistedRows = await this.database.db.fileSnapshots.bulkGet(
+			persistedKeys.map((key) => key ?? "__missing__"),
+		);
 		const shadowMissingPaths: string[] = [];
 		for (let index = 0; index < missingPaths.length; index++) {
 			const row = persistedRows[index];
@@ -1246,7 +1369,16 @@ export class FileSnapshotStore {
 			return snapshots;
 		}
 
-		const shadowRows = await this.database.db.hybridDirtyShadows.bulkGet(shadowMissingPaths);
+		const shadowKeys = shadowMissingPaths.map((filePath) => {
+			const registryRow = registryRowsByPath.get(filePath);
+			const expectedGeneration = expectedGenerations.get(filePath);
+			return registryRow == null || expectedGeneration == null
+				? undefined
+				: buildHybridGenerationKey(registryRow.docRef, expectedGeneration);
+		});
+		const shadowRows = await this.database.db.hybridDirtyShadows.bulkGet(
+			shadowKeys.map((key) => key ?? "__missing__"),
+		);
 		for (let index = 0; index < shadowMissingPaths.length; index++) {
 			const row = shadowRows[index];
 			if (!row) {
@@ -1256,8 +1388,9 @@ export class FileSnapshotStore {
 			if (!this.isGenerationMatch(row.generation, expectedGeneration)) {
 				continue;
 			}
-			snapshots.set(row.filePath, {
-				path: row.filePath,
+			const filePath = shadowMissingPaths[index];
+			snapshots.set(filePath, {
+				path: filePath,
 				text: row.plainText,
 				generation: row.generation,
 				source: "shadow",
@@ -1371,10 +1504,20 @@ export class FileSnapshotStore {
 			return;
 		}
 		const paths = dedupedFiles.map((file) => file.path);
-		const [indexedRefs, currentRows] = await Promise.all([
-			this.database.db.hybridIndexedFileRefs.bulkGet(paths),
-			this.database.db.fileSnapshots.bulkGet(paths),
-		]);
+		const registryRowsByPath = await this.database.getDocRegistryEntries(paths);
+		const docRefs = paths.map((path) => registryRowsByPath.get(path)?.docRef ?? -1);
+		const indexedRefs = await this.database.db.hybridIndexedFileRefs.bulkGet(docRefs);
+		const currentKeys = dedupedFiles.map((file, index) => {
+			const docRef = docRefs[index];
+			const generation =
+				indexedRefs[index]?.generation ?? registryRowsByPath.get(file.path)?.liveGeneration;
+			return docRef == null || generation == null
+				? undefined
+				: buildHybridGenerationKey(docRef, generation);
+		});
+		const currentRows = await this.database.db.fileSnapshots.bulkGet(
+			currentKeys.map((key) => key ?? "__missing__"),
+		);
 		const shadowRows: PersistedFileShadowRow[] = [];
 		for (let index = 0; index < dedupedFiles.length; index++) {
 			const indexedRef = indexedRefs[index];
@@ -1394,8 +1537,8 @@ export class FileSnapshotStore {
 				continue;
 			}
 			shadowRows.push({
-				docRef: currentRow.docRef ?? indexedRef.docRef,
-				filePath: currentRow.filePath,
+				id: buildHybridGenerationKey(currentRow.docRef, currentRow.generation),
+				docRef: currentRow.docRef,
 				plainText: currentRow.plainText,
 				generation: currentRow.generation,
 			});
@@ -1540,6 +1683,40 @@ export class FileSnapshotStore {
 			}
 
 			lastPath = getPath(rows[rows.length - 1]);
+		}
+	}
+
+	private async deleteDocRefRowsNotIn<Row extends { docRef: number }, Key>(
+		getTable: () => { orderBy: (index: string) => any; where: (index: string) => any },
+		deleteRows: (keys: Key[]) => Promise<void>,
+		validDocRefs: ReadonlySet<number>,
+		getKey: (row: Row) => Key,
+	): Promise<void> {
+		let lastDocRef: number | null = null;
+		while (true) {
+			const rows: Row[] =
+				lastDocRef === null
+					? await getTable()
+						.orderBy("docRef")
+						.limit(FileSnapshotStore.INDEXED_SNAPSHOT_SCAN_BATCH_SIZE)
+						.toArray()
+					: await getTable()
+						.where("docRef")
+						.above(lastDocRef)
+						.limit(FileSnapshotStore.INDEXED_SNAPSHOT_SCAN_BATCH_SIZE)
+						.toArray();
+			if (rows.length === 0) {
+				return;
+			}
+
+			const staleKeys = rows
+				.filter((row) => !validDocRefs.has(row.docRef))
+				.map((row) => getKey(row));
+			if (staleKeys.length > 0) {
+				await deleteRows(staleKeys);
+			}
+
+			lastDocRef = rows[rows.length - 1].docRef;
 		}
 	}
 
