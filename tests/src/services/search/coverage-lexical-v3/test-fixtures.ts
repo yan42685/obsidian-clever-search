@@ -195,6 +195,8 @@ export function createMinimalCandidate(
 			startedSurfaceGroupCount: 1,
 			crossScriptSatisfiedGroupCount: 1,
 		},
+		exactOrPrefixUnitCount:
+			overrides.exactOrPrefixUnitCount ?? overrides.exactUnitCount ?? 1,
 		exactUnitCount: overrides.exactUnitCount ?? 1,
 		completedHanSurfaceGroupCount: overrides.completedHanSurfaceGroupCount ?? 0,
 		hanSurfaceCompletionTierScoreTotal: overrides.hanSurfaceCompletionTierScoreTotal ?? 0,

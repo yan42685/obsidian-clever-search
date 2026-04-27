@@ -141,6 +141,7 @@ export type EvidencePackingProfile = Readonly<{
 	surfaceCoverageShapeKey: string;
 	realizedCoverageCount: number;
 	coverageGate: CoverageGateProfile;
+	exactOrPrefixUnitCount: number;
 	exactUnitCount: number;
 	completedHanSurfaceGroupCount: number;
 	hanSurfaceCompletionTierScoreTotal: number;

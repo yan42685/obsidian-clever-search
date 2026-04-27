@@ -30,6 +30,7 @@ const FUZZY_LOOKUP_BUDGET_MS = 8;
 const FUZZY_LOOKUP_TIME_CHECK_INTERVAL = 16;
 const FUZZY_LOOKUP_MAX_VERIFIED_CANDIDATES = 64;
 const FUZZY_LOOKUP_MATCH_LIMIT = 8;
+const MORPHOLOGY_LOOKUP_MATCH_LIMIT = 4;
 
 type PrefixLookupBudgetState = {
 	startedAtMs: number;
@@ -111,6 +112,14 @@ function lookupSortedQueryUnitFamilyMatches(
 	if (prefixMatches.length > 0) {
 		return prefixMatches;
 	}
+	const morphologyMatches = collectMorphologyMatches(
+		base,
+		queryUnit,
+		familyFlagsByFamilyId,
+	);
+	if (morphologyMatches.length > 0) {
+		return morphologyMatches;
+	}
 	if (!allowFuzzyMatch || !shouldAttemptFuzzyRescue(queryUnit, queryAnalysis)) {
 		return [];
 	}
@@ -186,8 +195,6 @@ function collectBoundedPrefixMatches(
 			familyText === queryUnitText ||
 			getFamilySourceMask(familyFlagsByFamilyId[familyId] ?? 0) === 0 ||
 			!canExpandFamilyPrefixForQuery(
-				queryUnitText,
-				familyText,
 				familyFlagsByFamilyId[familyId] ?? 0,
 			) ||
 			familyText.length <= queryUnitText.length
@@ -205,6 +212,37 @@ function collectBoundedPrefixMatches(
 			},
 			queryUnitText,
 			matchLimit,
+		);
+	}
+	return matches;
+}
+
+function collectMorphologyMatches(
+	base: ResidentBase,
+	queryUnit: V3QueryUnit,
+	familyFlagsByFamilyId: Uint8Array,
+): V3QueryFamilyMatch[] {
+	const matches: V3QueryFamilyMatch[] = [];
+	for (const probeText of buildEnglishMorphologyProbeTexts(queryUnit.text)) {
+		const shardLocalFamilySlot = findFirstShardLocalFamilySlotAtOrAfter(base, probeText);
+		const exactMatch = collectExactMatch(
+			base,
+			shardLocalFamilySlot,
+			probeText,
+			familyFlagsByFamilyId,
+		);
+		if (exactMatch == null || exactMatch.familyText === queryUnit.text) {
+			continue;
+		}
+		insertBoundedPrefixMatch(
+			matches,
+			{
+				...exactMatch,
+				matchKind: "morphology",
+				editDistance: 1,
+			},
+			queryUnit.text,
+			MORPHOLOGY_LOOKUP_MATCH_LIMIT,
 		);
 	}
 	return matches;
@@ -330,7 +368,7 @@ function findFirstShardLocalFamilySlotAtOrAfter(
 function computePrefixMatchLimit(queryUnitText: string): number {
 	switch (resolvePrefixLengthBand(queryUnitText.length)) {
 		case 0:
-			return 16;
+			return 0;
 		case 3:
 			return 32;
 		case 4:
@@ -379,23 +417,8 @@ function resolvePrefixLengthBand(queryUnitLength: number): 0 | 3 | 4 | 5 | 6 | 7
 	return 9;
 }
 
-function canExpandFamilyPrefixForQuery(
-	queryUnitText: string,
-	familyText: string,
-	familyFlags: number,
-): boolean {
-	return (
-		isFamilyPrefixExpandable(familyFlags) ||
-		(isHanPrefixQuery(queryUnitText) && isPureHanFamilyText(familyText))
-	);
-}
-
-function isHanPrefixQuery(queryUnitText: string): boolean {
-	return isPureHanFamilyText(queryUnitText) && Array.from(queryUnitText).length >= 3;
-}
-
-function isPureHanFamilyText(text: string): boolean {
-	return /^[\u4e00-\u9fff]+$/u.test(text);
+function canExpandFamilyPrefixForQuery(familyFlags: number): boolean {
+	return isFamilyPrefixExpandable(familyFlags);
 }
 
 function createPrefixLookupBudgetState(): PrefixLookupBudgetState {
@@ -500,13 +523,79 @@ function getQueryFamilyMatchRank(kind: V3QueryFamilyMatch["matchKind"]): number 
 			return 1;
 		case "prefix":
 			return 2;
-		case "fuzzy":
+		case "morphology":
 			return 3;
+		case "fuzzy":
+			return 4;
 	}
 }
 
 function getCompoundPrefixPenalty(match: V3QueryFamilyMatch): number {
 	return match.matchKind === "prefix" && /[_./-]/u.test(match.familyText) ? 1 : 0;
+}
+
+function buildEnglishMorphologyProbeTexts(queryUnitText: string): string[] {
+	if (!isEligibleEnglishMorphologyQuery(queryUnitText)) {
+		return [];
+	}
+	const probes: string[] = [];
+	const pushProbe = (probe: string): void => {
+		if (
+			probe.length >= 4 &&
+			probe !== queryUnitText &&
+			/^[a-z]+$/u.test(probe) &&
+			!probes.includes(probe)
+		) {
+			probes.push(probe);
+		}
+	};
+	if (queryUnitText.endsWith("ies") && queryUnitText.length >= 6) {
+		pushProbe(`${queryUnitText.slice(0, -3)}y`);
+	}
+	if (queryUnitText.endsWith("ing") && queryUnitText.length >= 7) {
+		const base = queryUnitText.slice(0, -3);
+		pushProbe(base);
+		pushProbe(`${base}e`);
+		pushProbe(removeDoubledFinalConsonant(base));
+	}
+	if (queryUnitText.endsWith("ed") && queryUnitText.length >= 6) {
+		const base = queryUnitText.slice(0, -2);
+		pushProbe(base);
+		pushProbe(`${base}e`);
+		pushProbe(removeDoubledFinalConsonant(base));
+	}
+	if (queryUnitText.endsWith("es") && queryUnitText.length >= 6) {
+		pushProbe(queryUnitText.slice(0, -2));
+	}
+	if (
+		queryUnitText.endsWith("s") &&
+		!queryUnitText.endsWith("ss") &&
+		queryUnitText.length >= 5
+	) {
+		pushProbe(queryUnitText.slice(0, -1));
+	}
+	return probes;
+}
+
+function isEligibleEnglishMorphologyQuery(queryUnitText: string): boolean {
+	return (
+		queryUnitText.length >= 5 &&
+		queryUnitText.length <= 32 &&
+		/^[a-z]+$/u.test(queryUnitText) &&
+		/[aeiou]/u.test(queryUnitText)
+	);
+}
+
+function removeDoubledFinalConsonant(text: string): string {
+	if (text.length < 2) {
+		return text;
+	}
+	const last = text[text.length - 1] ?? "";
+	const previous = text[text.length - 2] ?? "";
+	if (last !== previous || /[aeiou]/u.test(last)) {
+		return text;
+	}
+	return text.slice(0, -1);
 }
 
 function resolveEditDistanceAtMostOne(

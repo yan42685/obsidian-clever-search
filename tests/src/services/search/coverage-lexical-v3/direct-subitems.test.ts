@@ -44,6 +44,8 @@ function createCandidate(overrides: Partial<EvidencePackingProfile>): EvidencePa
 		windowWidth: 1,
 		gapCount: 0,
 		density: 1,
+		isLocalityTight: true,
+		localityTightness: 1,
 		headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
 	};
 	const bodyWindowContainer =
@@ -238,6 +240,8 @@ describe("coverage lexical v3 direct subitems", () => {
 					windowWidth: 2,
 					gapCount: 1,
 					density: 1,
+					isLocalityTight: true,
+					localityTightness: 1,
 					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
 				},
 

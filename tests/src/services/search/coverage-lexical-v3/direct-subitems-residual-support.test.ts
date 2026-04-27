@@ -27,6 +27,8 @@ function createCandidate(
 		windowWidth: 1,
 		gapCount: 0,
 		density: 1,
+		isLocalityTight: true,
+		localityTightness: 1,
 		headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
 	};
 	return createBaseCandidate({

@@ -246,6 +246,8 @@ type BodyWindowCandidate = Readonly<{
 	windowWidth: number;
 	gapCount: number;
 	density: number;
+	isLocalityTight: boolean;
+	localityTightness: number;
 	maxAdjacentGap: number;
 	preservesQueryOrder: boolean;
 	windowStart: number;
@@ -782,6 +784,7 @@ export function buildPackingProfile(
 		surfaceCoverageShapeKey: queryAnalysis.surfaceCoverageShapeKey,
 		realizedCoverageCount: realizedFamilies.length,
 		coverageGate,
+		exactOrPrefixUnitCount: realizedFamilies.filter(isExactOrPrefixFamily).length,
 		exactUnitCount: realizedFamilies.filter((family) => family.matchKind === "exact").length,
 		completedHanSurfaceGroupCount: hanSurfaceCompletionSummary.completedGroupCount,
 		hanSurfaceCompletionTierScoreTotal: hanSurfaceCompletionSummary.tierScoreTotal,
@@ -1458,8 +1461,10 @@ function matchKindPreference(kind: V3QueryFamilyMatch["matchKind"]): number {
 			return 1;
 		case "prefix":
 			return 2;
-		case "fuzzy":
+		case "morphology":
 			return 3;
+		case "fuzzy":
+			return 4;
 	}
 }
 
@@ -2336,6 +2341,14 @@ function isCompoundPrefixFamily(family: RealizedQueryUnitFamily): boolean {
 	return (
 		family.matchKind === "prefix" &&
 		(/[-_./]/u.test(family.familyText) || isCompoundBackedPrefixFamily(family))
+	);
+}
+
+function isExactOrPrefixFamily(family: RealizedQueryUnitFamily): boolean {
+	return (
+		family.matchKind === "exact" ||
+		family.matchKind === "opaque_exact" ||
+		family.matchKind === "prefix"
 	);
 }
 

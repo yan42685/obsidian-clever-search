@@ -4,6 +4,7 @@ export type V3QueryFamilyMatchKind =
 	| "exact"
 	| "opaque_exact"
 	| "prefix"
+	| "morphology"
 	| "fuzzy";
 
 export type V3QueryFamilyMatch = Readonly<{

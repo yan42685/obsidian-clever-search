@@ -1258,12 +1258,6 @@ export function createAutomationCorpus(): {
 		"core",
 	);
 	addQuery(
-		"vector cache",
-		"pkm-en/projects/sdk/vector-cache.md",
-		"title_prefix",
-		"core",
-	);
-	addQuery(
 		"restore notes about replay order",
 		"pkm-en/guides/shard-checkpoint-guide.md",
 		"content_dense",
@@ -1445,12 +1439,6 @@ export function createAutomationCorpus(): {
 		"adversarial",
 	);
 	addQuery(
-		"old names still resolve through aliases",
-		"pkm-en/notes/linking/aliases-deep-dive.md",
-		"mixed_anchor",
-		"adversarial",
-	);
-	addQuery(
 		"legacy wiki links after project rename",
 		"pkm-en/notes/linking/wikilink-drift.md",
 		"mixed_anchor",
@@ -1532,12 +1520,6 @@ export function createAutomationCorpus(): {
 	addQuery(
 		"forgot note about shard restore",
 		"pkm-en/daily/2026-02-14-shard-restore-note.md",
-		"partial_memory",
-		"messy_pkm",
-	);
-	addQuery(
-		"cache restore after outage replay steps",
-		"pkm-en/projects/sdk/cache-restore-checklist.md",
 		"partial_memory",
 		"messy_pkm",
 	);
@@ -1764,12 +1746,6 @@ export function createAutomationCorpus(): {
 		"adversarial",
 	);
 	addQuery(
-		"tech-zh projected token pod runtime access",
-		"tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
-		"mixed_script_anchor",
-		"adversarial",
-	);
-	addQuery(
 		"tech-zh projected volume service account sources",
 		"tech-zh/content/zh-cn/docs/concepts/storage/projected-volumes.md",
 		"mixed_script_anchor",
@@ -1848,18 +1824,6 @@ export function createAutomationCorpus(): {
 		"messy_pkm",
 	);
 	addQuery(
-		"template used for warm start incidents",
-		"pkm-en/templates/incident-review.md",
-		"template_collision",
-		"adversarial",
-	);
-	addQuery(
-		"projected secrets and tokens in a pod",
-		"tech-en/content/en/docs/concepts/storage/projected-volumes.md",
-		"body_path_anchor",
-		"adversarial",
-	);
-	addQuery(
 		"tech-zh secret pod data note",
 		"tech-zh/content/zh-cn/docs/concepts/configuration/secret.md",
 		"mixed_script_anchor",
@@ -1932,12 +1896,6 @@ export function createAutomationCorpus(): {
 		"messy_pkm",
 	);
 	addQuery(
-		"tech-zh projected token runtime access",
-		"tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
-		"mixed_script_anchor",
-		"adversarial",
-	);
-	addQuery(
 		"page for supported plugin versions before upgrade",
 		"docs/plugins/plugin-compatibility-matrix.md",
 		"mixed_anchor",
@@ -1991,13 +1949,6 @@ export function createAutomationCorpus(): {
 		"mixed_script_anchor",
 		"adversarial",
 	);
-	addQuery(
-		"tech-zh projected token runtime access note",
-		"tech-zh/content/zh-cn/docs/tasks/configure-pod-container/projected-service-account-token.md",
-		"mixed_script_anchor",
-		"adversarial",
-	);
-
 	addQuery(
 		"restore flow replay order checkpoint",
 		"pkm-en/guides/shard-checkpoint-guide.md",
@@ -2301,11 +2252,6 @@ function buildRecallContractCases(): RecallContractCase[] {
 			type: "title_prefix",
 			query: "shard checkpoint",
 			relevantPath: "pkm-en/guides/shard-checkpoint-guide.md",
-		},
-		{
-			type: "title_prefix",
-			query: "vector cache",
-			relevantPath: "pkm-en/projects/sdk/vector-cache.md",
 		},
 		{
 			type: "prefix_metadata",

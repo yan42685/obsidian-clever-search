@@ -125,6 +125,51 @@ describe("coverage lexical v3 family lookup", () => {
 		]);
 	});
 
+	test("latin prefix expansion starts at three query characters", () => {
+		const base = buildResidentBase([
+			createDocument({
+				path: "latin/and.md",
+				basename: "and",
+				folder: "latin",
+				content: "and account api",
+			}),
+			createDocument({
+				path: "latin/api.md",
+				basename: "api",
+				folder: "latin",
+				content: "api",
+			}),
+		]);
+
+		const [singleChar] = lookupQueryUnitFamilies(base, analyzeQuery("a"));
+		expect(singleChar.matches).toEqual([]);
+
+		const [twoChars] = lookupQueryUnitFamilies(base, analyzeQuery("ap"));
+		expect(twoChars.matches).toEqual([]);
+
+		const [threeChars] = lookupQueryUnitFamilies(base, analyzeQuery("acc"));
+		expect(threeChars.matches).toEqual([
+			expect.objectContaining({
+				familyText: "account",
+				matchKind: "prefix",
+			}),
+		]);
+	});
+
+	test("han family prefix expansion stays disabled", () => {
+		const base = buildResidentBase([
+			createDocument({
+				path: "han/prefix.md",
+				basename: "甲乙丙丁",
+				folder: "han",
+				content: "甲乙丙丁",
+			}),
+		]);
+
+		const [unitMatches] = lookupQueryUnitFamilies(base, analyzeQuery("甲乙丙"));
+		expect(unitMatches.matches.some((match) => match.matchKind === "prefix")).toBe(false);
+	});
+
 	test("fuzzy rescue only triggers after exact and prefix both miss", () => {
 		const base = buildResidentBase([
 			createDocument({
@@ -155,6 +200,88 @@ describe("coverage lexical v3 family lookup", () => {
 
 		const [prefixPresent] = lookupQueryUnitFamilies(base, analyzeQuery("runtim"));
 		expect(prefixPresent.matches.some((match) => match.matchKind === "fuzzy")).toBe(false);
+	});
+
+	test("morphology probes recover conservative English inflections before fuzzy rescue", () => {
+		const base = buildResidentBase([
+			createDocument({
+				path: "latin/restore.md",
+				basename: "restore",
+				folder: "latin",
+				content: "restore cache token",
+			}),
+		]);
+
+		const unitMatches = lookupQueryUnitFamilies(
+			base,
+			analyzeQuery("restoring cached tokens"),
+		);
+
+		expect(unitMatches.map((unit) => unit.matches[0])).toEqual([
+			expect.objectContaining({
+				familyText: "restore",
+				matchKind: "morphology",
+				editDistance: 1,
+			}),
+			expect.objectContaining({
+				familyText: "cache",
+				matchKind: "morphology",
+				editDistance: 1,
+			}),
+			expect.objectContaining({
+				familyText: "token",
+				matchKind: "morphology",
+				editDistance: 1,
+			}),
+		]);
+		expect(
+			unitMatches.some((unit) =>
+				unit.matches.some((match) => match.matchKind === "fuzzy"),
+			),
+		).toBe(false);
+	});
+
+	test("morphology probes stay weaker than exact and prefix matches", () => {
+		const base = buildResidentBase([
+			createDocument({
+				path: "latin/restoring.md",
+				basename: "restoring",
+				folder: "latin",
+				content: "restoring",
+			}),
+			createDocument({
+				path: "latin/cache.md",
+				basename: "cache",
+				folder: "latin",
+				content: "cache",
+			}),
+			createDocument({
+				path: "latin/cached.md",
+				basename: "cached",
+				folder: "latin",
+				content: "cached",
+			}),
+		]);
+
+		const [exactPresent] = lookupQueryUnitFamilies(base, analyzeQuery("restoring"));
+		expect(exactPresent.matches[0]).toEqual(
+			expect.objectContaining({
+				familyText: "restoring",
+				matchKind: "exact",
+			}),
+		);
+		expect(exactPresent.matches.some((match) => match.matchKind === "morphology")).toBe(
+			false,
+		);
+
+		const [prefixPresent] = lookupQueryUnitFamilies(base, analyzeQuery("cache"));
+		expect(prefixPresent.matches.map((match) => match.matchKind)).toEqual([
+			"exact",
+			"prefix",
+		]);
+		expect(prefixPresent.matches.some((match) => match.matchKind === "morphology")).toBe(
+			false,
+		);
 	});
 
 	test("fuzzy rescue respects minimum length and edit-distance-one verification", () => {
