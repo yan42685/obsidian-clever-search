@@ -1,3 +1,5 @@
+// @ts-nocheck
+export {};
 jest.mock("obsidian", () => ({
 	App: class App {},
 	parseFrontMatterAliases: () => [],

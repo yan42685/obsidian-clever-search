@@ -109,5 +109,5 @@ For current behavior, the code is the source of truth:
 
 - `src/services/search/hybrid/hybrid-engine.ts`
 - `src/services/search/hybrid/lexical-lane/`
-- `src/services/search/coverage-lexical/`
+- `src/services/search/coverage-lexical-v3/`
 - `tests/src/services/search/hybrid-benchmark-anchor.test.ts`

@@ -49,6 +49,7 @@ export type HybridLexicalLaneMetadataValues = {
 };
 
 export type HybridLexicalLaneFileCandidate = {
+	docRef?: number;
 	filePath: string;
 	snapshotGeneration?: number;
 	snapshotSource?: "live" | "indexed" | "shadow";
@@ -75,6 +76,7 @@ export type HybridLexicalLaneLocalSignals = {
 };
 
 export type HybridLexicalLaneBlockCandidate = {
+	docRef?: number;
 	filePath: string;
 	snapshotGeneration?: number;
 	snapshotSource?: "live" | "indexed" | "shadow";
@@ -115,6 +117,7 @@ export type HybridLexicalLaneRankedBlockCandidate =
 	};
 
 export type HybridLexicalLaneDisplayCandidate = {
+	docRef?: number;
 	filePath: string;
 	snapshotGeneration?: number;
 	snapshotSource?: "live" | "indexed" | "shadow";

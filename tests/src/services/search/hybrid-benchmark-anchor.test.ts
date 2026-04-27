@@ -205,7 +205,7 @@ function createOutcome(
 	queryCase: QueryCase,
 	rank: number,
 	diagnostics: Partial<
-		Pick<QueryOutcome, "fileMatchRank" | "shortlistRank" | "shortlistSize">
+		QueryOutcome
 	> = {},
 ): QueryOutcome {
 	return {
@@ -485,7 +485,7 @@ function loadAutomationCorpus(): {
 		globalScope[hookName] = noop;
 	}
 	try {
-		const modulePath = require.resolve("./coverage-lexical-legacy-automation-benchmark.bench");
+		const modulePath = require.resolve("./coverage-lexical-automation-fixture");
 		delete require.cache[modulePath];
 		const fixtureModule = require(modulePath) as {
 			createAutomationCorpus: () => {
@@ -510,9 +510,9 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 	const { OuterSetting, DEFAULT_OUTER_SETTING } = require(
 		"src/globals/plugin-setting",
 	) as typeof import("src/globals/plugin-setting");
-	const { CoverageLexicalFileSearchEngine } = require(
-		"src/services/search/coverage-lexical/coverage-lexical-engine",
-	) as typeof import("src/services/search/coverage-lexical/coverage-lexical-engine");
+	const { CoverageLexicalV3FileSearchEngine } = require(
+		"src/services/search/coverage-lexical-v3/file-search-engine",
+	) as typeof import("src/services/search/coverage-lexical-v3/file-search-engine");
 	const { buildHybridLexicalLaneFileCandidates } = require(
 		"src/services/search/hybrid/lexical-lane/file-shortlist",
 	) as typeof import("src/services/search/hybrid/lexical-lane/file-shortlist");
@@ -538,7 +538,7 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 		useValue: params.tokenizer,
 	});
 
-	const engine = new CoverageLexicalFileSearchEngine();
+	const engine = new CoverageLexicalV3FileSearchEngine();
 	await engine.addDocuments([...params.documents]);
 
 	const docByPath = new Map(

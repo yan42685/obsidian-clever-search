@@ -44,6 +44,8 @@ function createCandidate(overrides: Partial<EvidencePackingProfile>): EvidencePa
 		windowWidth: 1,
 		gapCount: 0,
 		density: 1,
+		isLocalityTight: true,
+		localityTightness: 1,
 		headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
 	};
 	const bodyWindowContainer =
@@ -238,6 +240,8 @@ describe("coverage lexical v3 direct subitems", () => {
 					windowWidth: 2,
 					gapCount: 1,
 					density: 1,
+					isLocalityTight: true,
+					localityTightness: 1,
 					headingCorroboration: { coveredUnitIndices: [], unitCount: 0 },
 				},
 
@@ -367,7 +371,7 @@ describe("coverage lexical v3 direct subitems", () => {
 		});
 
 		const result = buildV3DirectSubitems({
-			snapshotText: `alpha${"x".repeat(70)}beta`,
+			snapshotText: `alpha${"x".repeat(125)}beta`,
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "gap.md",
@@ -426,7 +430,7 @@ describe("coverage lexical v3 direct subitems", () => {
 		});
 
 		const result = buildV3DirectSubitems({
-			snapshotText: `alpha${"x".repeat(70)}beta${"x".repeat(70)}gamma`,
+			snapshotText: `alpha${"x".repeat(125)}beta${"x".repeat(125)}gamma`,
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "complete.md",
@@ -519,14 +523,14 @@ describe("coverage lexical v3 direct subitems", () => {
 
 	test("singleton Han body snippets render the matched char as a strong highlight", () => {
 		const queryAnalysis = createQueryAnalysis({
-			queryText: "?",
-			querySingletonHanChar: "?",
-			querySingletonHanCodePoint: "?".codePointAt(0) ?? null,
+			queryText: "\u952e",
+			querySingletonHanChar: "\u952e",
+			querySingletonHanCodePoint: "\u952e".codePointAt(0) ?? null,
 			querySingletonHanRecallEligible: true,
 			surfaceGroups: [
 				{
 					index: 0,
-					text: "?",
+					text: "\u952e",
 					kind: "han",
 					hanBigramTexts: [],
 					coveredCharMask: [false],
@@ -538,7 +542,7 @@ describe("coverage lexical v3 direct subitems", () => {
 		});
 
 		const result = buildV3DirectSubitems({
-			snapshotText: "??????????",
+			snapshotText: "\u70b9\u51fb\u5feb\u6377\u952e\u7ee7\u7eed",
 			queryAnalysis,
 			candidate: createCandidate({
 				path: "menu.md",
@@ -558,7 +562,7 @@ describe("coverage lexical v3 direct subitems", () => {
 
 		expect(result.subItems).toHaveLength(1);
 		expect(result.candidates[0]?.anchorTier).toBe("singleton_han");
-		expect(extractHighlightTexts(result)).toContain("?");
+		expect(extractHighlightTexts(result)).toContain("\u952e");
 		expect(result.subItems[0]?.weakHighlightRanges ?? []).toEqual([]);
 	});
 
@@ -599,5 +603,52 @@ describe("coverage lexical v3 direct subitems", () => {
 		expect(result.candidates).toHaveLength(0);
 		expect(result.subItems).toHaveLength(0);
 	});
-});
 
+	test("maps resident block ordinals through the indexed body block sequence", () => {
+		const queryAnalysis = createQueryAnalysis({
+			queryText: "\u5feb\u6377\u952e",
+			surfaceGroups: [
+				{
+					index: 0,
+					text: "\u5feb\u6377\u952e",
+					kind: "han",
+					hanBigramTexts: ["\u5feb\u6377", "\u6377\u952e"],
+					coveredCharMask: [true, true, true],
+					queryResidualUniqueBigrams: [],
+					hasQueryResidualHanCoverage: false,
+				},
+			],
+			primaryUnits: [
+				{
+					index: 0,
+					text: "\u5feb\u6377\u952e",
+					source: "han_tokenizer_real",
+					surfaceGroupIndex: 0,
+				},
+			],
+		});
+
+		const result = buildV3DirectSubitems({
+			snapshotText: "......\n\u8fd9\u4e00\u6bb5\u5305\u542b\u5feb\u6377\u952e\u8bf4\u660e",
+			queryAnalysis,
+			candidate: createCandidate({
+				path: "shortcut.md",
+				realizedFamilies: [
+					createRealizedFamily(
+						0,
+						"\u5feb\u6377\u952e",
+						"\u5feb\u6377\u952e",
+						"exact",
+						0,
+					),
+				],
+			}),
+			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
+			residentBase: createResidentBaseForBlockCounts([1]),
+		});
+
+		expect(result.subItems).toHaveLength(1);
+		expect(result.subItems[0]?.snippetText).toContain("\u5feb\u6377\u952e");
+		expect(extractHighlightTexts(result)).toContain("\u5feb\u6377\u952e");
+	});
+});

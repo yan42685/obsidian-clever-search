@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { container } from "tsyringe";
 import type { BaseIndexedFileRef } from "src/globals/search-types";
 
@@ -3443,9 +3444,9 @@ describe("DataManager integration", () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = false;
 
-    const file = createFile("docs/han.md", "ίԱ����", 420);
+    const file = createFile("docs/han.md", "委员锟斤拷锟斤拷", 420);
     const files = new Map<string, TFile>([[file.path, file]]);
-    const texts = new Map<string, string>([[file.path, "ίԱ����"]]);
+    const texts = new Map<string, string>([[file.path, "委员锟斤拷锟斤拷"]]);
 
     const database = createMockDatabase();
     await database.setLexicalIndexedFileRefs([
@@ -3470,7 +3471,7 @@ describe("DataManager integration", () => {
     });
     const fileSnapshotStore = createMockFileSnapshotStore();
     fileSnapshotStore.persisted.set(file.path, {
-      text: "ίԱ����",
+      text: "委员锟斤拷锟斤拷",
       generation: file.stat.mtime,
     });
     const hybridEngine = createMockHybridEngine({

@@ -99,6 +99,17 @@ export type V3DirectSubitemsBuildResult = Readonly<{
 	subItems: readonly FileSubItem[];
 }>;
 
+export type V3DirectSubitemPreparedText = Readonly<{
+	text: string;
+	rawBlocks: readonly Readonly<{
+		blockId: number;
+		ordinal: number;
+		start: number;
+		end: number;
+		text: string;
+	}>[];
+}>;
+
 export type V3DirectSubitemsBuildParams = Readonly<{
 	snapshotText: string;
 	queryAnalysis: V3QueryAnalysis;

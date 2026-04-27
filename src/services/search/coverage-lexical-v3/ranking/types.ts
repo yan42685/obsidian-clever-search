@@ -39,6 +39,8 @@ export type BodyWindowContainer = EvidenceContainer &
 		windowWidth: number;
 		gapCount: number;
 		density: number;
+		isLocalityTight: boolean;
+		localityTightness: number;
 		headingCorroboration: HeadingCorroboration;
 	}>;
 
@@ -139,6 +141,7 @@ export type EvidencePackingProfile = Readonly<{
 	surfaceCoverageShapeKey: string;
 	realizedCoverageCount: number;
 	coverageGate: CoverageGateProfile;
+	exactOrPrefixUnitCount: number;
 	exactUnitCount: number;
 	completedHanSurfaceGroupCount: number;
 	hanSurfaceCompletionTierScoreTotal: number;

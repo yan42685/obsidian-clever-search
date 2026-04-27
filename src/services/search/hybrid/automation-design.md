@@ -10,11 +10,11 @@ If any short prompt summary conflicts with this file, this file wins.
 
 1. The next lexical engine must be fully independent from legacy `passage-bm25` code and storage.
 
-- the designated implementation target for the next lexical engine is `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
+- the designated implementation target for the next lexical engine is `src/services/search/coverage-lexical-v3/file-search-engine.ts`
 - the next engine may still choose a passage-first or local-window evidence model, but that model must be implemented inside the new backend rather than imported from the old passage path
 - future replacement should be able to swap ranking, verifier, and recall layers through neutral interfaces without forcing a rewrite of unrelated layers
 - automated tuning should primarily target the new backend modules, not legacy passage ranker files
-- default tuning surface should be `coverage-lexical` planner / ranker / verifier / recall modules, not `src/services/search/passage-lexical/passage-lexical-ranker.ts`
+- default tuning surface should be Coverage Lexical V3 planner / ranker / verifier / recall modules, not `src/services/search/passage-lexical/passage-lexical-ranker.ts`
 - low-level posting or storage changes are still allowed, but only when the benchmark shows they materially help speed or size without hurting the ranking guardrails
 - the next lexical engine must be code-wise independent from `src/services/search/passage-lexical/passage-file-search-engine.ts`
 - do not evolve the old engine in place and relabel it as the new backend
@@ -26,8 +26,8 @@ If any short prompt summary conflicts with this file, this file wins.
 
 - the purpose is to discover a clearly better lexical backend, not to keep shaving decimals on the legacy `passage-bm25` path
 - repeated no-lift coefficient tuning on the old engine counts as failure mode, not progress
-- when benchmark movement stalls, the next cycle should bias toward a structural hypothesis inside `src/services/search/coverage-lexical/coverage-lexical-engine.ts`: new verifier, new planner path, new family scorer, new retrieval/ranking split, or a new coverage-first backend structure
-- old passage files may be consulted as historical reference only; retained mechanism work must land in the isolated `coverage-lexical` backend
+- when benchmark movement stalls, the next cycle should bias toward a structural hypothesis inside `src/services/search/coverage-lexical-v3/file-search-engine.ts`: new verifier, new planner path, new family scorer, new retrieval/ranking split, or a new coverage-first backend structure
+- old passage files may be consulted as historical reference only; retained mechanism work must land in the isolated Coverage Lexical V3 backend
 
 3. The controller must not own the search space.
 
@@ -281,4 +281,3 @@ Benchmark should be optimized for the intended search behavior, not for protecti
 - do not spend automation benchmark budget on `custom-bm25` or `passage-bm25`
 - target one full benchmark run under `20s` on a normal development machine
 - if runtime drifts above budget, reduce redundant cases before weakening core invariant coverage
-

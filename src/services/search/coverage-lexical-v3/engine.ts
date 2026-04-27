@@ -18,6 +18,11 @@ import type {
 	ResidentIndexViewSummary,
 	ResidentFuzzyRescueIndex,
 } from "./layout/types";
+import {
+	buildShardInvalidationSet,
+	filterInvalidatedCandidates,
+	type ShardInvalidationEntry,
+} from "./invalidation";
 import { EMPTY_RESIDENT_FUZZY_RESCUE_INDEX } from "./layout/fuzzy-rescue";
 import { describeResidentIndexView } from "./metrics";
 import { analyzeQuery } from "./query";
@@ -101,6 +106,8 @@ export class CoverageLexicalV3Engine {
 		[];
 	private lastBenchmarkRankSubphases: readonly CoverageLexicalV3BenchmarkPhaseEntry[] =
 		[];
+	private residentBaseByShardKey = new Map<string, ResidentBase>();
+	private invalidatedCandidateKeys: ReadonlySet<string> = new Set();
 
 	buildResidentIndexView(
 		documents: readonly IndexedDocument[],
@@ -129,17 +136,30 @@ export class CoverageLexicalV3Engine {
 	}
 
 	loadResidentIndexView(indexView: ResidentIndexView): void {
-		if (indexView.shards.length !== 1) {
-			throw new Error("CoverageLexicalV3Engine currently supports one resident shard");
-		}
-		const residentBase = indexView.shards[0]?.base;
-		if (residentBase == null) {
+		if (indexView.shards.length === 0) {
 			throw new Error("CoverageLexicalV3Engine.loadResidentIndexView requires a shard");
 		}
 		this.residentIndexView = indexView;
-		this.fuzzyRescueIndex =
-			residentBase.fuzzyRescue ?? EMPTY_RESIDENT_FUZZY_RESCUE_INDEX;
+		this.residentBaseByShardKey = buildResidentBaseByShardKey(indexView);
+		this.fuzzyRescueIndex = buildMergedFuzzyRescueIndex(indexView);
 		this.residentColdEvidenceRows = null;
+	}
+
+	loadOverlayResidentShard(overlayShard: ResidentIndexView["shards"][number] | null): void {
+		if (this.residentIndexView == null) {
+			throw new Error("CoverageLexicalV3Engine.loadOverlayResidentShard requires a resident index view");
+		}
+		const baseShards = this.residentIndexView.shards.filter(
+			(shard) => !shard.shardId.endsWith(":overlay"),
+		);
+		this.loadResidentIndexView({
+			...this.residentIndexView,
+			shards: overlayShard == null ? baseShards : [...baseShards, overlayShard],
+		});
+	}
+
+	clearOverlayResidentShard(): void {
+		this.loadOverlayResidentShard(null);
 	}
 
 	getResidentIndexView(): ResidentIndexView | null {
@@ -154,6 +174,14 @@ export class CoverageLexicalV3Engine {
 		this.fuzzyRescueIndex = index;
 	}
 
+	loadShardInvalidations(entries: readonly ShardInvalidationEntry[]): void {
+		this.invalidatedCandidateKeys = buildShardInvalidationSet(entries);
+	}
+
+	clearShardInvalidations(): void {
+		this.invalidatedCandidateKeys = new Set();
+	}
+
 	clearFuzzyRescueIndex(): void {
 		this.fuzzyRescueIndex = EMPTY_RESIDENT_FUZZY_RESCUE_INDEX;
 	}
@@ -165,10 +193,22 @@ export class CoverageLexicalV3Engine {
 		return describeResidentIndexView(this.residentIndexView);
 	}
 
-	private requireSingleResidentShardBase(): ResidentBase {
-		const residentBase = this.residentIndexView?.shards[0]?.base;
-		if (residentBase == null) {
+	private requireResidentShards(): ResidentIndexView["shards"] {
+		const shards = this.residentIndexView?.shards;
+		if (shards == null || shards.length === 0) {
 			throw new Error("CoverageLexicalV3Engine.search requires a resident index view");
+		}
+		return shards;
+	}
+
+	private requireCandidateResidentBase(candidateRecall: V3CandidateDocRecall): ResidentBase {
+		const residentBase = this.residentBaseByShardKey.get(
+			buildResidentShardKey(candidateRecall.shardId, candidateRecall.shardGeneration),
+		);
+		if (residentBase == null) {
+			throw new Error(
+				`CoverageLexicalV3Engine missing resident shard ${candidateRecall.shardId}@${candidateRecall.shardGeneration}`,
+			);
 		}
 		return residentBase;
 	}
@@ -176,9 +216,8 @@ export class CoverageLexicalV3Engine {
 	private materializeResidentColdEvidence(
 		candidateRecalls: readonly V3CandidateDocRecall[],
 	): CandidateEvidenceHydrationSource | null {
-		const residentBase = this.residentIndexView?.shards[0]?.base;
 		const residentColdEvidenceRows = this.residentColdEvidenceRows;
-		if (residentBase == null || residentColdEvidenceRows == null) {
+		if (residentColdEvidenceRows == null) {
 			return null;
 		}
 		const bodyEvidenceByBlockId = new Map<number, LexicalBodyEvidenceSnapshot>();
@@ -188,6 +227,7 @@ export class CoverageLexicalV3Engine {
 			LexicalHanDocEvidenceSnapshot
 		>();
 		for (const candidateRecall of candidateRecalls) {
+			const residentBase = this.requireCandidateResidentBase(candidateRecall);
 			const docRef = getLiveDocRef(residentBase, candidateRecall.liveDocSlot);
 			if (docRef != null) {
 				const docRowId = buildLexicalDocEvidenceRowId({
@@ -252,6 +292,56 @@ export class CoverageLexicalV3Engine {
 		};
 	}
 
+	hydrateCandidateEvidenceByShard(
+		candidateRecalls: readonly V3CandidateDocRecall[],
+		sourceByShardKey?: ReadonlyMap<string, CandidateEvidenceHydrationSource | null>,
+	): ReadonlyMap<string, CandidateEvidencePackage> {
+		const hydratedByCandidateKey = new Map<string, CandidateEvidencePackage>();
+		const candidateRecallsByShardKey = new Map<string, V3CandidateDocRecall[]>();
+		for (const candidateRecall of candidateRecalls) {
+			const shardKey = buildResidentShardKey(
+				candidateRecall.shardId,
+				candidateRecall.shardGeneration,
+			);
+			const existing = candidateRecallsByShardKey.get(shardKey);
+			if (existing != null) {
+				existing.push(candidateRecall);
+			} else {
+				candidateRecallsByShardKey.set(shardKey, [candidateRecall]);
+			}
+		}
+		for (const shardCandidateRecalls of candidateRecallsByShardKey.values()) {
+			const firstCandidateRecall = shardCandidateRecalls[0];
+			if (firstCandidateRecall == null) {
+				continue;
+			}
+			const hydratedForShard = hydrateCandidateEvidenceBatch(
+				this.requireCandidateResidentBase(firstCandidateRecall),
+				shardCandidateRecalls,
+				sourceByShardKey?.get(
+					buildResidentShardKey(
+						firstCandidateRecall.shardId,
+						firstCandidateRecall.shardGeneration,
+					),
+				) ?? this.materializeResidentColdEvidence(shardCandidateRecalls),
+			);
+			for (const [candidateKey, evidence] of hydratedForShard) {
+				hydratedByCandidateKey.set(candidateKey, evidence);
+			}
+		}
+		return hydratedByCandidateKey;
+	}
+
+	private filterInvalidatedCandidateDocs(
+		candidateRecalls: readonly V3CandidateDocRecall[],
+	): V3CandidateDocRecall[] {
+		return filterInvalidatedCandidates(
+			candidateRecalls,
+			(candidateRecall) => this.requireCandidateResidentBase(candidateRecall),
+			this.invalidatedCandidateKeys,
+		);
+	}
+
 	setBenchmarkPhaseTrackingEnabled(enabled: boolean): void {
 		this.benchmarkPhaseTrackingEnabled = enabled;
 		if (!enabled) {
@@ -283,7 +373,7 @@ export class CoverageLexicalV3Engine {
 		options: CoverageLexicalV3SearchOptions = {},
 		fuzzyRescueIndex: ResidentFuzzyRescueIndex = this.fuzzyRescueIndex,
 	): CoverageLexicalV3PreparedSearch {
-		const residentBase = this.requireSingleResidentShardBase();
+		const residentShards = this.requireResidentShards();
 		const benchmarkPhaseEntries: CoverageLexicalV3BenchmarkPhaseEntry[] = [];
 		const analyzeStartedAtMs = this.benchmarkPhaseTrackingEnabled ? nowDebugMs() : 0;
 		const queryAnalysis = analyzeQuery(queryText, queryTerms);
@@ -297,8 +387,8 @@ export class CoverageLexicalV3Engine {
 		const familyLookupStartedAtMs = this.benchmarkPhaseTrackingEnabled
 			? nowDebugMs()
 			: 0;
-		const unitFamilyMatches = lookupQueryUnitFamilies(
-			residentBase,
+		const unitFamilyMatches = collectShardFamilyMatches(
+			residentShards,
 			queryAnalysis,
 			options,
 			fuzzyRescueIndex,
@@ -311,11 +401,12 @@ export class CoverageLexicalV3Engine {
 			});
 		}
 		const recallStartedAtMs = this.benchmarkPhaseTrackingEnabled ? nowDebugMs() : 0;
-		const candidateDocs = recallCandidateDocs(
-			residentBase,
+		const recalledCandidateDocs = collectShardCandidateDocs(
+			residentShards,
 			queryAnalysis,
 			unitFamilyMatches,
 		);
+		const candidateDocs = this.filterInvalidatedCandidateDocs(recalledCandidateDocs);
 		if (this.benchmarkPhaseTrackingEnabled) {
 			benchmarkPhaseEntries.push({
 				phase: "recall",
@@ -349,19 +440,13 @@ export class CoverageLexicalV3Engine {
 		preparedSearch: CoverageLexicalV3PreparedSearch,
 		hydratedEvidenceByCandidateKey?: ReadonlyMap<string, CandidateEvidencePackage> | null,
 	): CoverageLexicalV3SearchResult {
-		const residentBase = this.requireSingleResidentShardBase();
 		const { queryAnalysis, unitFamilyMatches, guardedCandidateDocs } =
 			preparedSearch;
 		const benchmarkPhaseEntries: CoverageLexicalV3BenchmarkPhaseEntry[] = [];
 		const hydrateStartedAtMs = this.benchmarkPhaseTrackingEnabled ? nowDebugMs() : 0;
 		const effectiveHydratedEvidenceByCandidateKey =
 			hydratedEvidenceByCandidateKey ??
-			hydrateCandidateEvidenceBatch(
-				residentBase,
-				guardedCandidateDocs,
-				this.materializeResidentColdEvidence(guardedCandidateDocs),
-			);
-		const packingQueryContext = preparePackingProfileQueryContext(unitFamilyMatches);
+			this.hydrateCandidateEvidenceByShard(guardedCandidateDocs);
 		if (this.benchmarkPhaseTrackingEnabled && hydratedEvidenceByCandidateKey == null) {
 			benchmarkPhaseEntries.push({
 				phase: "residentHydrate",
@@ -372,22 +457,28 @@ export class CoverageLexicalV3Engine {
 		const provisionalPackingStartedAtMs = this.benchmarkPhaseTrackingEnabled
 			? nowDebugMs()
 			: 0;
-		const provisionalCandidateProfiles = guardedCandidateDocs.map((candidateRecall) =>
-			buildPackingProfile(
-				residentBase,
+		const provisionalCandidateProfiles = guardedCandidateDocs.map((candidateRecall) => {
+				const shardUnitFamilyMatches = filterUnitFamilyMatchesForCandidateShard(
+					unitFamilyMatches,
+					candidateRecall,
+				);
+				const shardPackingQueryContext =
+					preparePackingProfileQueryContext(shardUnitFamilyMatches);
+				return buildPackingProfile(
+				this.requireCandidateResidentBase(candidateRecall),
 				queryAnalysis,
 				candidateRecall,
-				unitFamilyMatches,
+				shardUnitFamilyMatches,
 				{
 					allowBodyOpaqueRescueSurfaceGroupIndices: null,
 					hydratedEvidence:
 						effectiveHydratedEvidenceByCandidateKey.get(
 							buildCandidateHydrationKey(candidateRecall),
 						) ?? null,
-					queryContext: packingQueryContext,
+					queryContext: shardPackingQueryContext,
 				},
-			),
-		);
+			);
+		});
 		if (this.benchmarkPhaseTrackingEnabled) {
 			benchmarkPhaseEntries.push({
 				phase: "provisionalPacking",
@@ -416,33 +507,43 @@ export class CoverageLexicalV3Engine {
 		const opaqueRescueGateStartedAtMs = this.benchmarkPhaseTrackingEnabled
 			? nowDebugMs()
 			: 0;
-		const allowedBodyOpaqueRescueSurfaceGroupsByLiveDocSlot =
+		const allowedBodyOpaqueRescueSurfaceGroupsByCandidateKey =
 			buildAllowedBodyOpaqueRescueSurfaceGroups(
-				residentBase,
+				(candidateRecall) => this.requireCandidateResidentBase(candidateRecall),
 				queryAnalysis,
 				guardedCandidateDocs,
 				unitFamilyMatches,
 				effectiveHydratedEvidenceByCandidateKey,
 			);
-		const secondPassCandidateProfiles = guardedCandidateDocs.map((candidateRecall) =>
-			buildPackingProfile(
-				residentBase,
+		const secondPassCandidateProfiles = guardedCandidateDocs.map((candidateRecall, index) => {
+			const candidateKey = buildCandidateHydrationKey(candidateRecall);
+			const allowBodyOpaqueRescueSurfaceGroupIndices =
+				allowedBodyOpaqueRescueSurfaceGroupsByCandidateKey.get(candidateKey) ?? null;
+			if (
+				allowBodyOpaqueRescueSurfaceGroupIndices == null ||
+				allowBodyOpaqueRescueSurfaceGroupIndices.size === 0
+			) {
+				return provisionalCandidateProfiles[index]!;
+			}
+			const shardUnitFamilyMatches = filterUnitFamilyMatchesForCandidateShard(
+				unitFamilyMatches,
+				candidateRecall,
+			);
+			const shardPackingQueryContext =
+				preparePackingProfileQueryContext(shardUnitFamilyMatches);
+			return buildPackingProfile(
+				this.requireCandidateResidentBase(candidateRecall),
 				queryAnalysis,
 				candidateRecall,
-				unitFamilyMatches,
+				shardUnitFamilyMatches,
 				{
-					allowBodyOpaqueRescueSurfaceGroupIndices:
-						allowedBodyOpaqueRescueSurfaceGroupsByLiveDocSlot.get(
-							candidateRecall.liveDocSlot,
-						) ?? null,
+					allowBodyOpaqueRescueSurfaceGroupIndices,
 					hydratedEvidence:
-						effectiveHydratedEvidenceByCandidateKey.get(
-							buildCandidateHydrationKey(candidateRecall),
-						) ?? null,
-					queryContext: packingQueryContext,
+						effectiveHydratedEvidenceByCandidateKey.get(candidateKey) ?? null,
+					queryContext: shardPackingQueryContext,
 				},
-			),
-		);
+			);
+		});
 		if (this.benchmarkPhaseTrackingEnabled) {
 			benchmarkPhaseEntries.push({
 				phase: "opaqueRescueSecondPass",
@@ -495,54 +596,58 @@ export class CoverageLexicalV3Engine {
 		queryTerms: readonly string[] = [],
 		options: CoverageLexicalV3SearchOptions = {},
 	): CoverageLexicalV3SearchResult {
-		const residentBase = this.requireSingleResidentShardBase();
+		const residentShards = this.requireResidentShards();
 		const shouldLogDebug = shouldLogCoverageLexicalV3Debug(queryText);
 		const startedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const analyzeStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const queryAnalysis = analyzeQuery(queryText, queryTerms);
 		const analyzeMs = shouldLogDebug ? nowDebugMs() - analyzeStartedAtMs : 0;
 		const familyLookupStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
-		const unitFamilyMatches = lookupQueryUnitFamilies(
-			residentBase,
+		const unitFamilyMatches = collectShardFamilyMatches(
+			residentShards,
 			queryAnalysis,
 			options,
 			this.fuzzyRescueIndex,
 		);
 		const familyLookupMs = shouldLogDebug ? nowDebugMs() - familyLookupStartedAtMs : 0;
 		const recallStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
-		const candidateDocs = recallCandidateDocs(
-			residentBase,
+		const recalledCandidateDocs = collectShardCandidateDocs(
+			residentShards,
 			queryAnalysis,
 			unitFamilyMatches,
 		);
+		const candidateDocs = this.filterInvalidatedCandidateDocs(recalledCandidateDocs);
 		const recallMs = shouldLogDebug ? nowDebugMs() - recallStartedAtMs : 0;
 		const guardStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const guardResult = applyPrefixFanoutGuard(candidateDocs, options.maxItemResults);
 		const guardedCandidateDocs = guardResult.candidateDocs;
 		const guardMs = shouldLogDebug ? nowDebugMs() - guardStartedAtMs : 0;
-		const hydratedEvidenceByCandidateKey = hydrateCandidateEvidenceBatch(
-			residentBase,
+		const hydratedEvidenceByCandidateKey = this.hydrateCandidateEvidenceByShard(
 			guardedCandidateDocs,
-			this.materializeResidentColdEvidence(guardedCandidateDocs),
 		);
-		const packingQueryContext = preparePackingProfileQueryContext(unitFamilyMatches);
 		const packingStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
-		const provisionalCandidateProfiles = guardedCandidateDocs.map((candidateRecall) =>
-			buildPackingProfile(
-				residentBase,
+		const provisionalCandidateProfiles = guardedCandidateDocs.map((candidateRecall) => {
+			const shardUnitFamilyMatches = filterUnitFamilyMatchesForCandidateShard(
+				unitFamilyMatches,
+				candidateRecall,
+			);
+			const shardPackingQueryContext =
+				preparePackingProfileQueryContext(shardUnitFamilyMatches);
+			return buildPackingProfile(
+				this.requireCandidateResidentBase(candidateRecall),
 				queryAnalysis,
 				candidateRecall,
-				unitFamilyMatches,
+				shardUnitFamilyMatches,
 				{
 					allowBodyOpaqueRescueSurfaceGroupIndices: null,
 					hydratedEvidence:
 						hydratedEvidenceByCandidateKey.get(
 							buildCandidateHydrationKey(candidateRecall),
 						) ?? null,
-					queryContext: packingQueryContext,
+					queryContext: shardPackingQueryContext,
 				},
-			),
-		);
+			);
+		});
 		const provisionalCandidates = provisionalCandidateProfiles
 			.filter(
 				(candidate, index) =>
@@ -551,33 +656,43 @@ export class CoverageLexicalV3Engine {
 					candidate.hasAnyHanRescueAssessment ||
 					hasBodyOpaqueRescueSeeds(guardedCandidateDocs[index]),
 			);
-		const allowedBodyOpaqueRescueSurfaceGroupsByLiveDocSlot =
+		const allowedBodyOpaqueRescueSurfaceGroupsByCandidateKey =
 			buildAllowedBodyOpaqueRescueSurfaceGroups(
-				residentBase,
+				(candidateRecall) => this.requireCandidateResidentBase(candidateRecall),
 				queryAnalysis,
 				guardedCandidateDocs,
 				unitFamilyMatches,
 				hydratedEvidenceByCandidateKey,
 			);
-		const secondPassCandidateProfiles = guardedCandidateDocs.map((candidateRecall) =>
-			buildPackingProfile(
-				residentBase,
+		const secondPassCandidateProfiles = guardedCandidateDocs.map((candidateRecall, index) => {
+			const candidateKey = buildCandidateHydrationKey(candidateRecall);
+			const allowBodyOpaqueRescueSurfaceGroupIndices =
+				allowedBodyOpaqueRescueSurfaceGroupsByCandidateKey.get(candidateKey) ?? null;
+			if (
+				allowBodyOpaqueRescueSurfaceGroupIndices == null ||
+				allowBodyOpaqueRescueSurfaceGroupIndices.size === 0
+			) {
+				return provisionalCandidateProfiles[index]!;
+			}
+			const shardUnitFamilyMatches = filterUnitFamilyMatchesForCandidateShard(
+				unitFamilyMatches,
+				candidateRecall,
+			);
+			const shardPackingQueryContext =
+				preparePackingProfileQueryContext(shardUnitFamilyMatches);
+			return buildPackingProfile(
+				this.requireCandidateResidentBase(candidateRecall),
 				queryAnalysis,
 				candidateRecall,
-				unitFamilyMatches,
+				shardUnitFamilyMatches,
 				{
-					allowBodyOpaqueRescueSurfaceGroupIndices:
-						allowedBodyOpaqueRescueSurfaceGroupsByLiveDocSlot.get(
-							candidateRecall.liveDocSlot,
-						) ?? null,
+					allowBodyOpaqueRescueSurfaceGroupIndices,
 					hydratedEvidence:
-						hydratedEvidenceByCandidateKey.get(
-							buildCandidateHydrationKey(candidateRecall),
-						) ?? null,
-					queryContext: packingQueryContext,
+						hydratedEvidenceByCandidateKey.get(candidateKey) ?? null,
+					queryContext: shardPackingQueryContext,
 				},
-			),
-		);
+			);
+		});
 		const rankedCandidatesBeforeSort = secondPassCandidateProfiles.filter(
 			(candidate, index) =>
 				(candidate.realizedCoverageCount > 0 ||
@@ -629,8 +744,8 @@ export class CoverageLexicalV3Engine {
 				candidateDocDetails: summarizeCandidateDocs(guardedCandidateDocs),
 				provisionalCandidateDetails: summarizePackingProfiles(provisionalCandidateProfiles),
 				bodyOpaqueRescueAllowanceDetails:
-					summarizeAllowedBodyOpaqueRescueByLiveDocSlot(
-						allowedBodyOpaqueRescueSurfaceGroupsByLiveDocSlot,
+					summarizeAllowedBodyOpaqueRescueByCandidateKey(
+						allowedBodyOpaqueRescueSurfaceGroupsByCandidateKey,
 					),
 				secondPassCandidateDetails:
 					summarizePackingProfiles(secondPassCandidateProfiles),
@@ -923,20 +1038,20 @@ function summarizePackingProfiles(
 	}));
 }
 
-function summarizeAllowedBodyOpaqueRescueByLiveDocSlot(
-	allowedBodyOpaqueRescueByLiveDocSlot: ReadonlyMap<number, ReadonlySet<number>>,
+function summarizeAllowedBodyOpaqueRescueByCandidateKey(
+	allowedBodyOpaqueRescueByCandidateKey: ReadonlyMap<string, ReadonlySet<number>>,
 ): ReadonlyArray<{
-	liveDocSlot: number;
+	candidateKey: string;
 	allowedSurfaceGroupIndices: readonly number[];
 }> {
-	return [...allowedBodyOpaqueRescueByLiveDocSlot.entries()]
-		.map(([liveDocSlot, surfaceGroupIndices]) => ({
-			liveDocSlot,
+	return [...allowedBodyOpaqueRescueByCandidateKey.entries()]
+		.map(([candidateKey, surfaceGroupIndices]) => ({
+			candidateKey,
 			allowedSurfaceGroupIndices: [...surfaceGroupIndices].sort(
 				(left, right) => left - right,
 			),
 		}))
-		.sort((left, right) => left.liveDocSlot - right.liveDocSlot);
+		.sort((left, right) => left.candidateKey.localeCompare(right.candidateKey));
 }
 
 function hasBodyOpaqueRescueSeeds(candidateRecall: V3RecallState["candidateDocs"][number]): boolean {
@@ -956,12 +1071,12 @@ function countBodyOpaqueRescueSurfaceGroups(
 }
 
 function buildAllowedBodyOpaqueRescueSurfaceGroups(
-	base: ResidentBase,
+	getCandidateBase: (candidateRecall: V3CandidateDocRecall) => ResidentBase,
 	queryAnalysis: V3RecallState["queryAnalysis"],
 	candidateDocs: V3RecallState["candidateDocs"],
 	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
 	hydratedEvidenceByCandidateKey?: ReadonlyMap<string, CandidateEvidencePackage> | null,
-): ReadonlyMap<number, ReadonlySet<number>> {
+): ReadonlyMap<string, ReadonlySet<number>> {
 	const comparisonProfileByCandidateKeyAndSurfaceGroup = new Map<
 		string,
 		EvidencePackingProfile
@@ -969,15 +1084,20 @@ function buildAllowedBodyOpaqueRescueSurfaceGroups(
 	const bestBySurfaceGroupIndex = new Map<number, EvidencePackingProfile>();
 	const hasOtherFamilyEvidenceBySurfaceGroup = new Map<number, boolean>();
 	for (const candidateRecall of candidateDocs) {
+		const candidateBase = getCandidateBase(candidateRecall);
+		const shardUnitFamilyMatches = filterUnitFamilyMatchesForCandidateShard(
+			unitFamilyMatches,
+			candidateRecall,
+		);
 		for (const groupRecall of candidateRecall.hanSurfaceGroupRecalls) {
 			if (groupRecall.bodySeedBlockIds.length === 0) {
 				continue;
 			}
 			const comparisonProfile = buildPackingProfile(
-				base,
+				candidateBase,
 				queryAnalysis,
 				candidateRecall,
-				unitFamilyMatches,
+				shardUnitFamilyMatches,
 				{
 					allowBodyOpaqueRescueSurfaceGroupIndices: null,
 					excludeSurfaceGroupIndices: new Set<number>([groupRecall.surfaceGroupIndex]),
@@ -1009,16 +1129,17 @@ function buildAllowedBodyOpaqueRescueSurfaceGroups(
 			}
 		}
 	}
-	const allowedByLiveDocSlot = new Map<number, Set<number>>();
+	const allowedByCandidateKey = new Map<string, Set<number>>();
 	for (const candidateRecall of candidateDocs) {
+		const candidateKey = buildCandidateHydrationKey(candidateRecall);
 		for (const groupRecall of candidateRecall.hanSurfaceGroupRecalls) {
 			if (groupRecall.bodySeedBlockIds.length === 0) {
 				continue;
 			}
 			if (!hasOtherFamilyEvidenceBySurfaceGroup.get(groupRecall.surfaceGroupIndex)) {
 				pushAllowedBodyOpaqueRescueSurfaceGroup(
-					allowedByLiveDocSlot,
-					candidateRecall.liveDocSlot,
+					allowedByCandidateKey,
+					candidateKey,
 					groupRecall.surfaceGroupIndex,
 				);
 				continue;
@@ -1040,13 +1161,13 @@ function buildAllowedBodyOpaqueRescueSurfaceGroups(
 				continue;
 			}
 			pushAllowedBodyOpaqueRescueSurfaceGroup(
-				allowedByLiveDocSlot,
-				candidateRecall.liveDocSlot,
+				allowedByCandidateKey,
+				candidateKey,
 				groupRecall.surfaceGroupIndex,
 			);
 		}
 	}
-	return allowedByLiveDocSlot;
+	return allowedByCandidateKey;
 }
 
 function buildBodyOpaqueRescueGateKey(
@@ -1060,20 +1181,143 @@ function buildBodyOpaqueRescueGateKey(
 }
 
 function pushAllowedBodyOpaqueRescueSurfaceGroup(
-	target: Map<number, Set<number>>,
-	liveDocSlot: number,
+	target: Map<string, Set<number>>,
+	candidateKey: string,
 	surfaceGroupIndex: number,
 ): void {
-	const existing = target.get(liveDocSlot);
+	const existing = target.get(candidateKey);
 	if (existing != null) {
 		existing.add(surfaceGroupIndex);
 		return;
 	}
-	target.set(liveDocSlot, new Set<number>([surfaceGroupIndex]));
+	target.set(candidateKey, new Set<number>([surfaceGroupIndex]));
 }
 
 function roundDebugMs(value: number): number {
 	return Math.round(value * 1000) / 1000;
+}
+
+function buildResidentBaseByShardKey(indexView: ResidentIndexView): Map<string, ResidentBase> {
+	return new Map(
+		indexView.shards.map((shard) => [
+			buildResidentShardKey(shard.shardId, shard.generation),
+			shard.base,
+		]),
+	);
+}
+
+function buildResidentShardKey(shardId: string, generation: number): string {
+	return `${shardId}@${generation}`;
+}
+
+function buildMergedFuzzyRescueIndex(indexView: ResidentIndexView): ResidentFuzzyRescueIndex {
+	const mergedLookup = new Map<string, Uint32Array>();
+	let indexedMetadataFamilyCount = 0;
+	let bytes = 0;
+	for (const shard of indexView.shards) {
+		const fuzzyRescue = shard.base.fuzzyRescue;
+		if (fuzzyRescue == null) {
+			continue;
+		}
+		indexedMetadataFamilyCount += fuzzyRescue.indexedMetadataFamilyCount;
+		bytes += fuzzyRescue.bytes;
+		for (const [lookupKey, slots] of fuzzyRescue.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey) {
+			mergedLookup.set(lookupKey, slots);
+		}
+	}
+	return {
+		candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: mergedLookup,
+		indexedMetadataFamilyCount,
+		fuzzyLookupKeyCount: mergedLookup.size,
+		bytes,
+	};
+}
+
+function collectShardFamilyMatches(
+	shards: ResidentIndexView["shards"],
+	queryAnalysis: V3RecallState["queryAnalysis"],
+	options: CoverageLexicalV3SearchOptions,
+	fuzzyRescueIndex: ResidentFuzzyRescueIndex,
+): readonly V3QueryUnitFamilyMatches[] {
+	const matchesByQueryUnitIndex = new Map<number, V3QueryUnitFamilyMatches>();
+		for (const shard of shards) {
+		const shardMatches = lookupQueryUnitFamilies(
+			shard.base,
+			queryAnalysis,
+			options,
+			fuzzyRescueIndex,
+		);
+		for (const unitMatches of shardMatches) {
+			const shardOwnedUnitMatches: V3QueryUnitFamilyMatches = {
+				...unitMatches,
+				matches: unitMatches.matches.map((match) => ({
+					...match,
+					shardId: shard.shardId,
+					shardGeneration: shard.generation,
+				})),
+			};
+			const existing = matchesByQueryUnitIndex.get(unitMatches.queryUnitIndex);
+			if (existing == null) {
+				matchesByQueryUnitIndex.set(unitMatches.queryUnitIndex, shardOwnedUnitMatches);
+				continue;
+			}
+			matchesByQueryUnitIndex.set(unitMatches.queryUnitIndex, {
+				...existing,
+				matches: [...existing.matches, ...shardOwnedUnitMatches.matches],
+			});
+		}
+	}
+	return [...matchesByQueryUnitIndex.values()].sort(
+		(left, right) => left.queryUnitIndex - right.queryUnitIndex,
+	);
+}
+
+function collectShardCandidateDocs(
+	shards: ResidentIndexView["shards"],
+	queryAnalysis: V3RecallState["queryAnalysis"],
+	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
+): V3CandidateDocRecall[] {
+	const candidateDocs: V3CandidateDocRecall[] = [];
+	for (const shard of shards) {
+		const shardUnitFamilyMatches = filterUnitFamilyMatchesForShard(
+			unitFamilyMatches,
+			shard.shardId,
+			shard.generation,
+		);
+		candidateDocs.push(
+			...recallCandidateDocs(shard.base, queryAnalysis, shardUnitFamilyMatches, {
+				shardId: shard.shardId,
+				shardGeneration: shard.generation,
+			}),
+		);
+	}
+	return candidateDocs;
+}
+
+function filterUnitFamilyMatchesForCandidateShard(
+	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
+	candidateRecall: Pick<V3CandidateDocRecall, "shardId" | "shardGeneration">,
+): readonly V3QueryUnitFamilyMatches[] {
+	return filterUnitFamilyMatchesForShard(
+		unitFamilyMatches,
+		candidateRecall.shardId,
+		candidateRecall.shardGeneration,
+	);
+}
+
+function filterUnitFamilyMatchesForShard(
+	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
+	shardId: string,
+	shardGeneration: number,
+): readonly V3QueryUnitFamilyMatches[] {
+	return unitFamilyMatches.map((unitMatches) => ({
+		...unitMatches,
+		matches: unitMatches.matches.filter(
+			(match) =>
+				(match.shardId == null || match.shardId === shardId) &&
+				(match.shardGeneration == null || match.shardGeneration === shardGeneration),
+		),
+	}));
 }
 
 function materializeResidentColdEvidenceRows(
@@ -1129,6 +1373,3 @@ function materializeResidentColdEvidenceRows(
 		),
 	};
 }
-
-
-

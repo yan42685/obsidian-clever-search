@@ -1340,3 +1340,22 @@ Validation completed for this update:
   2026-04-25 after shard-aware cold-row ownership was restored in test-only
   mocks; the remaining failures cluster around Han rescue / singleton-completion
   semantics and are no longer explained by missing cold evidence ownership.
+
+### 2026-04-26 Update: Shard-Native Terminology Contract
+
+- V3 now treats `Shard` as the sole ownership, lifecycle, compact, and replace
+  unit across both hot resident state and cold persisted state.
+- `Slot` is reserved for shard-local integer identities only:
+  `liveDocSlot` and `shardLocalFamilySlot`.
+- `Slice` is the canonical architectural term for shard-owned cold evidence
+  chunks; Dexie rows remain the storage-layer implementation of those slices,
+  not a competing top-level concept.
+- `slice != shard`: compact, replace, and generation boundaries belong to the
+  shard, while slices are content chunks owned by a shard.
+- candidate hydration identity is now formally the shard-aware tuple
+  `shardId + shardGeneration + liveDocSlot`; `docId` and `familyId` remain
+  lower-level resident implementation details rather than exposed ranking or
+  locator identities.
+- single-shard runtime execution remains intentional in this phase: the active
+  shard is still `base-0`, and this terminology update does not by itself
+  introduce multi-shard fan-out or ranking behavior changes.

@@ -127,6 +127,7 @@ function createBlockCandidate(params: {
   );
   const endLineOffset = lineOffsets[endLine] ?? 0;
   return {
+    docRef: file.docRef,
     filePath: file.filePath,
     snapshotGeneration: params.snapshotGeneration,
     snapshotSource: params.snapshotSource,
@@ -240,4 +241,3 @@ function buildHeadingChainsByLine(
 
   return chainsByLine;
 }
-

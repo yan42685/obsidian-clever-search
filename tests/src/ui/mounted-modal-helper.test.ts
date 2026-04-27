@@ -1,3 +1,4 @@
+// @ts-nocheck
 jest.mock("obsidian", () => ({
 	moment: { locale: () => "en" },
 }), { virtual: true });

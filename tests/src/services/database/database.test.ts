@@ -9,6 +9,23 @@ function createUpgradeError(message = "Not yet support for changing primary key"
   return error;
 }
 
+type DatabaseRecoveryHarness = {
+  db: {
+    open: jest.Mock;
+    close: jest.Mock;
+    dbName: string;
+    dbVersion: number;
+    consumeSchemaUpgradeDetected: jest.Mock;
+  };
+  resetTargetedPersistentIndexState: jest.Mock;
+  deleteDatabaseByName: jest.Mock;
+  openAndConsumeSchemaUpgradeReport: Database["openAndConsumeSchemaUpgradeReport"];
+};
+
+function createDatabaseRecoveryHarness(): DatabaseRecoveryHarness {
+  return Object.create(Database.prototype) as DatabaseRecoveryHarness;
+}
+
 describe("Database Dexie upgrade recovery", () => {
   const createdDbNames: string[] = [];
   let consoleWarnSpy: jest.SpyInstance;
@@ -39,7 +56,7 @@ describe("Database Dexie upgrade recovery", () => {
     }
   });
 
-  test("upgrades the old lexical evidence primary keys through the 28.3 bridge", async () => {
+  test("rebuilds an old path-keyed database instead of keeping bridge compatibility", async () => {
     const appId = `db-upgrade-${Date.now()}`;
     const dbName = `clever-search/${appId}`;
     createdDbNames.push(dbName);
@@ -101,14 +118,77 @@ describe("Database Dexie upgrade recovery", () => {
 
     const report = await database.openAndConsumeSchemaUpgradeReport();
 
-    expect(report).toEqual({
+    expect(report).toMatchObject({
       schemaUpgradeDetected: true,
-      recovery: null,
+      recovery: {
+        mode: "full-reset",
+        targetVersion: database.db.dbVersion,
+        initialErrorName: "UpgradeError",
+        preservedTokenStats: true,
+      },
     });
     await expect(database.db.lexicalBodyEvidence.count()).resolves.toBe(0);
     await expect(database.db.lexicalHanDocEvidence.count()).resolves.toBe(0);
     await expect(database.db.lexicalHanBodyEvidence.count()).resolves.toBe(0);
     await expect(database.db.hybridTokenStats.count()).resolves.toBe(1);
+
+    database.db.close();
+  });
+
+  test("rebuilds a 29.4 path-keyed Hybrid database and creates production stores", async () => {
+    const appId = `db-v3-stores-${Date.now()}`;
+    const dbName = `clever-search/${appId}`;
+    createdDbNames.push(dbName);
+
+    const legacyDb = new Dexie(dbName);
+    legacyDb.version(29.4).stores({
+      pluginSetting: "++id",
+      lexicalSearchSnapshots: "++id",
+      lexicalIndexedFileRefs: "path",
+      lexicalIndexedMetadata: "filePath",
+      lexicalFuzzyRescue: "id",
+      lexicalBodyEvidence:
+        "id, shardId, shardGeneration, docRef, generation, blockOrdinal, [shardId+shardGeneration+docRef+generation+blockOrdinal]",
+      lexicalHanDocEvidence:
+        "id, shardId, shardGeneration, docRef, generation, [shardId+shardGeneration+docRef+generation]",
+      lexicalHanBodyEvidence:
+        "id, shardId, shardGeneration, docRef, generation, blockOrdinal, [shardId+shardGeneration+docRef+generation+blockOrdinal]",
+      docRegistry: "docRef, path, deleted, liveGeneration, updatedAt",
+      docRegistryMeta: "key",
+      hybridChunks: "++id, filePath",
+      fileSnapshots: "filePath",
+      hybridDirtyShadows: "filePath",
+      hybridChunkVectors: "filePath",
+      hybridHnswSmall: "id",
+      hybridIndexedFileRefs: "path",
+      indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
+      indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
+      hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+      hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
+      hybridTokenBudgetResets: "++id, periodKey",
+    });
+    await legacyDb.open();
+    legacyDb.close();
+
+    const database = createDatabaseHarness(appId);
+
+    const report = await database.openAndConsumeSchemaUpgradeReport();
+
+    expect(report).toMatchObject({
+      schemaUpgradeDetected: true,
+      recovery: {
+        mode: "full-reset",
+        targetVersion: database.db.dbVersion,
+        initialErrorName: "UpgradeError",
+      },
+    });
+    await expect(database.db.coverageLexicalV3ShardRegistry.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3Invalidations.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3ResidentShardArtifacts.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3ActiveOverlayJournal.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3CompactJobs.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3CompactTempArtifacts.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3SnapshotManifests.count()).resolves.toBe(0);
 
     database.db.close();
   });
@@ -183,22 +263,12 @@ describe("Database Dexie upgrade recovery", () => {
       .mockRejectedValueOnce(createUpgradeError())
       .mockResolvedValueOnce(undefined);
     const consumeSchemaUpgradeDetected = jest.fn(() => false);
-    const database = Object.create(Database.prototype) as Database & {
-      db: {
-        open: jest.Mock;
-        close: jest.Mock;
-        dbName: string;
-        dbVersion: number;
-        consumeSchemaUpgradeDetected: jest.Mock;
-      };
-      resetTargetedPersistentIndexState: jest.Mock;
-      deleteDatabaseByName: jest.Mock;
-    };
+    const database = createDatabaseRecoveryHarness();
     database.db = {
       open,
       close: jest.fn(),
       dbName: "clever-search/stub-targeted",
-      dbVersion: 28.4,
+      dbVersion: 29.5,
       consumeSchemaUpgradeDetected,
     };
     database.resetTargetedPersistentIndexState = jest.fn(async () => {});
@@ -211,7 +281,7 @@ describe("Database Dexie upgrade recovery", () => {
       recovery: {
         mode: "targeted-reset",
         dbName: "clever-search/stub-targeted",
-        targetVersion: 28.4,
+        targetVersion: 29.5,
         initialErrorName: "UpgradeError",
         initialErrorMessage: "Not yet support for changing primary key",
         preservedTokenStats: true,
@@ -226,22 +296,12 @@ describe("Database Dexie upgrade recovery", () => {
       .fn()
       .mockRejectedValueOnce(createUpgradeError())
       .mockResolvedValueOnce(undefined);
-    const database = Object.create(Database.prototype) as Database & {
-      db: {
-        open: jest.Mock;
-        close: jest.Mock;
-        dbName: string;
-        dbVersion: number;
-        consumeSchemaUpgradeDetected: jest.Mock;
-      };
-      resetTargetedPersistentIndexState: jest.Mock;
-      deleteDatabaseByName: jest.Mock;
-    };
+    const database = createDatabaseRecoveryHarness();
     database.db = {
       open,
       close: jest.fn(),
       dbName: "clever-search/stub-full",
-      dbVersion: 28.4,
+      dbVersion: 29.5,
       consumeSchemaUpgradeDetected: jest.fn(() => false),
     };
     database.resetTargetedPersistentIndexState = jest.fn(async () => {
@@ -256,10 +316,11 @@ describe("Database Dexie upgrade recovery", () => {
       recovery: {
         mode: "full-reset",
         dbName: "clever-search/stub-full",
-        targetVersion: 28.4,
+        targetVersion: 29.5,
         initialErrorName: "UpgradeError",
         initialErrorMessage: "Not yet support for changing primary key",
         preservedTokenStats: false,
+        preservedSettings: false,
       },
     });
     expect(database.resetTargetedPersistentIndexState).toHaveBeenCalledTimes(1);
@@ -270,24 +331,14 @@ describe("Database Dexie upgrade recovery", () => {
 
   test("auto-heals a given upgrade signature only once per startup", async () => {
     const upgradeError = createUpgradeError();
-    const database = Object.create(Database.prototype) as Database & {
-      db: {
-        open: jest.Mock;
-        close: jest.Mock;
-        dbName: string;
-        dbVersion: number;
-        consumeSchemaUpgradeDetected: jest.Mock;
-      };
-      resetTargetedPersistentIndexState: jest.Mock;
-      deleteDatabaseByName: jest.Mock;
-    };
+    const database = createDatabaseRecoveryHarness();
     database.db = {
       open: jest.fn(async () => {
         throw upgradeError;
       }),
       close: jest.fn(),
       dbName: "clever-search/stub-once",
-      dbVersion: 28.4,
+      dbVersion: 29.5,
       consumeSchemaUpgradeDetected: jest.fn(() => false),
     };
     database.resetTargetedPersistentIndexState = jest.fn(async () => {

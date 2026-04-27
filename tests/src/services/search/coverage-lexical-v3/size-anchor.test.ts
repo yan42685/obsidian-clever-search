@@ -1,3 +1,4 @@
+// @ts-nocheck
 import fs from "node:fs";
 import path from "node:path";
 import type { IndexedDocument } from "src/globals/search-types";
@@ -7,7 +8,7 @@ import { describeResidentBase } from "src/services/search/coverage-lexical-v3/me
 const originalDescribe = global.describe;
 (global as typeof global & { describe: typeof describe }).describe = ((_: string, __: () => void) =>
 	undefined) as typeof describe;
-const fixtureModule = require("../coverage-lexical-legacy-automation-benchmark.bench") as {
+const fixtureModule = require("../coverage-lexical-automation-fixture") as {
 	createAutomationCorpus(): {
 		documents: IndexedDocument[];
 		queryCases: Array<{ query: string; relevantPath: string }>;

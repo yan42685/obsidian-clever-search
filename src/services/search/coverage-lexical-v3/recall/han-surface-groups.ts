@@ -46,18 +46,6 @@ export function planHanSurfaceGroupRecallsAfterFamilyLookup(
 		const matchedRealUnitIndices = realPrimaryUnits
 			.filter((unit) => matchedQueryUnitIndexSet.has(unit.index))
 			.map((unit) => unit.index);
-		if (matchedRealUnitIndices.length === 0) {
-			out.push({
-				surfaceGroupIndex: group.index,
-				surfaceText: group.text,
-				realUnitIndices,
-				matchedRealUnitIndices,
-				matchedCharMask: Array.from({ length: Array.from(group.text).length }, () => false),
-				rescueMode: group.hanBigramTexts.length > 0 ? "whole_group_when_real_miss" : "none",
-				rescueBigrams: group.hanBigramTexts,
-			});
-			continue;
-		}
 		const matchedRealUnitTexts = realPrimaryUnits
 			.filter((unit) => matchedQueryUnitIndexSet.has(unit.index))
 			.map((unit) => unit.text);
@@ -71,14 +59,25 @@ export function planHanSurfaceGroupRecallsAfterFamilyLookup(
 			matchedCharMask,
 			group.hanBigramTexts,
 		);
+		const hasPotentialTokenizerMismatch = group.hanBigramTexts.length > 0;
 		out.push({
 			surfaceGroupIndex: group.index,
 			surfaceText: group.text,
 			realUnitIndices,
 			matchedRealUnitIndices,
 			matchedCharMask,
-			rescueMode: rescueBigrams.length > 0 ? "residual_only" : "none",
-			rescueBigrams,
+			rescueMode:
+				rescueBigrams.length > 0
+					? "residual_only"
+					: hasPotentialTokenizerMismatch
+						? "whole_group_when_real_miss"
+						: "none",
+			rescueBigrams:
+				rescueBigrams.length > 0
+					? rescueBigrams
+					: hasPotentialTokenizerMismatch
+						? group.hanBigramTexts
+						: [],
 		});
 	}
 	return out;
@@ -150,14 +149,25 @@ export function resolveCandidateHanSurfaceGroups(
 			matchedCharMask,
 			group.hanBigramTexts,
 		);
+		const hasUnmatchedRealUnits = matchedRealUnitIndices.length < realUnitIndices.length;
 		out.push({
 			surfaceGroupIndex: group.index,
 			surfaceText: group.text,
 			realUnitIndices,
 			matchedRealUnitIndices,
 			matchedCharMask,
-			rescueMode: rescueBigrams.length > 0 ? "residual_only" : "none",
-			rescueBigrams,
+			rescueMode:
+				rescueBigrams.length > 0
+					? "residual_only"
+					: hasUnmatchedRealUnits && group.hanBigramTexts.length > 0
+						? "whole_group_when_real_miss"
+						: "none",
+			rescueBigrams:
+				rescueBigrams.length > 0
+					? rescueBigrams
+					: hasUnmatchedRealUnits
+						? group.hanBigramTexts
+						: [],
 		});
 	}
 	return out;

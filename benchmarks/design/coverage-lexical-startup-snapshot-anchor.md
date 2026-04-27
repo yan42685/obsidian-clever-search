@@ -388,3 +388,24 @@ Validation completed for this update:
   `coverage-lexical-v3/resident-base.test.ts`, and
   `data-manager-lexical-startup-reconcile.test.ts`.
   not startup/store ownership or hydration key shape.
+
+## Shard-Native Terminology Update
+
+Updated on 2026-04-26:
+
+- startup and snapshot wording now align to the same shard-native ownership
+  contract used by the runtime:
+  - `Shard` = ownership, lifecycle, compact, and replace unit
+  - `liveDocSlot` / `shardLocalFamilySlot` = shard-local integer identities
+  - `Slice` = shard-owned cold evidence chunk
+  - `Row` = storage implementation of a slice
+- the active startup/runtime execution model is still single-shard (`base-0`);
+  this terminology update does not promote multi-shard recall or ranking
+  fan-out by itself
+- cold evidence stays outside the hot snapshot boundary as shard-owned slices,
+  while row ids remain only the persisted keys used to hydrate those locators
+- snapshot and self-heal planning should therefore treat shard replacement as
+  the future compact unit, not individual slices
+- terminology cleanup is intentionally decoupled from query-benchmark scoring:
+  this phase stabilizes ownership language and identity boundaries without
+  changing ranking gates, opaque rescue, or Han refine behavior

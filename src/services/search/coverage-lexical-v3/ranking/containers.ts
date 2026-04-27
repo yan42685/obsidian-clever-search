@@ -5,10 +5,13 @@ import {
 	logCoverageLexicalV3Debug,
 	shouldLogCoverageLexicalV3Debug,
 } from "../debug";
+import type { HanRescueAssessment } from "../han-rescue";
 import {
-	HAN_BODY_LOCALITY_MAX_ADJACENT_GAP,
-	type HanRescueAssessment,
-} from "../han-rescue";
+	BODY_LOCALITY_MAX_ADJACENT_GAP,
+	BODY_LOCALITY_MAX_HEAD_TAIL_SPAN,
+	BODY_LOCALITY_STRONG_ADJACENT_GAP,
+	BODY_LOCALITY_TIGHTNESS_EXPONENT,
+} from "../body-locality/constants";
 import {
 	collectHanRescueArtifacts,
 	type HanBodyRescueEvaluation,
@@ -111,6 +114,7 @@ const CHAIN_BOUNDARY_PENALTY = 0;
 const WITNESS_MATCH_FAMILY_ID_OFFSET = 1;
 const BLOCK_SHORTLIST_LIMIT = 6;
 const BODY_WINDOW_PREFILTER_PER_BUCKET = 4;
+const BODY_LOCALITY_TIGHTNESS_COMPACTNESS_WEIGHT = 90;
 
 export type CandidateDocEvidence = Readonly<{
 	identityFamilyIds: readonly number[];
@@ -242,6 +246,8 @@ type BodyWindowCandidate = Readonly<{
 	windowWidth: number;
 	gapCount: number;
 	density: number;
+	isLocalityTight: boolean;
+	localityTightness: number;
 	maxAdjacentGap: number;
 	preservesQueryOrder: boolean;
 	windowStart: number;
@@ -730,12 +736,12 @@ export function buildPackingProfile(
 	const routeProvidesNovelCoverage = routeContainerProvidesNovelCoverage(
 		routeContainer,
 		identityContainer,
-		bodyWindowContainer,
+		bodyWindowContainer?.isLocalityTight ? bodyWindowContainer : null,
 	);
 	const mainContainers = [
 		identityContainer,
 		routeProvidesNovelCoverage ? routeContainer : null,
-		bodyWindowContainer,
+		bodyWindowContainer?.isLocalityTight ? bodyWindowContainer : null,
 	]
 		.filter(
 			(container): container is IdentityContainer | RouteContainer | BodyWindowContainer =>
@@ -778,6 +784,7 @@ export function buildPackingProfile(
 		surfaceCoverageShapeKey: queryAnalysis.surfaceCoverageShapeKey,
 		realizedCoverageCount: realizedFamilies.length,
 		coverageGate,
+		exactOrPrefixUnitCount: realizedFamilies.filter(isExactOrPrefixFamily).length,
 		exactUnitCount: realizedFamilies.filter((family) => family.matchKind === "exact").length,
 		completedHanSurfaceGroupCount: hanSurfaceCompletionSummary.completedGroupCount,
 		hanSurfaceCompletionTierScoreTotal: hanSurfaceCompletionSummary.tierScoreTotal,
@@ -1373,7 +1380,7 @@ function buildWitnessPositionedOccurrences(
 		Readonly<{ matchKey: number; start: number; text: string }>
 	>,
 ): PositionedFamilyOccurrence[] {
-	return occurrences.map((occurrence, index) => {
+	return Array.from(occurrences, (occurrence, index) => {
 		const familyId = occurrence.matchKey;
 		const approxLength = Math.max(1, occurrence.text.length);
 		return {
@@ -1396,7 +1403,7 @@ function buildColdWitnessOccurrences(
 	}
 	const effectiveTexts = texts ?? [];
 	const effectiveMatchKeys = matchKeys;
-	return effectiveMatchKeys.map((matchKey, index) => ({
+	return Array.from(effectiveMatchKeys, (matchKey, index) => ({
 		matchKey,
 		start: startOffsets[index] ?? 0,
 		text: effectiveTexts[index] ?? "",
@@ -1454,8 +1461,10 @@ function matchKindPreference(kind: V3QueryFamilyMatch["matchKind"]): number {
 			return 1;
 		case "prefix":
 			return 2;
-		case "fuzzy":
+		case "morphology":
 			return 3;
+		case "fuzzy":
+			return 4;
 	}
 }
 
@@ -2050,11 +2059,16 @@ function materializeBodyWindowCandidateFromShortlistState(
 			state.approxHeadTailSpan * 16 -
 			state.approxTotalGapMass * 10 -
 			state.approxMaxAdjacentGap * 12 -
-			state.boundaryCrossingCount * 80,
+			state.boundaryCrossingCount * 80 +
+			computeBodyLocalityTightness(state.approxMaxAdjacentGap) *
+				BODY_LOCALITY_TIGHTNESS_COMPACTNESS_WEIGHT,
 		exactUnitCount: state.exactUnitCount,
 		windowWidth: ordinalSummary.windowWidth,
 		gapCount: ordinalSummary.gapCount,
 		density: coveredUnitIndices.length / Math.max(state.approxHeadTailSpan, 1),
+		isLocalityTight:
+			state.approxMaxAdjacentGap <= BODY_LOCALITY_STRONG_ADJACENT_GAP,
+		localityTightness: computeBodyLocalityTightness(state.approxMaxAdjacentGap),
 		maxAdjacentGap: ordinalSummary.maxAdjacentGap,
 		preservesQueryOrder: state.preservesQueryOrder,
 		windowStart: ordinalSummary.windowStart,
@@ -2069,6 +2083,18 @@ function materializeBodyWindowCandidateFromShortlistState(
 			unitCount: headingCorroborationUnitIndices.length,
 		},
 	};
+}
+
+function computeBodyLocalityTightness(maxAdjacentGap: number): number {
+	if (!Number.isFinite(maxAdjacentGap)) {
+		return 0;
+	}
+	const clampedGap = Math.max(
+		0,
+		Math.min(maxAdjacentGap, BODY_LOCALITY_MAX_ADJACENT_GAP),
+	);
+	const ratio = clampedGap / BODY_LOCALITY_MAX_ADJACENT_GAP;
+	return 1 - Math.pow(ratio, BODY_LOCALITY_TIGHTNESS_EXPONENT);
 }
 
 function buildOrdinalWindowSummary(
@@ -2122,8 +2148,8 @@ function passesBodyWindowShortlistAdmission(
 		return (
 			state.coveredDistinctUnitCount >= 1 &&
 			state.boundaryCrossingCount <= 1 &&
-			state.approxMaxAdjacentGap <= 15 &&
-			state.approxHeadTailSpan <= 160
+			state.approxMaxAdjacentGap <= BODY_LOCALITY_MAX_ADJACENT_GAP &&
+			state.approxHeadTailSpan <= BODY_LOCALITY_MAX_HEAD_TAIL_SPAN
 		);
 	}
 	return passesBlockShortlistAdmission({
@@ -2315,6 +2341,14 @@ function isCompoundPrefixFamily(family: RealizedQueryUnitFamily): boolean {
 	return (
 		family.matchKind === "prefix" &&
 		(/[-_./]/u.test(family.familyText) || isCompoundBackedPrefixFamily(family))
+	);
+}
+
+function isExactOrPrefixFamily(family: RealizedQueryUnitFamily): boolean {
+	return (
+		family.matchKind === "exact" ||
+		family.matchKind === "opaque_exact" ||
+		family.matchKind === "prefix"
 	);
 }
 
@@ -3580,7 +3614,7 @@ function isSingletonHanCompletionLocalityQualified(
 	}
 	return (
 		(bestAnchorDistance ?? Number.MAX_SAFE_INTEGER) <=
-		HAN_BODY_LOCALITY_MAX_ADJACENT_GAP
+		BODY_LOCALITY_MAX_ADJACENT_GAP
 	);
 }
 
@@ -3813,4 +3847,3 @@ function getHanSurfaceCompletionTierScore(tier: HanSurfaceCompletionTier): numbe
 			return 0;
 	}
 }
-

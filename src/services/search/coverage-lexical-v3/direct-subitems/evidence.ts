@@ -1,13 +1,10 @@
 import type { ResidentBase } from "../layout/types";
-import {
-	HAN_BODY_LOCALITY_MAX_ADJACENT_GAP,
-	type HanRescueAssessment,
-} from "../han-rescue";
+import type { HanRescueAssessment } from "../han-rescue";
+import { BODY_LOCALITY_MAX_ADJACENT_GAP } from "../body-locality/constants";
 import type { V3QueryAnalysis, V3QuerySurfaceGroup, V3QueryUnit } from "../query/analysis";
 import {
-	createV3BodyBlockChunkRanges,
-	V3_BODY_BLOCK_MAX_TOKENS,
-	V3_BODY_BLOCK_TARGET_TOKENS,
+	normalizeText,
+	splitBodyBlocksWithDocumentTokenizer,
 } from "../query/text";
 import { getLiveDocBodyBlockIds, type V3CandidateDocRecall, type V3ResolvedHanSurfaceGroup } from "../recall";
 import { resolveCandidateHanSurfaceGroups } from "../recall/han-surface-groups";
@@ -35,6 +32,36 @@ import type {
 	V3DirectSubitemHighlightTier,
 	V3DirectSubitemResidualScopeTier,
 } from "./contracts";
+import type { V3DirectSubitemPreparedText } from "./contracts";
+
+export function normalizeV3DirectSubitemSnapshotText(snapshotText: string): string {
+	return normalizeText(snapshotText).replace(/\r\n?/gu, "\n");
+}
+
+export function prepareV3DirectSubitemSnapshotText(
+	snapshotText: string,
+): V3DirectSubitemPreparedText {
+	const normalizedText = normalizeV3DirectSubitemSnapshotText(snapshotText);
+	const blocks = splitBodyBlocksWithDocumentTokenizer(normalizedText);
+	let offset = 0;
+	const rawBlocks: V3DirectSubitemPreparedText["rawBlocks"] = blocks.map((block, index) => {
+		const start = normalizedText.indexOf(block.normalizedText, offset);
+		const blockStart = start >= 0 ? start : offset;
+		const blockEnd = blockStart + block.normalizedText.length;
+		offset = blockEnd;
+		return {
+			blockId: index,
+			ordinal: block.ordinal,
+			start: blockStart,
+			end: blockEnd,
+			text: block.normalizedText,
+		};
+	});
+	return {
+		text: normalizedText,
+		rawBlocks,
+	};
+}
 
 const DIRECT_SUBITEM_SINGLETON_HAN_TIER_SCORE = {
 	none: 0,
@@ -87,8 +114,9 @@ export function buildV3DirectSubitemCandidates(params: {
 	if (params.snapshotText.trim().length === 0) {
 		return [];
 	}
+	const preparedText = prepareV3DirectSubitemSnapshotText(params.snapshotText);
 	const rawBlocks = splitRawBodyBlocks(
-		params.snapshotText,
+		preparedText,
 		params.candidate,
 		params.candidateRecall,
 		params.residentBase,
@@ -152,7 +180,7 @@ export function buildV3DirectSubitemCandidates(params: {
 		params.queryAnalysis,
 		params.candidate,
 	);
-	const snapshotGapIndex = buildWeightedGapIndex(params.snapshotText);
+	const snapshotGapIndex = buildWeightedGapIndex(preparedText.text);
 	const candidates = scopes.flatMap((scope) => {
 		const blockById = new Map<number, RawBlock>(
 			scope.blocks.map((block) => [block.blockId, block]),
@@ -161,7 +189,7 @@ export function buildV3DirectSubitemCandidates(params: {
 			scope.blocks.map((block) => [block.blockId, buildWeightedGapIndex(block.text)]),
 		);
 		return buildCandidatesForScope({
-			snapshotText: params.snapshotText,
+			snapshotText: preparedText.text,
 			snapshotGapIndex,
 			queryAnalysis: params.queryAnalysis,
 			candidate: params.candidate,
@@ -513,7 +541,7 @@ function buildCandidateFromState(
 		totalGap += gap;
 		maxAdjacentGap = Math.max(maxAdjacentGap, gap);
 	}
-	if (maxAdjacentGap > HAN_BODY_LOCALITY_MAX_ADJACENT_GAP) {
+	if (maxAdjacentGap > BODY_LOCALITY_MAX_ADJACENT_GAP) {
 		return null;
 	}
 	const confirmedSurfaceAtoms = buildConfirmedSurfaceAtoms(
@@ -789,7 +817,7 @@ function collectSingletonHanAtomsForScope(
 			}
 			if (
 				bestOffset == null ||
-				bestGap > HAN_BODY_LOCALITY_MAX_ADJACENT_GAP
+		bestGap > BODY_LOCALITY_MAX_ADJACENT_GAP
 			) {
 				continue;
 			}
@@ -835,7 +863,7 @@ function resolveSingletonHanCompletionTierForScope(
 	if (!Number.isFinite(bestGap)) {
 		return "none";
 	}
-	return bestGap <= HAN_BODY_LOCALITY_MAX_ADJACENT_GAP ? "tight" : "none";
+	return bestGap <= BODY_LOCALITY_MAX_ADJACENT_GAP ? "tight" : "none";
 }
 
 function computeScopeAtomBoundaryGap(
@@ -1032,7 +1060,7 @@ function createScope(
 }
 
 function splitRawBodyBlocks(
-	snapshotText: string,
+	preparedText: V3DirectSubitemPreparedText,
 	candidate: EvidencePackingProfile,
 	candidateRecall: V3CandidateDocRecall,
 	residentBase: ResidentBase,
@@ -1048,20 +1076,15 @@ function splitRawBodyBlocks(
 			blockIdByOrdinal.set(ordinal, blockId);
 		}
 	}
-	const ranges = createV3BodyBlockChunkRanges(
-		snapshotText,
-		V3_BODY_BLOCK_TARGET_TOKENS,
-		V3_BODY_BLOCK_MAX_TOKENS,
-	);
 	const blocks: RawBlock[] = [];
 	for (const [ordinal, blockId] of [...blockIdByOrdinal.entries()].sort(
 		(left, right) => left[0] - right[0],
 	)) {
-		const range = ranges[ordinal];
+		const range = preparedText.rawBlocks.find((block) => block.ordinal === ordinal);
 		if (range == null) {
 			continue;
 		}
-		pushBlock(snapshotText, range.startOffset, range.endOffset, ordinal, blockId, blocks);
+		pushBlock(preparedText.text, range.start, range.end, ordinal, blockId, blocks);
 	}
 	return blocks;
 }
@@ -1106,13 +1129,17 @@ function collectSameDocSeedNeighborhoodBlockIds(
 	seedBlockId: number,
 	availableBlocks: readonly Pick<RawBlock, "blockId">[],
 ): number[] {
-	const availableBlockIds = new Set(availableBlocks.map((block) => block.blockId));
+	const seedIndex = availableBlocks.findIndex((block) => block.blockId === seedBlockId);
+	if (seedIndex < 0) {
+		return [];
+	}
 	const out: number[] = [];
-	for (const candidateBlockId of [seedBlockId - 1, seedBlockId, seedBlockId + 1]) {
-		if (candidateBlockId < 0 || !availableBlockIds.has(candidateBlockId)) {
+	for (const candidateIndex of [seedIndex - 1, seedIndex, seedIndex + 1]) {
+		const candidateBlock = availableBlocks[candidateIndex];
+		if (candidateBlock == null) {
 			continue;
 		}
-		out.push(candidateBlockId);
+		out.push(candidateBlock.blockId);
 	}
 	return out;
 }

@@ -13,9 +13,7 @@ import {
 	type V3ResolvedHanSurfaceGroup,
 } from "./recall";
 import {
-	HAN_BODY_LOCALITY_MAX_ADJACENT_GAP,
 	HAN_BODY_LOCALITY_MAX_BLOCK_DISTANCE,
-	HAN_BODY_LOCALITY_MAX_HEAD_TAIL_SPAN,
 	HAN_METADATA_DISTANCE_PENALTY_PER_CHAR,
 	HAN_METADATA_MAX_DISTANCE_PENALTY,
 	HAN_RESCUE_BIGRAM_SUPPORT_WEIGHT,
@@ -27,6 +25,10 @@ import {
 	type HanRescueStrength,
 	type HanRescueWitnessKind,
 } from "./han-rescue";
+import {
+	BODY_LOCALITY_MAX_ADJACENT_GAP,
+	BODY_LOCALITY_MAX_HEAD_TAIL_SPAN,
+} from "./body-locality/constants";
 
 export type HanRescueDocEvidence = Readonly<{
 	identityWitnessTexts: readonly string[];
@@ -548,8 +550,8 @@ function collectBodyRescueEvaluations<TBodyWindow extends HanBodyWindowLike>(par
 				: (bodyWindow.blockIds[bodyWindow.blockIds.length - 1] ?? 0) -
 					(bodyWindow.blockIds[0] ?? 0);
 		const localityQualified =
-			bodyWindow.approxMaxAdjacentGap <= HAN_BODY_LOCALITY_MAX_ADJACENT_GAP &&
-			bodyWindow.approxHeadTailSpan <= HAN_BODY_LOCALITY_MAX_HEAD_TAIL_SPAN &&
+		bodyWindow.approxMaxAdjacentGap <= BODY_LOCALITY_MAX_ADJACENT_GAP &&
+		bodyWindow.approxHeadTailSpan <= BODY_LOCALITY_MAX_HEAD_TAIL_SPAN &&
 			blockDistance <= HAN_BODY_LOCALITY_MAX_BLOCK_DISTANCE;
 		const rescueMode = normalizeHanRescueMode(group.resolvedHanSurfaceGroup.rescueMode);
 		const matchedRealAnchorCount =

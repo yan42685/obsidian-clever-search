@@ -3,14 +3,14 @@
 Read these files before every cycle, in this order:
 
 1. `src/services/search/hybrid/automation-design.md`
-2. `src/services/search/coverage-lexical/automation.md`
+2. `benchmarks/design/coverage-lexical-v3-memory-first-architecture.md`
 
 If this file conflicts with either of them, those files win.
 
 ## Targets
 
-- mechanism target: `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
-- parameter target: `src/services/search/coverage-lexical/coverage-lexical-engine.ts`
+- mechanism target: `src/services/search/coverage-lexical-v3/file-search-engine.ts`
+- parameter target: `src/services/search/coverage-lexical-v3/file-search-engine.ts`
 - do not reintroduce removed legacy backends as hidden dependencies or comparison baselines
 
 ## Controller Contract
@@ -28,12 +28,12 @@ If this file conflicts with either of them, those files win.
 ## Workflow
 
 1. Form one primary hypothesis from the detailed rule files.
-2. Default to a mechanism-level cycle against `coverage-lexical`; use parameter mode only for small numeric tuning on the same engine.
+2. Default to a mechanism-level cycle against Coverage Lexical V3; use parameter mode only for small numeric tuning on the same engine.
 3. Keep one main hypothesis per cycle and one lane per cycle.
 4. Generate candidates instead of relying on a fixed built-in grid.
 5. Evaluate candidates serially in the current workspace.
 6. Multi-lane orchestration should evaluate lanes without mutating baseline first, then auto-commit only the final retained winner.
-7. Automation benchmark focus: compare `CoverageLexical` against `MiniSearch`, and keep one full run under `20s`.
+7. Automation benchmark focus: validate Coverage Lexical V3 quality, latency, and storage size, and keep one full run under `20s`.
 
 ## Workspace Setup
 

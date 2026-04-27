@@ -17,11 +17,19 @@ import type {
   BlobRecord,
   ChunkRow,
   ChunkVectorShardRow,
+  HybridDocState,
   HybridFileSnapshotRow,
   HybridDirtyShadowRow,
   HybridIndexedFileRef,
 } from "src/services/search/hybrid/hybrid-store";
 import type { SerializedFileSearchIndex } from "src/services/search/file-search-engine";
+import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
+import type { ActiveOverlayJournalEntry } from "src/services/search/coverage-lexical-v3/active-overlay-journal";
+import type {
+  CompactJobManifest,
+  CompactTempArtifact,
+} from "src/services/search/coverage-lexical-v3/compact";
+import type { CoverageLexicalV3SnapshotManifest } from "src/services/search/coverage-lexical-v3/snapshot";
 import { logger } from "src/utils/logger";
 import { getInstance, monitorDecorator } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -129,8 +137,53 @@ export type DocRegistryRow = {
   deleted: boolean;
   liveGeneration: number;
   contentFingerprint?: string;
+  denseReadyGeneration?: number;
+  denseTargetGeneration?: number;
+  denseState?: HybridDocState;
+  denseServeUntil?: number;
+  lastDenseSuccessAt?: number;
+  lastDenseAttemptAt?: number;
+  nextDenseAttemptAt?: number;
+  denseAttemptCount?: number;
+  denseFailureKind?: string;
   updatedAt: number;
 };
+
+export type CoverageLexicalV3ShardRegistryRow = {
+  shardId: string;
+  generation: number;
+  state: "active" | "sealing" | "sealed" | "compact_temp" | "garbage";
+  sourceBytes: number;
+  staleSourceBytes?: number;
+  docCount: number;
+  staleDocCount?: number;
+  createdOrder: number;
+  artifactOwner: string;
+};
+
+export type CoverageLexicalV3InvalidationRow = {
+  id: string;
+  shardId: string;
+  shardGeneration: number;
+  docRef: DocRef;
+  docGeneration: number;
+  reason: "superseded" | "deleted";
+  createdAt: number;
+};
+
+export type CoverageLexicalV3ResidentShardArtifactRow = {
+  id: string;
+  shardId: string;
+  generation: number;
+  artifactOwner: string;
+  base: ResidentBase;
+  createdAt: number;
+};
+
+export type CoverageLexicalV3ActiveOverlayJournalRow = ActiveOverlayJournalEntry;
+export type CoverageLexicalV3CompactJobManifestRow = CompactJobManifest;
+export type CoverageLexicalV3CompactTempArtifactRow = CompactTempArtifact;
+export type CoverageLexicalV3SnapshotManifestRow = CoverageLexicalV3SnapshotManifest;
 
 type DocRegistryMetaRow = {
   key: string;
@@ -148,6 +201,13 @@ const TARGETED_INDEX_RESET_TABLES = [
   "lexicalHanDocEvidence",
   "lexicalHanBodyEvidence",
   "docRegistry",
+  "coverageLexicalV3ShardRegistry",
+  "coverageLexicalV3Invalidations",
+  "coverageLexicalV3ResidentShardArtifacts",
+  "coverageLexicalV3ActiveOverlayJournal",
+  "coverageLexicalV3CompactJobs",
+  "coverageLexicalV3CompactTempArtifacts",
+  "coverageLexicalV3SnapshotManifests",
   "indexRecoveryState",
   "indexArtifactState",
   "lexicalMutationJournal",
@@ -169,6 +229,14 @@ export type DatabaseOpenRecoveryReport = {
   initialErrorName: string;
   initialErrorMessage: string;
   preservedTokenStats: boolean;
+  preservedSettings?: boolean;
+};
+
+type FullResetPreservedUserState = {
+  pluginSettingRows: Array<{ id?: number; data: OuterSetting }>;
+  hybridTokenStatsRows: HybridTokenRecord[];
+  hybridTokenSavingsRows: HybridTokenSavingRecord[];
+  hybridTokenBudgetResetRows: HybridTokenBudgetResetRecord[];
 };
 
 export type DatabaseOpenReport = {
@@ -221,6 +289,25 @@ export class Database {
       { name: "lexicalHanDocEvidence", table: this.db.lexicalHanDocEvidence },
       { name: "lexicalHanBodyEvidence", table: this.db.lexicalHanBodyEvidence },
       { name: "docRegistry", table: this.db.docRegistry },
+      { name: "coverageLexicalV3ShardRegistry", table: this.db.coverageLexicalV3ShardRegistry },
+      { name: "coverageLexicalV3Invalidations", table: this.db.coverageLexicalV3Invalidations },
+      {
+        name: "coverageLexicalV3ResidentShardArtifacts",
+        table: this.db.coverageLexicalV3ResidentShardArtifacts,
+      },
+      {
+        name: "coverageLexicalV3ActiveOverlayJournal",
+        table: this.db.coverageLexicalV3ActiveOverlayJournal,
+      },
+      { name: "coverageLexicalV3CompactJobs", table: this.db.coverageLexicalV3CompactJobs },
+      {
+        name: "coverageLexicalV3CompactTempArtifacts",
+        table: this.db.coverageLexicalV3CompactTempArtifacts,
+      },
+      {
+        name: "coverageLexicalV3SnapshotManifests",
+        table: this.db.coverageLexicalV3SnapshotManifests,
+      },
       { name: "docRegistryMeta", table: this.db.docRegistryMeta },
       { name: "hybridChunks", table: this.db.hybridChunks },
       { name: "fileSnapshots", table: this.db.fileSnapshots },
@@ -400,15 +487,14 @@ export class Database {
       breakdown.sharedSnapshotTextBytes += estimateValueBytes(
         snapshot.plainText,
       );
-      breakdown.sharedSnapshotPathBytes += estimateValueBytes(
-        snapshot.filePath,
-      );
+      breakdown.sharedSnapshotPathBytes += estimateValueBytes(snapshot.docRef);
     }
 
     for (const row of rows) {
       breakdown.chunkMetadataBytes +=
         estimateValueBytes(row.id) +
-        estimateValueBytes(row.filePath) +
+        estimateValueBytes(row.docRef) +
+        estimateValueBytes(row.generation) +
         estimateValueBytes(row.chunkIndex) +
         estimateValueBytes(row.startOffset) +
         estimateValueBytes(row.endOffset) +
@@ -434,7 +520,9 @@ export class Database {
       breakdown.vectorBytes += row.vectorData?.size ?? 0;
       breakdown.scaleBytes += row.scaleData?.size ?? 0;
       breakdown.metadataBytes +=
-        estimateValueBytes(row.filePath) +
+        estimateValueBytes(row.id) +
+        estimateValueBytes(row.docRef) +
+        estimateValueBytes(row.generation) +
         estimateValueBytes(row.precision) +
         estimateValueBytes(row.dim) +
         estimateValueBytes(row.chunkCount);
@@ -965,14 +1053,18 @@ export class Database {
         );
       }
 
+      const preservedUserState = await this.exportUserStateBeforeFullReset();
       this.db.close();
       await this.deleteDatabaseByName(this.db.dbName);
 
       try {
         await this.db.open();
+        const restoreReport = await this.restoreUserStateAfterFullReset(
+          preservedUserState,
+        );
         console.warn(
-          "[clever-search] Dexie startup upgrade recovered by rebuilding the local search database. Settings were preserved; token stats may have been reset.",
-          initialErrorSummary,
+          "[clever-search] Dexie startup upgrade recovered by rebuilding the local search database. Settings and token stats were restored best-effort.",
+          { ...initialErrorSummary, restoreReport },
         );
         return {
           mode: "full-reset",
@@ -980,7 +1072,8 @@ export class Database {
           targetVersion: this.db.dbVersion,
           initialErrorName,
           initialErrorMessage,
-          preservedTokenStats: false,
+          preservedTokenStats: restoreReport.tokenRowsRestored > 0,
+          preservedSettings: restoreReport.settingsRestored,
         };
       } catch (finalError) {
         console.warn(
@@ -1005,6 +1098,112 @@ export class Database {
       "message" in error &&
       (error as { name?: unknown }).name === "UpgradeError"
     );
+  }
+
+  private async exportUserStateBeforeFullReset(): Promise<FullResetPreservedUserState | null> {
+    try {
+      const database = await this.openIndexedDbByName(this.db.dbName);
+      try {
+        const storeNames = new Set(Array.from(database.objectStoreNames));
+        return {
+          pluginSettingRows: storeNames.has("pluginSetting")
+            ? await this.readAllRowsFromRawStore<{ id?: number; data: OuterSetting }>(
+                database,
+                "pluginSetting",
+              )
+            : [],
+          hybridTokenStatsRows: storeNames.has("hybridTokenStats")
+            ? await this.readAllRowsFromRawStore<HybridTokenRecord>(
+                database,
+                "hybridTokenStats",
+              )
+            : [],
+          hybridTokenSavingsRows: storeNames.has("hybridTokenSavings")
+            ? await this.readAllRowsFromRawStore<HybridTokenSavingRecord>(
+                database,
+                "hybridTokenSavings",
+              )
+            : [],
+          hybridTokenBudgetResetRows: storeNames.has("hybridTokenBudgetResets")
+            ? await this.readAllRowsFromRawStore<HybridTokenBudgetResetRecord>(
+                database,
+                "hybridTokenBudgetResets",
+              )
+            : [],
+        };
+      } finally {
+        database.close();
+      }
+    } catch (error) {
+      console.warn(
+        "[clever-search] Failed to export settings/token stats before full database reset; continuing recovery.",
+        error,
+      );
+      return null;
+    }
+  }
+
+  private async restoreUserStateAfterFullReset(
+    state: FullResetPreservedUserState | null,
+  ): Promise<{ settingsRestored: boolean; tokenRowsRestored: number }> {
+    if (state == null) {
+      return { settingsRestored: false, tokenRowsRestored: 0 };
+    }
+    try {
+      await this.db.transaction(
+        "rw",
+        this.db.pluginSetting,
+        this.db.hybridTokenStats,
+        this.db.hybridTokenSavings,
+        this.db.hybridTokenBudgetResets,
+        async () => {
+          if (state.pluginSettingRows.length > 0) {
+            await this.db.pluginSetting.bulkPut(state.pluginSettingRows);
+          }
+          if (state.hybridTokenStatsRows.length > 0) {
+            await this.db.hybridTokenStats.bulkPut(state.hybridTokenStatsRows);
+          }
+          if (state.hybridTokenSavingsRows.length > 0) {
+            await this.db.hybridTokenSavings.bulkPut(state.hybridTokenSavingsRows);
+          }
+          if (state.hybridTokenBudgetResetRows.length > 0) {
+            await this.db.hybridTokenBudgetResets.bulkPut(
+              state.hybridTokenBudgetResetRows,
+            );
+          }
+        },
+      );
+      return {
+        settingsRestored: state.pluginSettingRows.length > 0,
+        tokenRowsRestored:
+          state.hybridTokenStatsRows.length +
+          state.hybridTokenSavingsRows.length +
+          state.hybridTokenBudgetResetRows.length,
+      };
+    } catch (error) {
+      console.warn(
+        "[clever-search] Failed to restore settings/token stats after full database reset; continuing recovery.",
+        error,
+      );
+      return { settingsRestored: false, tokenRowsRestored: 0 };
+    }
+  }
+
+  private async readAllRowsFromRawStore<Row>(
+    database: IDBDatabase,
+    storeName: string,
+  ): Promise<Row[]> {
+    return await new Promise<Row[]>((resolve, reject) => {
+      const transaction = database.transaction([storeName], "readonly");
+      const request = transaction.objectStore(storeName).getAll();
+      request.onsuccess = () => resolve(request.result as Row[]);
+      request.onerror = () =>
+        reject(request.error ?? new Error(`Failed to read ${storeName}.`));
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error(`Failed to read ${storeName}.`));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error(`Read ${storeName} aborted.`));
+    });
   }
 
   private async resetTargetedPersistentIndexState(): Promise<void> {
@@ -1069,7 +1268,7 @@ export class Database {
 export class DexieWrapper extends Dexie {
   // Dexie keeps one decimal place for version() and multiplies by 10 when opening IndexedDB.
   // Use 0.1 increments here so app-level schema bumps stay readable while mapping to IDB integers.
-  private static readonly _dbVersion = 28.9;
+  private static readonly _dbVersion = 29.6;
   private static readonly dbNamePrefix = "clever-search/";
   static readonly docRegistryNextRefKey = DOC_REGISTRY_NEXT_REF_KEY;
   static readonly lexicalQueryEvidenceReadyKey = LEXICAL_QUERY_EVIDENCE_READY_KEY;
@@ -1087,6 +1286,13 @@ export class DexieWrapper extends Dexie {
   lexicalHanDocEvidence!: Dexie.Table<LexicalHanDocEvidenceRow, string>;
   lexicalHanBodyEvidence!: Dexie.Table<LexicalHanBodyEvidenceRow, string>;
   docRegistry!: Dexie.Table<DocRegistryRow, number>;
+  coverageLexicalV3ShardRegistry!: Dexie.Table<CoverageLexicalV3ShardRegistryRow, string>;
+  coverageLexicalV3Invalidations!: Dexie.Table<CoverageLexicalV3InvalidationRow, string>;
+  coverageLexicalV3ResidentShardArtifacts!: Dexie.Table<CoverageLexicalV3ResidentShardArtifactRow, string>;
+  coverageLexicalV3ActiveOverlayJournal!: Dexie.Table<CoverageLexicalV3ActiveOverlayJournalRow, string>;
+  coverageLexicalV3CompactJobs!: Dexie.Table<CoverageLexicalV3CompactJobManifestRow, string>;
+  coverageLexicalV3CompactTempArtifacts!: Dexie.Table<CoverageLexicalV3CompactTempArtifactRow, string>;
+  coverageLexicalV3SnapshotManifests!: Dexie.Table<CoverageLexicalV3SnapshotManifestRow, string>;
   docRegistryMeta!: Dexie.Table<DocRegistryMetaRow, string>;
 
   hybridChunks!: Dexie.Table<ChunkRow, number>;
@@ -1094,7 +1300,7 @@ export class DexieWrapper extends Dexie {
   hybridDirtyShadows!: Dexie.Table<HybridDirtyShadowRow, string>;
   hybridChunkVectors!: Dexie.Table<ChunkVectorShardRow, string>;
   hybridHnswSmall!: Dexie.Table<BlobRecord, number>;
-  hybridIndexedFileRefs!: Dexie.Table<HybridIndexedFileRefRow, string>;
+  hybridIndexedFileRefs!: Dexie.Table<HybridIndexedFileRefRow, number>;
   indexRecoveryState!: Dexie.Table<IndexRecoveryStateRow, string>;
   indexArtifactState!: Dexie.Table<IndexArtifactStateRow, string>;
   lexicalMutationJournal!: Dexie.Table<LexicalMutationJournalRow, string>;
@@ -1106,148 +1312,6 @@ export class DexieWrapper extends Dexie {
   constructor(privateApi: PrivateApi) {
     super(DexieWrapper.dbNamePrefix + privateApi.getAppId());
     this.privateApi = privateApi;
-    this.version(21)
-      .stores({
-        pluginSetting: "++id",
-        lexicalSearchSnapshots: "++id",
-        lexicalIndexedFileRefs: "path",
-        hybridChunks: "++id, filePath",
-        fileSnapshots: "filePath",
-        hybridDirtyShadows: "filePath",
-        hybridChunkVectors: "filePath",
-        hybridHnswSmall: "id",
-        hybridIndexedFileRefs: "path",
-        indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
-        indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
-        lexicalMutationJournal: "id, engine, kind, path, createdAt, [engine+path]",
-        pendingDocOperations: "id, engine, type, path, createdAt, [engine+path]",
-        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
-        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
-      })
-      .upgrade(async (tx) => {
-        this.schemaUpgradeDetected = true;
-        await Promise.all([
-          tx.table("hybridChunks").clear(),
-          tx.table("fileSnapshots").clear(),
-          tx.table("hybridDirtyShadows").clear(),
-          tx.table("hybridChunkVectors").clear(),
-          tx.table("hybridHnswSmall").clear(),
-          tx.table("hybridIndexedFileRefs").clear(),
-          tx.table("indexRecoveryState").clear(),
-          tx.table("indexArtifactState").clear(),
-        ]);
-      });
-    this.version(27.3)
-      .stores({
-        pluginSetting: "++id",
-        lexicalSearchSnapshots: "++id",
-        lexicalIndexedFileRefs: "path",
-        hybridChunks: "++id, filePath",
-        fileSnapshots: "filePath",
-        hybridDirtyShadows: "filePath",
-        hybridChunkVectors: "filePath",
-        hybridHnswSmall: "id",
-        hybridIndexedFileRefs: "path",
-        indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
-        indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
-        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
-        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
-        hybridTokenBudgetResets: "++id, periodKey",
-      })
-      .upgrade(async (tx) => {
-        this.schemaUpgradeDetected = true;
-        await Promise.all([
-          tx.table("lexicalSearchSnapshots").clear(),
-          tx.table("lexicalIndexedFileRefs").clear(),
-          tx.table("hybridChunks").clear(),
-          tx.table("fileSnapshots").clear(),
-          tx.table("hybridDirtyShadows").clear(),
-          tx.table("hybridChunkVectors").clear(),
-          tx.table("hybridHnswSmall").clear(),
-          tx.table("hybridIndexedFileRefs").clear(),
-          tx.table("indexRecoveryState").clear(),
-          tx.table("indexArtifactState").clear(),
-          tx.table("hybridTokenStats").clear(),
-          tx.table("hybridTokenSavings").clear(),
-          tx.table("hybridTokenBudgetResets").clear(),
-        ]);
-      });
-    // Primary-key changes must always go through a bridge version that drops
-    // the old stores first. Dexie cannot rewrite an existing object store's
-    // primary key in place.
-    // Bridge the 28.2 -> 28.4 lexical evidence key migration.
-    // Dexie cannot rewrite an existing object store's primary key in place, so
-    // we drop the pre-shard-aware legacy evidence stores one version earlier
-    // and recreate the canonical evidence stores at 28.4.
-    this.version(28.3)
-      .stores({
-        pluginSetting: "++id",
-        lexicalSearchSnapshots: "++id",
-        lexicalIndexedFileRefs: "path",
-        lexicalIndexedMetadata: "filePath",
-        lexicalFuzzyRescue: "id",
-        lexicalBodyFamilySupport: "id",
-        lexicalExactTapes: "id",
-        lexicalHanWitness: "id",
-        docRegistry: "docRef, path, deleted, liveGeneration, updatedAt",
-        docRegistryMeta: "key",
-        hybridChunks: "++id, filePath",
-        fileSnapshots: "filePath",
-        hybridDirtyShadows: "filePath",
-        hybridChunkVectors: "filePath",
-        hybridHnswSmall: "id",
-        hybridIndexedFileRefs: "path",
-        indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
-        indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
-        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
-        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
-        hybridTokenBudgetResets: "++id, periodKey",
-      })
-      .upgrade(async (tx) => {
-        this.schemaUpgradeDetected = true;
-        await Promise.all([
-          tx.table("lexicalSearchSnapshots").clear(),
-          tx.table("lexicalIndexedFileRefs").clear(),
-          tx
-            .table("docRegistryMeta")
-            .delete(DexieWrapper.lexicalQueryEvidenceReadyKey),
-        ]);
-      });
-    this.version(28.4)
-      .stores({
-        pluginSetting: "++id",
-        lexicalSearchSnapshots: "++id",
-        lexicalIndexedFileRefs: "path",
-        lexicalIndexedMetadata: "filePath",
-        lexicalFuzzyRescue: "id",
-        lexicalBodyFamilySupport: "id",
-        lexicalBodyEvidence: "id, docRef, generation, blockOrdinal, [docRef+generation+blockOrdinal]",
-        lexicalHanDocEvidence: "id, docRef, generation, [docRef+generation]",
-        lexicalHanBodyEvidence: "id, docRef, generation, blockOrdinal, [docRef+generation+blockOrdinal]",
-        lexicalExactTapes: "id",
-        lexicalHanWitness: "id",
-        docRegistry: "docRef, path, deleted, liveGeneration, updatedAt",
-        docRegistryMeta: "key",
-        hybridChunks: "++id, filePath",
-        fileSnapshots: "filePath",
-        hybridDirtyShadows: "filePath",
-        hybridChunkVectors: "filePath",
-        hybridHnswSmall: "id",
-        hybridIndexedFileRefs: "path",
-        indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
-        indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
-        hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
-        hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
-        hybridTokenBudgetResets: "++id, periodKey",
-      })
-      .upgrade(async (tx) => {
-        this.schemaUpgradeDetected = true;
-        await Promise.all([
-          tx.table("lexicalBodyEvidence").clear(),
-          tx.table("lexicalHanDocEvidence").clear(),
-          tx.table("lexicalHanBodyEvidence").clear(),
-        ]);
-      });
     this.version(DexieWrapper._dbVersion)
       .stores({
         pluginSetting: "++id",
@@ -1261,14 +1325,26 @@ export class DexieWrapper extends Dexie {
           "id, shardId, shardGeneration, docRef, generation, [shardId+shardGeneration+docRef+generation]",
         lexicalHanBodyEvidence:
           "id, shardId, shardGeneration, docRef, generation, blockOrdinal, [shardId+shardGeneration+docRef+generation+blockOrdinal]",
-        docRegistry: "docRef, path, deleted, liveGeneration, updatedAt",
-        docRegistryMeta: "key",
-        hybridChunks: "++id, filePath",
-        fileSnapshots: "filePath",
-        hybridDirtyShadows: "filePath",
-        hybridChunkVectors: "filePath",
+          docRegistry:
+            "docRef, path, deleted, liveGeneration, denseReadyGeneration, denseTargetGeneration, denseState, denseServeUntil, updatedAt",
+          coverageLexicalV3ShardRegistry: "shardId, state, createdOrder",
+          coverageLexicalV3Invalidations:
+            "id, shardId, docRef, docGeneration, [shardId+shardGeneration+docRef+docGeneration]",
+          coverageLexicalV3ResidentShardArtifacts:
+            "id, shardId, generation, artifactOwner, [artifactOwner+generation]",
+          coverageLexicalV3ActiveOverlayJournal:
+            "id, sequence, activeShardId, activeShardGeneration, [activeShardId+activeShardGeneration+sequence]",
+          coverageLexicalV3CompactJobs: "jobId, status, createdAt, updatedAt",
+          coverageLexicalV3CompactTempArtifacts: "jobId, outputShardId, createdAt",
+          coverageLexicalV3SnapshotManifests: "snapshotId, status, createdAt",
+          docRegistryMeta: "key",
+        hybridChunks:
+          "++id, docRef, generation, [docRef+generation], [docRef+generation+chunkIndex]",
+        fileSnapshots: "id, docRef, generation, [docRef+generation]",
+        hybridDirtyShadows: "id, docRef, generation, [docRef+generation]",
+        hybridChunkVectors: "id, docRef, generation, [docRef+generation]",
         hybridHnswSmall: "id",
-        hybridIndexedFileRefs: "path",
+        hybridIndexedFileRefs: "docRef, generation, state",
         indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
         indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
         hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
@@ -1284,6 +1360,12 @@ export class DexieWrapper extends Dexie {
           tx
             .table("docRegistryMeta")
             .delete(DexieWrapper.lexicalQueryEvidenceReadyKey),
+          tx.table("hybridChunks").clear(),
+          tx.table("fileSnapshots").clear(),
+          tx.table("hybridDirtyShadows").clear(),
+          tx.table("hybridChunkVectors").clear(),
+          tx.table("hybridHnswSmall").clear(),
+          tx.table("hybridIndexedFileRefs").clear(),
         ]);
       });
   }
@@ -1458,6 +1540,3 @@ function addDocLocalWitnessTexts(
     texts.add(value);
   }
 }
-
-
-

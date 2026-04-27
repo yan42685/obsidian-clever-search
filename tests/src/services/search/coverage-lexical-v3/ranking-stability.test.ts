@@ -17,6 +17,8 @@ function createPackingProfile(
 			startedSurfaceGroupCount: 1,
 			crossScriptSatisfiedGroupCount: 1,
 		},
+		exactOrPrefixUnitCount:
+			overrides.exactOrPrefixUnitCount ?? overrides.exactUnitCount ?? 0,
 		exactUnitCount: overrides.exactUnitCount ?? 0,
 		completedHanSurfaceGroupCount: overrides.completedHanSurfaceGroupCount ?? 0,
 		hanSurfaceCompletionTierScoreTotal: overrides.hanSurfaceCompletionTierScoreTotal ?? 0,

@@ -56,6 +56,8 @@ function createBodyWindowContainer(
 		windowWidth: options.windowWidth ?? coveredUnitIndices.length,
 		gapCount: options.gapCount ?? 0,
 		density: options.density ?? 1,
+		isLocalityTight: options.isLocalityTight ?? true,
+		localityTightness: options.localityTightness ?? 1,
 		headingCorroboration: options.headingCorroboration ?? {
 			coveredUnitIndices: [],
 			unitCount: 0,
@@ -81,6 +83,8 @@ function createPackingProfile(
 			startedSurfaceGroupCount: 0,
 			crossScriptSatisfiedGroupCount: 0,
 		},
+		exactOrPrefixUnitCount:
+			overrides.exactOrPrefixUnitCount ?? overrides.exactUnitCount ?? 0,
 		exactUnitCount: overrides.exactUnitCount ?? 0,
 		completedHanSurfaceGroupCount: overrides.completedHanSurfaceGroupCount ?? 0,
 		hanSurfaceCompletionTierScoreTotal: overrides.hanSurfaceCompletionTierScoreTotal ?? 0,
@@ -449,10 +453,25 @@ describe("coverage lexical v3 comparator", () => {
 		expect(comparePackingProfiles(crossScript, singleScript)).toBeLessThan(0);
 	});
 
-	test("exact count is a late tie-break", () => {
-		const prefixHeavy = createPackingProfile({
-			path: "prefix.md",
+	test("exact-or-prefix count beats locality after coverage ties", () => {
+		const localityHeavy = createPackingProfile({
+			path: "locality.md",
 			realizedCoverageCount: 3,
+			exactOrPrefixUnitCount: 1,
+			exactUnitCount: 1,
+			strongestContainer: createBodyWindowContainer([0, 1, 2], {
+				containerCompactness: 1200,
+			}),
+			fragmentationPenalty: {
+				bodyResidueUnitCount: 0,
+				uncoveredByTopTwoCount: 0,
+				explanatoryContainerCount: 1,
+			},
+		});
+		const lexicalHeavy = createPackingProfile({
+			path: "lexical.md",
+			realizedCoverageCount: 3,
+			exactOrPrefixUnitCount: 3,
 			exactUnitCount: 1,
 			strongestContainer: createBodyWindowContainer([0, 1, 2], {
 				containerCompactness: 920,
@@ -463,18 +482,28 @@ describe("coverage lexical v3 comparator", () => {
 				explanatoryContainerCount: 1,
 			},
 		});
+
+		expect(comparePackingProfiles(lexicalHeavy, localityHeavy)).toBeLessThan(0);
+	});
+
+	test("exact count remains a tie-break after exact-or-prefix ties", () => {
+		const prefixHeavy = createPackingProfile({
+			path: "prefix.md",
+			realizedCoverageCount: 3,
+			exactOrPrefixUnitCount: 3,
+			exactUnitCount: 1,
+			strongestContainer: createBodyWindowContainer([0, 1, 2], {
+				containerCompactness: 920,
+			}),
+		});
 		const exactHeavy = createPackingProfile({
 			path: "exact.md",
 			realizedCoverageCount: 3,
+			exactOrPrefixUnitCount: 3,
 			exactUnitCount: 3,
 			strongestContainer: createBodyWindowContainer([0, 1, 2], {
 				containerCompactness: 920,
 			}),
-			fragmentationPenalty: {
-				bodyResidueUnitCount: 0,
-				uncoveredByTopTwoCount: 0,
-				explanatoryContainerCount: 1,
-			},
 		});
 
 		expect(comparePackingProfiles(exactHeavy, prefixHeavy)).toBeLessThan(0);
@@ -847,5 +876,3 @@ describe("coverage lexical v3 comparator", () => {
 		expect(comparePackingProfiles(plain, compoundBacked)).toBeLessThan(0);
 	});
 });
-
-

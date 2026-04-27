@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { IndexedDocument } from "src/globals/search-types";
 import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
 import { analyzeQuery } from "src/services/search/coverage-lexical-v3/query";

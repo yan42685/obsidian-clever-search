@@ -38,6 +38,7 @@ export async function buildHybridLexicalLaneFileShortlist(params: {
 		queryText,
 		limit: params.limit,
 		matches: matchedFiles.map((match, index) => ({
+			docRef: (match as { docRef?: number }).docRef,
 			path: match.path,
 			generation: match.snapshotGeneration,
 			score: match.score ?? 0,
@@ -72,6 +73,7 @@ export function buildHybridLexicalLaneFileCandidates(params: {
 	queryText: string;
 	limit?: number;
 	matches: ReadonlyArray<{
+		docRef?: number;
 		path: string;
 		generation?: number;
 		score?: number;
@@ -87,6 +89,7 @@ export function buildHybridLexicalLaneFileCandidates(params: {
 			const aliases = metadata?.aliases ?? [];
 			const headings = metadata?.headings ?? [];
 			return {
+				docRef: match.docRef,
 				filePath: match.path,
 				snapshotGeneration: match.generation,
 				snapshotSource: "live" as const,

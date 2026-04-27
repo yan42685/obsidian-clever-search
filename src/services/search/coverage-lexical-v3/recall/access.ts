@@ -96,7 +96,8 @@ export function getDocStableKey(base: ResidentBase, docId: number): string {
 }
 
 export function getLiveDocPath(base: ResidentBase, liveDocSlot: number): string {
-	const pathStringId = base.docTable.pathStringIdsByLiveDocSlot[liveDocSlot] ?? 0;
+	const docId = getDocIdForLiveDocSlot(base, liveDocSlot);
+	const pathStringId = base.docTable.pathStringIds[docId] ?? 0;
 	return readResidentString(base, pathStringId);
 }
 
@@ -104,7 +105,8 @@ export function getLiveDocRef(
 	base: ResidentBase,
 	liveDocSlot: number,
 ): number | null {
-	const docRef = base.docTable.docRefsByLiveDocSlot[liveDocSlot];
+	const docId = getDocIdForLiveDocSlot(base, liveDocSlot);
+	const docRef = base.docTable.docRefsByDocId[docId];
 	return Number.isFinite(docRef) && docRef > 0 ? docRef : null;
 }
 
@@ -122,21 +124,21 @@ export function getLiveDocGeneration(
 	base: ResidentBase,
 	liveDocSlot: number,
 ): number {
-	return base.docTable.generationByLiveDocSlot[liveDocSlot] ?? 0;
+	const docId = getDocIdForLiveDocSlot(base, liveDocSlot);
+	return base.docTable.generationByDocId[docId] ?? 0;
 }
 
 function resolveLiveDocSliceBounds(
-	_base: ResidentBase,
+	base: ResidentBase,
 	liveDocSlot: number,
 	params: Readonly<{
-		startByLiveDocSlot: ResidentIntegerArray;
-		countByLiveDocSlot: ResidentIntegerArray;
 		startByDocId: ResidentIntegerArray;
 		countByDocId: ResidentIntegerArray;
 	}>,
 ): readonly [number, number] {
-	const start = params.startByLiveDocSlot[liveDocSlot] ?? 0;
-	const count = params.countByLiveDocSlot[liveDocSlot] ?? 0;
+	const docId = getDocIdForLiveDocSlot(base, liveDocSlot);
+	const start = params.startByDocId[docId] ?? 0;
+	const count = params.countByDocId[docId] ?? 0;
 	return [start, start + count];
 }
 
@@ -157,8 +159,6 @@ export function getLiveDocIdentityFamilyIds(
 	liveDocSlot: number,
 ): number[] {
 	const [start, end] = resolveLiveDocSliceBounds(base, liveDocSlot, {
-		startByLiveDocSlot: base.docTable.identityStartByLiveDocSlot,
-		countByLiveDocSlot: base.docTable.identityCountByLiveDocSlot,
 		startByDocId: base.docTable.identityStartByDocId,
 		countByDocId: base.docTable.identityCountByDocId,
 	});
@@ -187,8 +187,6 @@ export function getLiveDocIdentitySourceMasks(
 	liveDocSlot: number,
 ): number[] {
 	const [start, end] = resolveLiveDocSliceBounds(base, liveDocSlot, {
-		startByLiveDocSlot: base.docTable.identityStartByLiveDocSlot,
-		countByLiveDocSlot: base.docTable.identityCountByLiveDocSlot,
 		startByDocId: base.docTable.identityStartByDocId,
 		countByDocId: base.docTable.identityCountByDocId,
 	});
@@ -214,8 +212,6 @@ export function getLiveDocRouteFamilyIds(
 	liveDocSlot: number,
 ): number[] {
 	const [start, end] = resolveLiveDocSliceBounds(base, liveDocSlot, {
-		startByLiveDocSlot: base.docTable.routeStartByLiveDocSlot,
-		countByLiveDocSlot: base.docTable.routeCountByLiveDocSlot,
 		startByDocId: base.docTable.routeStartByDocId,
 		countByDocId: base.docTable.routeCountByDocId,
 	});
@@ -244,8 +240,6 @@ export function getLiveDocRouteSourceMasks(
 	liveDocSlot: number,
 ): number[] {
 	const [start, end] = resolveLiveDocSliceBounds(base, liveDocSlot, {
-		startByLiveDocSlot: base.docTable.routeStartByLiveDocSlot,
-		countByLiveDocSlot: base.docTable.routeCountByLiveDocSlot,
 		startByDocId: base.docTable.routeStartByDocId,
 		countByDocId: base.docTable.routeCountByDocId,
 	});
@@ -271,8 +265,6 @@ export function getLiveDocHeadingFamilyIds(
 	liveDocSlot: number,
 ): number[] {
 	const [start, end] = resolveLiveDocSliceBounds(base, liveDocSlot, {
-		startByLiveDocSlot: base.docTable.headingStartByLiveDocSlot,
-		countByLiveDocSlot: base.docTable.headingCountByLiveDocSlot,
 		startByDocId: base.docTable.headingStartByDocId,
 		countByDocId: base.docTable.headingCountByDocId,
 	});
@@ -296,8 +288,9 @@ export function getLiveDocBodyBlockIds(
 	base: ResidentBase,
 	liveDocSlot: number,
 ): number[] {
-	const start = base.docTable.bodyBlockStartByLiveDocSlot[liveDocSlot] ?? 0;
-	const count = base.docTable.bodyBlockCountByLiveDocSlot[liveDocSlot] ?? 0;
+	const docId = getDocIdForLiveDocSlot(base, liveDocSlot);
+	const start = base.docTable.bodyBlockStartByDocId[docId] ?? 0;
+	const count = base.docTable.bodyBlockCountByDocId[docId] ?? 0;
 	return Array.from({ length: count }, (_, index) => start + index);
 }
 
@@ -383,11 +376,11 @@ export function getLiveDocIdentityHanWitnessStringIds(
 	base: ResidentBase,
 	liveDocSlot: number,
 ): number[] {
+	const docId = getDocIdForLiveDocSlot(base, liveDocSlot);
 	return sliceSentinelBucket(
-		base.hanRoute.identityWitnessStartByLiveDocSlot ??
-			base.hanRoute.identityWitnessStartByDocId,
+		base.hanRoute.identityWitnessStartByDocId,
 		base.hanRoute.identityWitnessTextIds,
-		liveDocSlot,
+		docId,
 	);
 }
 
@@ -404,11 +397,9 @@ export function getLiveDocIdentityHanWitnessSourceMasks(
 	base: ResidentBase,
 	liveDocSlot: number,
 ): number[] {
-	const starts =
-		base.hanRoute.identityWitnessStartByLiveDocSlot ??
-		base.hanRoute.identityWitnessStartByDocId;
-	const start = starts[liveDocSlot] ?? 0;
-	const end = starts[liveDocSlot + 1] ?? start;
+	const docId = getDocIdForLiveDocSlot(base, liveDocSlot);
+	const start = base.hanRoute.identityWitnessStartByDocId[docId] ?? 0;
+	const end = base.hanRoute.identityWitnessStartByDocId[docId + 1] ?? start;
 	return Array.from(base.hanRoute.identityWitnessSourceMaskByDocEntry.slice(start, end));
 }
 
@@ -445,11 +436,11 @@ export function getLiveDocRouteHanWitnessStringIds(
 	base: ResidentBase,
 	liveDocSlot: number,
 ): number[] {
+	const docId = getDocIdForLiveDocSlot(base, liveDocSlot);
 	return sliceSentinelBucket(
-		base.hanRoute.routeWitnessStartByLiveDocSlot ??
-			base.hanRoute.routeWitnessStartByDocId,
+		base.hanRoute.routeWitnessStartByDocId,
 		base.hanRoute.routeWitnessTextIds,
-		liveDocSlot,
+		docId,
 	);
 }
 
@@ -466,11 +457,9 @@ export function getLiveDocRouteHanWitnessSourceMasks(
 	base: ResidentBase,
 	liveDocSlot: number,
 ): number[] {
-	const starts =
-		base.hanRoute.routeWitnessStartByLiveDocSlot ??
-		base.hanRoute.routeWitnessStartByDocId;
-	const start = starts[liveDocSlot] ?? 0;
-	const end = starts[liveDocSlot + 1] ?? start;
+	const docId = getDocIdForLiveDocSlot(base, liveDocSlot);
+	const start = base.hanRoute.routeWitnessStartByDocId[docId] ?? 0;
+	const end = base.hanRoute.routeWitnessStartByDocId[docId + 1] ?? start;
 	return Array.from(base.hanRoute.routeWitnessSourceMaskByDocEntry.slice(start, end));
 }
 
@@ -507,11 +496,11 @@ export function getLiveDocHeadingHanWitnessStringIds(
 	base: ResidentBase,
 	liveDocSlot: number,
 ): number[] {
+	const docId = getDocIdForLiveDocSlot(base, liveDocSlot);
 	return sliceSentinelBucket(
-		base.hanRoute.headingWitnessStartByLiveDocSlot ??
-			base.hanRoute.headingWitnessStartByDocId,
+		base.hanRoute.headingWitnessStartByDocId,
 		base.hanRoute.headingWitnessTextIds,
-		liveDocSlot,
+		docId,
 	);
 }
 

@@ -96,6 +96,9 @@ export function comparePackingProfilesBeforeHanSurfaceCompletion(
 	if (coverageGateComparison !== 0) {
 		return coverageGateComparison;
 	}
+	if (left.exactOrPrefixUnitCount !== right.exactOrPrefixUnitCount) {
+		return right.exactOrPrefixUnitCount - left.exactOrPrefixUnitCount;
+	}
 	const strongestComparison = compareContainerStrength(
 		left.strongestContainer,
 		right.strongestContainer,
