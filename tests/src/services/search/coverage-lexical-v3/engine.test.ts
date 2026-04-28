@@ -1,6 +1,7 @@
 ﻿import type { IndexedDocument } from "src/globals/search-types";
 import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
 import {
+	analyzeQuery,
 	splitBodyBlocks,
 	type V3DocumentTokenizer,
 } from "src/services/search/coverage-lexical-v3/query";
@@ -856,6 +857,40 @@ describe("coverage lexical v3 engine", () => {
 			}),
 		);
 		expect(result.rankedCandidates[1]?.singletonHanCompletion).toEqual(
+			expect.objectContaining({
+				matched: false,
+				matchSource: "none",
+				tier: "none",
+			}),
+		);
+	});
+
+	test("residual singleton completion only uses anchors from its own Han surface group", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const farFiller = "\u9694\u5f00\u5f88\u8fdc\u7684\u8bf4\u660e\u6587\u5b57".repeat(8);
+		const tokenizer: V3DocumentTokenizer = () => [];
+		engine.buildResidentIndexView(
+			[
+				createDocument({
+					path: "zh/cross-group-singleton-anchor.md",
+					basename: "\u666e\u901a\u7b14\u8bb0",
+					folder: "zh",
+					content: `\u5b87\u5b99${farFiller}\u5929\u5730\u529b`,
+				}),
+			],
+			tokenizer,
+		);
+
+		const query = "\u5b87\u5b99\u529b x \u5929\u5730";
+		expect(analyzeQuery(query).surfaceGroups.map((group) => group.text)).toEqual([
+			"\u5b87\u5b99\u529b",
+			"x",
+			"\u5929\u5730",
+		]);
+
+		const result = engine.search(query);
+
+		expect(result.rankedCandidates[0]?.singletonHanCompletion).toEqual(
 			expect.objectContaining({
 				matched: false,
 				matchSource: "none",

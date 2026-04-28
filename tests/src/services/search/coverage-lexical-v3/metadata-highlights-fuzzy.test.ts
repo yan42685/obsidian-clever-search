@@ -176,6 +176,38 @@ describe("coverage lexical v3 fuzzy metadata highlights", () => {
 		expect(
 			sliceHighlights("\u5957\u9910\u8bf4\u660e", highlights.basenameHighlightRanges),
 		).toContain("\u9910");
+		expect(highlights.folderHighlightRanges).toEqual([]);
 		expect(highlights.basenameWeakHighlightRanges).toEqual([]);
+	});
+
+	test("body singleton Han completion does not create metadata highlights", () => {
+		const queryAnalysis = analyzeQuery("\u9910");
+		const highlights = buildV3MetadataFieldHighlightRanges({
+			queryAnalysis,
+			candidate: createPackingProfile({
+				path: "notes/menu.md",
+				realizedCoverageCount: 0,
+				realizedFamilies: [],
+				singletonHanCompletion: {
+					singletonHanChar: "\u9910",
+					singletonHanCharIndex: null,
+					singletonHanSurfaceGroupIndex: 0,
+					matched: true,
+					matchSource: "body_same_block",
+					bestAnchorKind: "none",
+					bestAnchorDistance: null,
+					sameBlockAsAnchor: false,
+					sameBlockAsBestBodyWindow: false,
+					tier: "tight",
+				},
+			}),
+			basenameText: "\u5957\u9910\u8bf4\u660e",
+			folderText: "notes/\u9910\u996e/",
+		});
+
+		expect(highlights.basenameHighlightRanges).toEqual([]);
+		expect(highlights.folderHighlightRanges).toEqual([]);
+		expect(highlights.basenameWeakHighlightRanges).toEqual([]);
+		expect(highlights.folderWeakHighlightRanges).toEqual([]);
 	});
 });

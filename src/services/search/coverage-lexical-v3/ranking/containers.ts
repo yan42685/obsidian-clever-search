@@ -173,6 +173,7 @@ export type CandidateHydratedHanDocEvidence = Readonly<{
 
 type BodyOccurrenceMatchContext = Readonly<{
 	unitIndex: number;
+	querySurfaceGroupIndex: number | null;
 	match: V3QueryFamilyMatch;
 }>;
 
@@ -225,6 +226,7 @@ type BodyBigramAnchorOccurrence = Readonly<{
 type BodyOccurrence = Readonly<{
 	blockId: number;
 	unitIndex: number;
+	querySurfaceGroupIndex: number | null;
 	match: V3QueryFamilyMatch;
 	shardLocalFamilySlot: number;
 	ordinalPosition: number;
@@ -1234,22 +1236,6 @@ function buildSyntheticBodyFamilyId(surfaceGroupIndex: number): number {
 	return -(500_000 + surfaceGroupIndex + 1);
 }
 
-function buildSyntheticBodyBigramUnitIndex(
-	baseQueryUnitCount: number,
-	surfaceGroupIndex: number,
-	bigramIndex: number,
-): number {
-	return baseQueryUnitCount + 100_000 + surfaceGroupIndex * 100 + bigramIndex;
-}
-
-function buildSyntheticBodyBigramFamilyId(
-	surfaceGroupIndex: number,
-	bigramIndex: number,
-	localMatchOrdinal: number,
-): number {
-	return -(1_000_000 + surfaceGroupIndex * 1000 + bigramIndex * 10 + localMatchOrdinal);
-}
-
 function routeContainerProvidesNovelCoverage(
 	routeContainer: RouteContainer | null,
 	identityContainer: IdentityContainer | null,
@@ -1293,6 +1279,7 @@ function buildBodyOccurrenceMatchContextsByShardLocalFamilySlot(
 			if (existing != null) {
 				existing.push({
 					unitIndex: unitMatches.queryUnitIndex,
+					querySurfaceGroupIndex: unitMatches.querySurfaceGroupIndex,
 					match,
 				});
 				continue;
@@ -1300,6 +1287,7 @@ function buildBodyOccurrenceMatchContextsByShardLocalFamilySlot(
 			contextsByShardLocalFamilySlot.set(match.shardLocalFamilySlot, [
 				{
 					unitIndex: unitMatches.queryUnitIndex,
+					querySurfaceGroupIndex: unitMatches.querySurfaceGroupIndex,
 					match,
 				},
 			]);
@@ -1329,6 +1317,7 @@ function collectBlockOccurrences(
 			target.push({
 				blockId,
 				unitIndex: matchContext.unitIndex,
+				querySurfaceGroupIndex: matchContext.querySurfaceGroupIndex,
 				match: matchContext.match,
 				shardLocalFamilySlot,
 				ordinalPosition: positionedOccurrence.ordinalPosition,
@@ -2905,18 +2894,22 @@ function summarizeSingletonHanCompletion(params: Readonly<{
 	);
 	let best: SingletonHanCompletionCandidate | null = null;
 	for (const target of targets) {
+		const targetQueryBigramTexts = collectQueryHanBigramTextsForSingletonTarget(
+			target,
+			queryBigramSpecs,
+		);
 		const metadataCandidate = buildMetadataSingletonHanCompletionCandidate({
 			target,
 			docEvidence: params.docEvidence,
 			realizedFamilies: params.realizedFamilies,
-			queryBigramTexts,
+			queryBigramTexts: targetQueryBigramTexts,
 		});
 		best = chooseBetterSingletonHanCompletion(best, metadataCandidate);
 		const bodyCandidate = buildBodySingletonHanCompletionCandidate({
 			target,
 			base: params.base,
 			liveDocSlot: params.candidateRecall.liveDocSlot,
-			queryBigramTexts,
+			queryBigramTexts: targetQueryBigramTexts,
 			shortlistedBodyBlockIds: params.candidateRecall.shortlistedBodyBlockIds,
 			bodyBlockEvidenceByBlockId: params.bodyBlockEvidenceByBlockId,
 			bodyOccurrencesByBlockId: params.bodyOccurrencesByBlockId,
@@ -2961,6 +2954,18 @@ function collectQueryHanBigramTexts(
 ): readonly string[] {
 	return [...new Set(specs.map((spec) => spec.bigramText))].sort((left, right) =>
 		left.localeCompare(right),
+	);
+}
+
+function collectQueryHanBigramTextsForSingletonTarget(
+	target: SingletonHanTarget,
+	specs: readonly QueryHanBigramSpec[],
+): readonly string[] {
+	if (target.kind !== "residual_singleton" || target.surfaceGroupIndex == null) {
+		return collectQueryHanBigramTexts(specs);
+	}
+	return collectQueryHanBigramTexts(
+		specs.filter((spec) => spec.surfaceGroupIndex === target.surfaceGroupIndex),
 	);
 }
 
@@ -3072,17 +3077,35 @@ function buildMetadataSingletonHanCompletionCandidate(params: Readonly<{
 		target: params.target,
 		witnessTexts: params.docEvidence.identityWitnessTexts,
 		matchSource: "identity",
-		anchorFamilies: params.realizedFamilies.filter((family) => family.inIdentity),
+		anchorFamilies: filterSingletonTargetFamilies(
+			params.target,
+			params.realizedFamilies.filter((family) => family.inIdentity),
+		),
 		queryBigramTexts: params.queryBigramTexts,
 	});
 	const routeCandidate = buildWitnessSingletonHanCompletionCandidate({
 		target: params.target,
 		witnessTexts: params.docEvidence.routeWitnessTexts,
 		matchSource: "route",
-		anchorFamilies: params.realizedFamilies.filter((family) => family.inRoute),
+		anchorFamilies: filterSingletonTargetFamilies(
+			params.target,
+			params.realizedFamilies.filter((family) => family.inRoute),
+		),
 		queryBigramTexts: params.queryBigramTexts,
 	});
 	return chooseBetterSingletonHanCompletion(identityCandidate, routeCandidate);
+}
+
+function filterSingletonTargetFamilies(
+	target: SingletonHanTarget,
+	families: readonly RealizedQueryUnitFamily[],
+): readonly RealizedQueryUnitFamily[] {
+	if (target.kind !== "residual_singleton" || target.surfaceGroupIndex == null) {
+		return families;
+	}
+	return families.filter(
+		(family) => family.querySurfaceGroupIndex === target.surfaceGroupIndex,
+	);
 }
 
 function buildWitnessSingletonHanCompletionCandidate(params: Readonly<{
@@ -3270,6 +3293,16 @@ function buildBodySingletonHanCompletionCandidate(params: Readonly<{
 		params.liveDocSlot,
 		params.shortlistedBodyBlockIds,
 	);
+	const targetBodyOccurrencesByBlockId =
+		filterBodyOccurrencesByBlockIdForSingletonTarget(
+			params.target,
+			params.bodyOccurrencesByBlockId,
+		);
+	const targetBodyRescueBigramOccurrencesByBlockId =
+		filterBodyRescueBigramOccurrencesByBlockIdForSingletonTarget(
+			params.target,
+			params.bodyRescueBigramOccurrencesByBlockId,
+		);
 	let best: SingletonHanCompletionCandidate | null = null;
 	for (const blockId of candidateBlockIds) {
 		const blockEvidence = params.bodyBlockEvidenceByBlockId.get(blockId);
@@ -3279,13 +3312,14 @@ function buildBodySingletonHanCompletionCandidate(params: Readonly<{
 		const blockBigramAnchorOccurrences = collectBodyBigramAnchorOccurrences({
 			blockEvidence,
 			queryBigramTexts: params.queryBigramTexts,
-			rescueOccurrences: params.bodyRescueBigramOccurrencesByBlockId.get(blockId) ?? null,
+			rescueOccurrences:
+				targetBodyRescueBigramOccurrencesByBlockId.get(blockId) ?? null,
 		});
 		const charPositions = filterOverlappingSingletonCharPositions(
 			collectBodySingletonCharPositions(blockEvidence, params.target.char),
 			params.target.char,
 			[
-				...(params.bodyOccurrencesByBlockId.get(blockId) ?? []).map((occurrence) => ({
+				...(targetBodyOccurrencesByBlockId.get(blockId) ?? []).map((occurrence) => ({
 					start: occurrence.localPosition,
 					end: occurrence.localEndPosition,
 				})),
@@ -3302,7 +3336,7 @@ function buildBodySingletonHanCompletionCandidate(params: Readonly<{
 			target: params.target,
 			blockId,
 			charPositions,
-			bodyOccurrencesByBlockId: params.bodyOccurrencesByBlockId,
+			bodyOccurrencesByBlockId: targetBodyOccurrencesByBlockId,
 			bodyBigramAnchorOccurrences: blockBigramAnchorOccurrences,
 			bestBodyWindowBlockIds: params.bestBodyWindowBlockIds,
 			weightedGapIndex: blockEvidence.weightedGapIndex,
@@ -3319,14 +3353,56 @@ function buildBodySingletonHanCompletionCandidate(params: Readonly<{
 			charPositions,
 			weightedGapIndex: blockEvidence.weightedGapIndex,
 			bodyBlockEvidenceByBlockId: params.bodyBlockEvidenceByBlockId,
-			bodyOccurrencesByBlockId: params.bodyOccurrencesByBlockId,
-			bodyRescueBigramOccurrencesByBlockId: params.bodyRescueBigramOccurrencesByBlockId,
+			bodyOccurrencesByBlockId: targetBodyOccurrencesByBlockId,
+			bodyRescueBigramOccurrencesByBlockId:
+				targetBodyRescueBigramOccurrencesByBlockId,
 			queryBigramTexts: params.queryBigramTexts,
 			bestBodyWindowBlockIds: params.bestBodyWindowBlockIds,
 		});
 		best = chooseBetterSingletonHanCompletion(best, adjacentAnchor);
 	}
 	return best;
+}
+
+function filterBodyOccurrencesByBlockIdForSingletonTarget(
+	target: SingletonHanTarget,
+	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>,
+): ReadonlyMap<number, readonly BodyOccurrence[]> {
+	if (target.kind !== "residual_singleton" || target.surfaceGroupIndex == null) {
+		return bodyOccurrencesByBlockId;
+	}
+	const filtered = new Map<number, readonly BodyOccurrence[]>();
+	for (const [blockId, occurrences] of bodyOccurrencesByBlockId) {
+		const targetOccurrences = occurrences.filter(
+			(occurrence) => occurrence.querySurfaceGroupIndex === target.surfaceGroupIndex,
+		);
+		if (targetOccurrences.length > 0) {
+			filtered.set(blockId, targetOccurrences);
+		}
+	}
+	return filtered;
+}
+
+function filterBodyRescueBigramOccurrencesByBlockIdForSingletonTarget(
+	target: SingletonHanTarget,
+	bodyRescueBigramOccurrencesByBlockId: ReadonlyMap<
+		number,
+		readonly HanSyntheticBodyOccurrence[]
+	>,
+): ReadonlyMap<number, readonly HanSyntheticBodyOccurrence[]> {
+	if (target.kind !== "residual_singleton" || target.surfaceGroupIndex == null) {
+		return bodyRescueBigramOccurrencesByBlockId;
+	}
+	const filtered = new Map<number, readonly HanSyntheticBodyOccurrence[]>();
+	for (const [blockId, occurrences] of bodyRescueBigramOccurrencesByBlockId) {
+		const targetOccurrences = occurrences.filter(
+			(occurrence) => occurrence.surfaceGroupIndex === target.surfaceGroupIndex,
+		);
+		if (targetOccurrences.length > 0) {
+			filtered.set(blockId, targetOccurrences);
+		}
+	}
+	return filtered;
 }
 
 function collectCandidateSingletonHanBlockIds(

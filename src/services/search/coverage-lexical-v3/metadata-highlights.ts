@@ -246,7 +246,15 @@ function collectSingletonHanHighlightsByField(params: Readonly<{
 	) {
 		return outByField;
 	}
+	const allowedFields = resolveSingletonHanMetadataHighlightFields(
+		singletonHanCompletion?.matched === true
+			? singletonHanCompletion.matchSource
+			: "unmatched_query_singleton",
+	);
 	for (const witness of params.witnesses) {
+		if (!allowedFields.has(witness.field)) {
+			continue;
+		}
 		for (const charOffset of collectTextOffsets(
 			witness.text,
 			singletonHanChar,
@@ -267,6 +275,23 @@ function collectSingletonHanHighlightsByField(params: Readonly<{
 		basename: dedupeMetadataOccurrences(outByField.basename),
 		folder: dedupeMetadataOccurrences(outByField.folder),
 	};
+}
+
+function resolveSingletonHanMetadataHighlightFields(
+	matchSource:
+		| NonNullable<EvidencePackingProfile["singletonHanCompletion"]>["matchSource"]
+		| "unmatched_query_singleton",
+): ReadonlySet<MetadataWitness["field"]> {
+	switch (matchSource) {
+		case "identity":
+			return new Set<MetadataWitness["field"]>(["basename"]);
+		case "route":
+			return new Set<MetadataWitness["field"]>(["folder"]);
+		case "unmatched_query_singleton":
+			return new Set<MetadataWitness["field"]>(["basename", "folder"]);
+		default:
+			return new Set<MetadataWitness["field"]>();
+	}
 }
 
 function chooseBestMetadataWitnessForSurfaceGroup(

@@ -50,8 +50,10 @@ export type HanRescueBodyBlockEvidence = Readonly<{
 }>;
 
 export type HanSyntheticBodyOccurrence = Readonly<{
+	surfaceGroupIndex: number;
 	blockId: number;
 	unitIndex: number;
+	querySurfaceGroupIndex: number | null;
 	match: Readonly<{
 		familyId: number;
 		shardLocalFamilySlot: number;
@@ -139,6 +141,12 @@ type BodyWindowChooser<TBodyWindow extends HanBodyWindowLike> = (
 		syntheticOrdinalSpanByBlockId: ReadonlyMap<number, number>;
 	}>,
 ) => TBodyWindow | null;
+
+const SYNTHETIC_BODY_BIGRAM_UNIT_BASE = 100_000;
+const SYNTHETIC_BODY_BIGRAM_UNIT_GROUP_STRIDE = 10_000;
+const SYNTHETIC_BODY_BIGRAM_FAMILY_BASE = 1_000_000;
+const SYNTHETIC_BODY_BIGRAM_FAMILY_GROUP_STRIDE = 1_000_000_000;
+const SYNTHETIC_BODY_BIGRAM_FAMILY_BIGRAM_STRIDE = 1_000_000;
 
 export function buildResolvedHanSurfaceGroupByIndex(
 	resolvedHanSurfaceGroups: readonly V3ResolvedHanSurfaceGroup[],
@@ -626,19 +634,26 @@ function projectGroupBodyBigramOccurrences(params: Readonly<{
 	const out: HanSyntheticBodyOccurrence[] = [];
 	for (let bigramIndex = 0; bigramIndex < params.unresolvedBigrams.length; bigramIndex += 1) {
 		const bigram = params.unresolvedBigrams[bigramIndex] ?? "";
-		for (const occurrence of params.collectedByBigram.get(bigram) ?? []) {
+		const occurrences = params.collectedByBigram.get(bigram) ?? [];
+		for (let occurrenceIndex = 0; occurrenceIndex < occurrences.length; occurrenceIndex += 1) {
+			const occurrence = occurrences[occurrenceIndex];
+			if (occurrence == null) {
+				continue;
+			}
 			const familyId = buildSyntheticBodyBigramFamilyId(
 				params.surfaceGroupIndex,
 				bigramIndex,
-				occurrence.ordinalPosition,
+				occurrenceIndex,
 			);
 			out.push({
+				surfaceGroupIndex: params.surfaceGroupIndex,
 				blockId: occurrence.blockId,
 				unitIndex: buildSyntheticBodyBigramUnitIndex(
 					params.baseQueryUnitCount,
 					params.surfaceGroupIndex,
 					bigramIndex,
 				),
+				querySurfaceGroupIndex: params.surfaceGroupIndex,
 				match: {
 					familyId,
 					shardLocalFamilySlot: getShardLocalFamilySlot(params.base, familyId),
@@ -1001,7 +1016,10 @@ function collectMatchedOpaqueBodyBigramTexts(params: Readonly<{
 	const out = new Set<string>();
 	for (const unitIndex of params.bodyWindow.coveredUnitIndices) {
 		const bigramIndex =
-			unitIndex - params.baseQueryUnitCount - 100_000 - params.surfaceGroupIndex * 100;
+			unitIndex -
+			params.baseQueryUnitCount -
+			SYNTHETIC_BODY_BIGRAM_UNIT_BASE -
+			params.surfaceGroupIndex * SYNTHETIC_BODY_BIGRAM_UNIT_GROUP_STRIDE;
 		if (bigramIndex < 0 || bigramIndex >= params.unresolvedBigrams.length) {
 			continue;
 		}
@@ -1049,7 +1067,12 @@ function buildSyntheticBodyBigramUnitIndex(
 	surfaceGroupIndex: number,
 	bigramIndex: number,
 ): number {
-	return baseQueryUnitCount + 100_000 + surfaceGroupIndex * 100 + bigramIndex;
+	return (
+		baseQueryUnitCount +
+		SYNTHETIC_BODY_BIGRAM_UNIT_BASE +
+		surfaceGroupIndex * SYNTHETIC_BODY_BIGRAM_UNIT_GROUP_STRIDE +
+		bigramIndex
+	);
 }
 
 function buildSyntheticBodyBigramFamilyId(
@@ -1057,5 +1080,10 @@ function buildSyntheticBodyBigramFamilyId(
 	bigramIndex: number,
 	localMatchOrdinal: number,
 ): number {
-	return -(1_000_000 + surfaceGroupIndex * 1000 + bigramIndex * 10 + localMatchOrdinal);
+	return -(
+		SYNTHETIC_BODY_BIGRAM_FAMILY_BASE +
+		surfaceGroupIndex * SYNTHETIC_BODY_BIGRAM_FAMILY_GROUP_STRIDE +
+		bigramIndex * SYNTHETIC_BODY_BIGRAM_FAMILY_BIGRAM_STRIDE +
+		localMatchOrdinal
+	);
 }
