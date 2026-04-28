@@ -2882,7 +2882,7 @@ function summarizeSingletonHanCompletion(params: Readonly<{
 }>): SingletonHanCompletion {
 	const candidateBlockIds = collectCandidateSingletonHanBlockIds(
 		params.base,
-		params.candidateRecall.docId,
+		params.candidateRecall.liveDocSlot,
 		params.candidateRecall.shortlistedBodyBlockIds,
 	);
 	const queryBigramTexts = collectAllQueryHanBigramTexts(params.queryAnalysis);

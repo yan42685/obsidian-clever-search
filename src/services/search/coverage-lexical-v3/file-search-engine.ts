@@ -80,11 +80,8 @@ import type {
 import {
 	getLiveDocGeneration,
 	getDocPath,
-	getLiveDocPath,
 	getLiveDocRef,
-	getLiveDocSlot,
 	getLiveDocSlotForBlockId,
-	getLiveDocStableKey,
 	type V3CandidateDocRecall,
 } from "./recall";
 import {
@@ -658,10 +655,6 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			}
 			return null;
 		}
-		const candidateKeyByProfileKey = buildCandidateKeyByProfileKey(
-			this.engine.getResidentIndexView()?.shards ?? [],
-			result.recallState.candidateDocs,
-		);
 		const candidateRecallByCandidateKey = new Map<string, V3CandidateDocRecall>(
 			result.recallState.candidateDocs.map((item) => [
 				buildCandidateHydrationKey(item),
@@ -669,7 +662,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			]),
 		);
 		const candidateRecall = candidateRecallByCandidateKey.get(
-			findCandidateKeyForProfile(candidateKeyByProfileKey, candidate),
+			buildCandidateHydrationKey(candidate),
 		);
 		if (candidateRecall == null) {
 			if (shouldLogDebug) {
@@ -703,7 +696,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		const snapshotReadStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
 		const expectedGeneration = getLiveDocGeneration(
 			residentBase,
-			getLiveDocSlot(residentBase, candidate.docId),
+			candidateRecall.liveDocSlot,
 		);
 		let snapshotText = (
 			await this.getFileSnapshotStore().readIndexedTexts([
@@ -1785,17 +1778,10 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				return [candidateKey, candidate] as const;
 			}),
 		);
-		const candidateKeyByProfileKey = buildCandidateKeyByProfileKey(
-			this.engine.getResidentIndexView()?.shards ?? [],
-			result.recallState.candidateDocs,
-		);
 		const refinedCandidates = new Map<string, EvidencePackingProfile>();
 		for (let candidateIndex = 0; candidateIndex < result.rankedCandidates.length; candidateIndex += 1) {
 			const candidate = result.rankedCandidates[candidateIndex];
-			const candidateKey = findCandidateKeyForProfile(
-				candidateKeyByProfileKey,
-				candidate,
-			);
+			const candidateKey = buildCandidateHydrationKey(candidate);
 			const candidateRecall = candidateRecallByCandidateKey.get(candidateKey);
 			if (candidateRecall == null || !hasBodyTierHanCompletion(candidate)) {
 				continue;
@@ -1875,9 +1861,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		return result.rankedCandidates
 			.map(
 				(candidate) =>
-					refinedCandidates.get(
-						findCandidateKeyForProfile(candidateKeyByProfileKey, candidate),
-					) ??
+					refinedCandidates.get(buildCandidateHydrationKey(candidate)) ??
 					candidate,
 			)
 			.sort(comparePackingProfiles);
@@ -2510,42 +2494,6 @@ function groupCandidateRecallsByShardKey(
 		}
 	}
 	return candidateRecallsByShardKey;
-}
-
-function buildCandidateKeyByProfileKey(
-	residentShards: readonly ResidentShard[],
-	candidateRecalls: readonly V3CandidateDocRecall[],
-): Map<string, string> {
-	const candidateKeyByProfileKey = new Map<string, string>();
-	for (const candidateRecall of candidateRecalls) {
-		const residentBase = findResidentBaseForCandidate(residentShards, candidateRecall);
-		if (residentBase == null) {
-			continue;
-		}
-		const candidateKey = buildCandidateHydrationKey(candidateRecall);
-		candidateKeyByProfileKey.set(
-			buildCandidateProfileKey({
-				path: getLiveDocPath(residentBase, candidateRecall.liveDocSlot),
-				stableKey: getLiveDocStableKey(residentBase, candidateRecall.liveDocSlot),
-				liveDocSlot: candidateRecall.liveDocSlot,
-			}),
-			candidateKey,
-		);
-	}
-	return candidateKeyByProfileKey;
-}
-
-function findCandidateKeyForProfile(
-	candidateKeyByProfileKey: ReadonlyMap<string, string>,
-	candidate: Pick<EvidencePackingProfile, "liveDocSlot" | "stableKey" | "path">,
-): string {
-	return candidateKeyByProfileKey.get(buildCandidateProfileKey(candidate)) ?? "";
-}
-
-function buildCandidateProfileKey(
-	candidate: Pick<EvidencePackingProfile, "liveDocSlot" | "stableKey" | "path">,
-): string {
-	return `${candidate.stableKey}\0${candidate.path}\0${candidate.liveDocSlot}`;
 }
 
 function collectShortlistedBodyEvidenceLocators(

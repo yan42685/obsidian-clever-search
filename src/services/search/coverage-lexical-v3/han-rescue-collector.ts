@@ -475,7 +475,7 @@ function collectBodyRescueEvaluations<TBodyWindow extends HanBodyWindowLike>(par
 				group.groupRecall.bodySeedBlockIds.flatMap((seedBlockId) =>
 					collectSameDocSeedNeighborhoodBlockIds(
 						params.base,
-						params.candidateRecall.docId,
+						params.candidateRecall.liveDocSlot,
 						seedBlockId,
 					),
 				),

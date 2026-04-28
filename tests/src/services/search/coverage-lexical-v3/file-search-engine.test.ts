@@ -107,6 +107,8 @@ function createPackingProfile(
 		Pick<EvidencePackingProfile, "docId" | "path">,
 ): EvidencePackingProfile {
 	return {
+		shardId: overrides.shardId ?? "test-shard",
+		shardGeneration: overrides.shardGeneration ?? 1,
 		docId: overrides.docId,
 		liveDocSlot: overrides.liveDocSlot ?? overrides.docId,
 		path: overrides.path,
@@ -441,6 +443,8 @@ function createCandidateDocRecall(
 ): V3CandidateDocRecall {
 	const shortlistedBodyBlocks = overrides.shortlistedBodyBlocks ?? [];
 	return {
+		shardId: overrides.shardId ?? "test-shard",
+		shardGeneration: overrides.shardGeneration ?? 1,
 		docId,
 		liveDocSlot: overrides.liveDocSlot ?? docId,
 		matchedIdentityUnitIndices: overrides.matchedIdentityUnitIndices ?? [],
@@ -1044,7 +1048,9 @@ function createMockSearchRuntime(
 		hydrateCandidateEvidenceByShard: (
 			candidateDocs: readonly V3CandidateDocRecall[],
 		) => hydrateCandidateEvidenceBatch(residentBase, candidateDocs, {}),
-		getResidentIndexView: () => ({ shards: [{ base: residentBase }] }),
+		getResidentIndexView: () => ({
+			shards: [{ shardId: "test-shard", generation: 1, base: residentBase }],
+		}),
 	};
 }
 
@@ -2904,6 +2910,81 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 		expect(highlightTexts).not.toContain(shorterTerm);
 	});
 
+	test("getDirectSubItems reads indexed snapshots by candidate liveDocSlot generation", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		const fullSurface = "\u7f13\u5b58\u6062\u590d\u6b65\u9aa4";
+		await engine.reIndexAll([
+			createDocument({
+				path: "notes/live-slot-target.md",
+				basename: "note",
+				folder: "notes",
+				generation: 101,
+				content: "placeholder",
+			}),
+		]);
+		const residentBase = createResidentBaseForBlockCounts(
+			[1, 1],
+			["notes/other.md", "notes/live-slot-target.md"],
+		);
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: createHanQueryAnalysis(fullSurface, fullSurface),
+				unitFamilyMatches: [],
+				candidateDocs: [
+					createCandidateDocRecall(0, {
+						liveDocSlot: 1,
+						shortlistedBodyBlocks: [createCandidateBodyBlockRecall(1)],
+					}),
+				],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					liveDocSlot: 1,
+					path: "notes/live-slot-target.md",
+					stableKey: "docref:2",
+					bodyWindowContainer: createBodyWindowContainer([1]),
+					strongestContainer: createBodyWindowContainer([1]),
+				}),
+			],
+		}));
+		const readIndexedTexts = jest.fn(async () =>
+			new Map([["notes/live-slot-target.md", fullSurface]]),
+		);
+		(
+			engine as unknown as {
+				engine: {
+					search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
+					getResidentIndexView: () => { shards: [{ base: ResidentBase }] };
+				};
+				getFileSnapshotStore: () => {
+					readIndexedTexts: typeof readIndexedTexts;
+					readCurrentTexts: jest.Mock;
+				};
+			}
+		).engine = createMockSearchRuntime(search, residentBase);
+		(
+			engine as unknown as {
+				getFileSnapshotStore: () => {
+					readIndexedTexts: typeof readIndexedTexts;
+					readCurrentTexts: jest.Mock;
+				};
+			}
+		).getFileSnapshotStore = () => ({
+			readIndexedTexts,
+			readCurrentTexts: jest.fn(),
+		});
+
+		await engine.getDirectSubItems(fullSurface, "notes/live-slot-target.md", 3);
+
+		expect(readIndexedTexts).toHaveBeenCalledWith([
+			{
+				path: "notes/live-slot-target.md",
+				generation: 101,
+			},
+		]);
+	});
+
 	test("searchFiles passes tokenizer query terms into engine.search", async () => {
 		const tokenizeSequence = jest.fn((text: string, mode?: "index" | "search") => {
 			if (text === "systemproxy" && mode === "search") {
@@ -3321,6 +3402,114 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 		]);
 		expect(refined[0].strongestHanSurfaceCompletionTier).toBe("body_window");
 		expect(refined[1].strongestHanSurfaceCompletionTier).toBe("body_residue");
+	});
+
+	test("resident Han witness refine keeps same-slot candidates scoped by shard", async () => {
+		const fullSurface = "\u7f13\u5b58\u6062\u590d\u6b65\u9aa4";
+		const sealedBase = withBodyWitnessTexts(
+			createResidentBaseForBlockCounts([1], ["same.md"]),
+			[[fullSurface]],
+		);
+		const activeBase = withBodyWitnessTexts(
+			createResidentBaseForBlockCounts([1], ["same.md"]),
+			[["unrelated body text"]],
+		);
+		const sealedRecall = createCandidateDocRecall(0, {
+			shardId: "sealed-0",
+			shardGeneration: 1,
+			liveDocSlot: 0,
+			shortlistedBodyBlocks: [createCandidateBodyBlockRecall(0)],
+		});
+		const activeRecall = createCandidateDocRecall(0, {
+			shardId: "active-1",
+			shardGeneration: 1,
+			liveDocSlot: 0,
+			shortlistedBodyBlocks: [createCandidateBodyBlockRecall(0)],
+		});
+		const sealedCandidate = createPackingProfile({
+			shardId: "sealed-0",
+			shardGeneration: 1,
+			docId: 0,
+			liveDocSlot: 0,
+			path: "same.md",
+			stableKey: "docref:1",
+			bodyWindowContainer: createBodyWindowContainer([0]),
+			strongestContainer: createBodyWindowContainer([0]),
+			hanSurfaceCompletionGroups: [
+				{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "body_residue" },
+			],
+		});
+		const activeCandidate = createPackingProfile({
+			shardId: "active-1",
+			shardGeneration: 1,
+			docId: 0,
+			liveDocSlot: 0,
+			path: "same.md",
+			stableKey: "docref:1",
+			bodyWindowContainer: createBodyWindowContainer([0]),
+			strongestContainer: createBodyWindowContainer([0]),
+			hanSurfaceCompletionGroups: [
+				{ surfaceGroupIndex: 0, surfaceText: fullSurface, tier: "body_residue" },
+			],
+		});
+		const result: CoverageLexicalV3SearchResult = {
+			recallState: {
+				queryAnalysis: createHanQueryAnalysis(fullSurface, "\u7f13\u5b58\u6062\u590d"),
+				unitFamilyMatches: [],
+				candidateDocs: [sealedRecall, activeRecall],
+			},
+			rankedCandidates: [sealedCandidate, activeCandidate],
+		};
+		const hydratedEvidenceByCandidateKey = new Map([
+			...hydrateCandidateEvidenceBatch(sealedBase, [sealedRecall], {
+				bodyHanEvidenceByBlockId: createResidentBodyHanEvidenceByBlockId(
+					sealedBase,
+					[sealedRecall],
+				),
+			}),
+			...hydrateCandidateEvidenceBatch(activeBase, [activeRecall], {
+				bodyHanEvidenceByBlockId: createResidentBodyHanEvidenceByBlockId(
+					activeBase,
+					[activeRecall],
+				),
+			}),
+		]);
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		(
+			engine as unknown as {
+				engine: {
+					getResidentIndexView: () => {
+						shards: Array<{
+							shardId: string;
+							generation: number;
+							base: ResidentBase;
+						}>;
+					};
+				};
+			}
+		).engine = {
+			getResidentIndexView: () => ({
+				shards: [
+					{ shardId: "sealed-0", generation: 1, base: sealedBase },
+					{ shardId: "active-1", generation: 1, base: activeBase },
+				],
+			}),
+		};
+
+		const refined = await (engine as unknown as {
+			refineHanSurfaceCompletion: (
+				searchResult: CoverageLexicalV3SearchResult,
+				hydratedEvidenceByCandidateKey: ReadonlyMap<string, CandidateEvidencePackage>,
+			) => Promise<readonly EvidencePackingProfile[]>;
+		}).refineHanSurfaceCompletion(result, hydratedEvidenceByCandidateKey);
+
+		expect(refined.map((candidate) => [
+			candidate.shardId,
+			candidate.strongestHanSurfaceCompletionTier,
+		])).toEqual([
+			["sealed-0", "body_window"],
+			["active-1", "body_residue"],
+		]);
 	});
 
 	test("resident Han witness refine checks all shortlisted blocks without raw query budget caps", async () => {
