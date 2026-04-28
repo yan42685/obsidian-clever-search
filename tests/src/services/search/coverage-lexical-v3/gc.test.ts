@@ -1,4 +1,9 @@
 import { runCoverageLexicalV3StorageGc } from "src/services/search/coverage-lexical-v3/gc";
+import { buildResidentHotBaseArtifacts } from "src/services/search/coverage-lexical-v3/build";
+import {
+	buildLexicalBlockEvidenceRowId,
+	buildLexicalDocEvidenceRowId,
+} from "src/services/search/shared/file-snapshot-store";
 
 class MemoryTable<Row extends { id?: string; snapshotId?: string; jobId?: string }> {
 	rows = new Map<string, Row>();
@@ -143,5 +148,113 @@ describe("coverage lexical v3 storage gc", () => {
 		]);
 		expect([...invalidations.rows.keys()]).toEqual(["active", "active-overlay"]);
 		expect([...lexicalBodyEvidence.rows.keys()]).toEqual(["active-overlay-evidence"]);
+	});
+
+	test("removes stale resident cold evidence rows inside a reused shard key", async () => {
+		const artifacts = buildResidentHotBaseArtifacts([
+			{
+				path: "current.md",
+				basename: "current",
+				folder: "",
+				content: "current body target",
+				docRef: 7,
+				generation: 2,
+			},
+		]);
+		const descriptor = {
+			shardId: "base-0",
+			generation: 1,
+			state: "active" as const,
+			sourceBytes: 10,
+			docCount: 1,
+			createdOrder: 1,
+			artifactOwner: "base-0",
+		};
+		const currentDocEvidenceId = buildLexicalDocEvidenceRowId({
+			shardId: "base-0",
+			shardGeneration: 1,
+			docRef: 7,
+			generation: 2,
+		});
+		const staleDocEvidenceId = buildLexicalDocEvidenceRowId({
+			shardId: "base-0",
+			shardGeneration: 1,
+			docRef: 7,
+			generation: 1,
+		});
+		const currentBlockEvidenceId = buildLexicalBlockEvidenceRowId({
+			shardId: "base-0",
+			shardGeneration: 1,
+			docRef: 7,
+			generation: 2,
+			blockOrdinal: 0,
+		});
+		const staleBlockEvidenceId = buildLexicalBlockEvidenceRowId({
+			shardId: "base-0",
+			shardGeneration: 1,
+			docRef: 7,
+			generation: 1,
+			blockOrdinal: 0,
+		});
+		const residentShardArtifacts = new MemoryTable(
+			[
+				{
+					id: "base-0@1",
+					shardId: "base-0",
+					generation: 1,
+					artifactOwner: "base-0",
+					base: artifacts.base,
+					createdAt: 1,
+				},
+			],
+			(row) => row.id!,
+		);
+		const snapshotManifests = new MemoryTable<any>([], (row) => row.snapshotId!);
+		const shardRegistry = new MemoryTable<any>([descriptor], (row) => row.shardId);
+		const activeOverlayJournal = new MemoryTable<any>([], (row) => row.id!);
+		const invalidations = new MemoryTable<any>([], (row) => row.id!);
+		const compactJobs = new MemoryTable<any>([], (row) => row.jobId!);
+		const compactTempArtifacts = new MemoryTable<any>([], (row) => row.jobId!);
+		const lexicalBodyEvidence = new MemoryTable(
+			[
+				{ id: currentBlockEvidenceId, shardId: "base-0", shardGeneration: 1 },
+				{ id: staleBlockEvidenceId, shardId: "base-0", shardGeneration: 1 },
+			],
+			(row) => row.id!,
+		);
+		const lexicalHanDocEvidence = new MemoryTable(
+			[
+				{ id: currentDocEvidenceId, shardId: "base-0", shardGeneration: 1 },
+				{ id: staleDocEvidenceId, shardId: "base-0", shardGeneration: 1 },
+			],
+			(row) => row.id!,
+		);
+		const lexicalHanBodyEvidence = new MemoryTable(
+			[
+				{ id: currentBlockEvidenceId, shardId: "base-0", shardGeneration: 1 },
+				{ id: staleBlockEvidenceId, shardId: "base-0", shardGeneration: 1 },
+			],
+			(row) => row.id!,
+		);
+
+		const result = await runCoverageLexicalV3StorageGc({
+			tables: {
+				residentShardArtifacts: residentShardArtifacts as any,
+				snapshotManifests: snapshotManifests as any,
+				shardRegistry: shardRegistry as any,
+				activeOverlayJournal: activeOverlayJournal as any,
+				invalidations: invalidations as any,
+				compactJobs: compactJobs as any,
+				compactTempArtifacts: compactTempArtifacts as any,
+				lexicalBodyEvidence: lexicalBodyEvidence as any,
+				lexicalHanDocEvidence: lexicalHanDocEvidence as any,
+				lexicalHanBodyEvidence: lexicalHanBodyEvidence as any,
+			},
+		});
+
+		expect(result.coldEvidenceRowsRemoved).toBe(3);
+		expect([...lexicalBodyEvidence.rows.keys()]).toEqual([currentBlockEvidenceId]);
+		expect([...lexicalHanDocEvidence.rows.keys()]).toEqual([currentDocEvidenceId]);
+		expect([...lexicalHanBodyEvidence.rows.keys()]).toEqual([currentBlockEvidenceId]);
 	});
 });

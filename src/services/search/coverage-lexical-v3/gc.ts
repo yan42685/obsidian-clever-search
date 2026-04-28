@@ -8,6 +8,10 @@ import type {
 import type { ActiveOverlayJournalRow } from "./active-overlay-journal";
 import { buildOverlayShardId } from "./active-overlay-journal";
 import type { CoverageLexicalV3ResidentShardArtifactRow } from "./artifact-loader";
+import {
+	buildLexicalBlockEvidenceRowId,
+	buildLexicalDocEvidenceRowId,
+} from "../shared/file-snapshot-store";
 import type { CoverageLexicalV3SnapshotManifest } from "./snapshot";
 import { isReadableShardState, type ResidentShardDescriptor } from "./shards";
 import type {
@@ -138,6 +142,10 @@ export async function runCoverageLexicalV3StorageGc(params: {
 		...readableShardKeys,
 		...overlayShardKeys,
 	]);
+	const rootedResidentColdEvidenceRowIds = collectRootedResidentColdEvidenceRowIds({
+		descriptors: [...readableRegistry, ...readableManifestShards],
+		artifactRows,
+	});
 	const rootedInvalidationShardKeys = new Set([
 		...readableShardKeys,
 		...overlayShardKeys,
@@ -182,18 +190,24 @@ export async function runCoverageLexicalV3StorageGc(params: {
 			bodyEvidenceRows,
 			params.tables.lexicalBodyEvidence,
 			rootedColdEvidenceShardKeys,
+			overlayShardKeys,
+			rootedResidentColdEvidenceRowIds,
 			deleteIfBudgetAllows,
 		)) +
 		(await deleteColdEvidenceRows(
 			hanDocEvidenceRows,
 			params.tables.lexicalHanDocEvidence,
 			rootedColdEvidenceShardKeys,
+			overlayShardKeys,
+			rootedResidentColdEvidenceRowIds,
 			deleteIfBudgetAllows,
 		)) +
 		(await deleteColdEvidenceRows(
 			hanBodyEvidenceRows,
 			params.tables.lexicalHanBodyEvidence,
 			rootedColdEvidenceShardKeys,
+			overlayShardKeys,
+			rootedResidentColdEvidenceRowIds,
 			deleteIfBudgetAllows,
 		));
 
@@ -213,6 +227,8 @@ async function deleteColdEvidenceRows<Row extends { id: string; shardId: string;
 	rows: readonly Row[],
 	table: GcTable<Row, string> | undefined,
 	rootedShardKeys: ReadonlySet<string>,
+	overlayShardKeys: ReadonlySet<string>,
+	rootedResidentRowIds: ReadonlySet<string>,
 	deleteIfBudgetAllows: (
 		rows: readonly Row[],
 		table: GcTable<Row, string>,
@@ -224,11 +240,82 @@ async function deleteColdEvidenceRows<Row extends { id: string; shardId: string;
 	}
 	return await deleteIfBudgetAllows(
 		rows.filter(
-			(row) => !rootedShardKeys.has(shardKeyFromParts(row.shardId, row.shardGeneration)),
+			(row) =>
+				!shouldKeepColdEvidenceRow({
+					row,
+					rootedShardKeys,
+					overlayShardKeys,
+					rootedResidentRowIds,
+				}),
 		),
 		table,
 		(row) => row.id,
 	);
+}
+
+function shouldKeepColdEvidenceRow(params: {
+	row: { id: string; shardId: string; shardGeneration: number };
+	rootedShardKeys: ReadonlySet<string>;
+	overlayShardKeys: ReadonlySet<string>;
+	rootedResidentRowIds: ReadonlySet<string>;
+}): boolean {
+	const key = shardKeyFromParts(params.row.shardId, params.row.shardGeneration);
+	if (!params.rootedShardKeys.has(key)) {
+		return false;
+	}
+	if (params.overlayShardKeys.has(key)) {
+		return true;
+	}
+	return params.rootedResidentRowIds.has(params.row.id);
+}
+
+function collectRootedResidentColdEvidenceRowIds(params: {
+	descriptors: readonly ResidentShardDescriptor[];
+	artifactRows: readonly CoverageLexicalV3ResidentShardArtifactRow[];
+}): ReadonlySet<string> {
+	const ids = new Set<string>();
+	const artifactRowsById = new Map(params.artifactRows.map((row) => [row.id, row]));
+	for (const descriptor of params.descriptors) {
+		const artifact = artifactRowsById.get(artifactRowIdForDescriptor(descriptor));
+		if (artifact == null) {
+			continue;
+		}
+		const docTable = artifact.base?.docTable;
+		const bodyBlocks = artifact.base?.bodyBlocks;
+		if (docTable == null || bodyBlocks == null) {
+			continue;
+		}
+		for (let docId = 0; docId < docTable.docCount; docId += 1) {
+			const docRef = docTable.docRefsByDocId[docId] ?? 0;
+			if (!Number.isFinite(docRef) || docRef <= 0) {
+				continue;
+			}
+			const generation = docTable.generationByDocId[docId] ?? 0;
+			ids.add(
+				buildLexicalDocEvidenceRowId({
+					shardId: descriptor.shardId,
+					shardGeneration: descriptor.generation,
+					docRef,
+					generation,
+				}),
+			);
+			const blockStart = docTable.bodyBlockStartByDocId[docId] ?? 0;
+			const blockCount = docTable.bodyBlockCountByDocId[docId] ?? 0;
+			for (let offset = 0; offset < blockCount; offset += 1) {
+				const blockId = blockStart + offset;
+				ids.add(
+					buildLexicalBlockEvidenceRowId({
+						shardId: descriptor.shardId,
+						shardGeneration: descriptor.generation,
+						docRef,
+						generation,
+						blockOrdinal: bodyBlocks.blockOrdinalByBlockId[blockId] ?? offset,
+					}),
+				);
+			}
+		}
+	}
+	return ids;
 }
 
 function latestCommittedSnapshot(
