@@ -10,6 +10,7 @@ import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3
 import type { ResidentShard } from "src/services/search/coverage-lexical-v3/layout/types";
 import type { ResidentShardDescriptor } from "src/services/search/coverage-lexical-v3/shards";
 import {
+	createDexieCoverageLexicalV3SnapshotStore,
 	healCoverageLexicalV3SnapshotState,
 	MemoryCoverageLexicalV3SnapshotStore,
 	restoreCoverageLexicalV3Snapshot,
@@ -33,6 +34,41 @@ class FakeArtifactTable<Row extends Record<string, unknown>, Key extends string>
 
 	async delete(key: Key): Promise<void> {
 		this.rows.delete(key);
+	}
+}
+
+class FakeSnapshotTable<Row extends { snapshotId: string }> {
+	private rows = new Map<string, Row>();
+
+	constructor(initialRows: readonly Row[] = []) {
+		for (const row of initialRows) {
+			this.rows.set(row.snapshotId, row);
+		}
+	}
+
+	async toArray(): Promise<Row[]> {
+		return [...this.rows.values()];
+	}
+
+	async put(row: Row): Promise<void> {
+		this.rows.set(row.snapshotId, row);
+	}
+
+	async delete(key: string): Promise<void> {
+		this.rows.delete(key);
+	}
+}
+
+class FakeTransactionScope {
+	public transactionCallCount = 0;
+
+	async transaction(
+		_mode: "rw",
+		...args: [...unknown[], () => Promise<void>]
+	): Promise<void> {
+		this.transactionCallCount += 1;
+		const callback = args[args.length - 1] as () => Promise<void>;
+		await callback();
 	}
 }
 
@@ -140,8 +176,62 @@ describe("coverage lexical v3 multi-shard snapshot", () => {
 			"active-2",
 		]);
 		expect(result.manifest.artifactRefs).toHaveLength(2);
-	expect(result.manifest.overlayJournalRefs.map((ref) => ref.entryId)).toEqual(["active-2@1:1"]);
+		expect(result.manifest.overlayJournalRefs.map((ref) => ref.entryId)).toEqual(["active-2@1:1"]);
 		expect((await snapshotStore.loadLatestCommittedManifest())?.snapshotId).toBe("snapshot-1");
+	});
+
+	test("default snapshot ids stay unique across same-ms writes", async () => {
+		const sealed = descriptor("sealed-1", "sealed", 1);
+		const stores = createMemoryCoverageLexicalV3ProductionStores({ registry: [sealed] });
+		const overlayStore = new MemoryActiveOverlayJournalStore();
+		const snapshotStore = new MemoryCoverageLexicalV3SnapshotStore();
+
+		const first = await writeCoverageLexicalV3Snapshot({
+			snapshotStore,
+			stores,
+			overlayJournalStore: overlayStore,
+			now: 20,
+		});
+		const second = await writeCoverageLexicalV3Snapshot({
+			snapshotStore,
+			stores,
+			overlayJournalStore: overlayStore,
+			now: 20,
+		});
+
+		expect(first.manifest.snapshotId).toBe("v3-snapshot-20");
+		expect(second.manifest.snapshotId).toBe("v3-snapshot-20-1");
+		expect((await snapshotStore.loadLatestCommittedManifest())?.snapshotId).toBe(
+			"v3-snapshot-20-1",
+		);
+		expect(
+			(await snapshotStore.loadManifests()).map((item) => ({
+				snapshotId: item.snapshotId,
+				status: item.status,
+			})),
+		).toEqual([
+			{ snapshotId: "v3-snapshot-20", status: "garbage" },
+			{ snapshotId: "v3-snapshot-20-1", status: "committed" },
+		]);
+	});
+
+	test("same-ms default snapshot ordering treats numeric suffixes as recency", async () => {
+		const sealed = descriptor("sealed-1", "sealed", 1);
+		const snapshotStore = new MemoryCoverageLexicalV3SnapshotStore(
+			Array.from({ length: 11 }, (_, index) =>
+				manifest({
+					snapshotId:
+						index === 0 ? "v3-snapshot-20" : `v3-snapshot-20-${index}`,
+					status: "committed",
+					createdAt: 20,
+					shards: [sealed],
+				}),
+			),
+		);
+
+		expect((await snapshotStore.loadLatestCommittedManifest())?.snapshotId).toBe(
+			"v3-snapshot-20-10",
+		);
 	});
 
 	test("building manifest is ignored during restore", async () => {
@@ -291,6 +381,13 @@ describe("coverage lexical v3 multi-shard snapshot", () => {
 		});
 		expect(missingArtifact.reason).toBe("missing_resident_shard");
 
+		const existingEngine = new CoverageLexicalV3Engine();
+		const existingDescriptor = descriptor("existing-1", "sealed", 1);
+		existingEngine.loadResidentIndexView({
+			version: 1,
+			shards: [residentShard("existing-1", [doc("existing.md", "existing target", 9)])],
+			shardRegistry: [existingDescriptor],
+		});
 		const missingOverlay = await restoreCoverageLexicalV3Snapshot({
 			snapshotStore: new MemoryCoverageLexicalV3SnapshotStore([
 				{
@@ -305,12 +402,13 @@ describe("coverage lexical v3 multi-shard snapshot", () => {
 					],
 				},
 			]),
-			engine: new CoverageLexicalV3Engine(),
+			engine: existingEngine,
 			stores: createMemoryCoverageLexicalV3ProductionStores({ registry: [active] }),
 			residentShardArtifactLoader: { async loadResidentShard() { return residentShard("active-1", []); } },
 			overlayJournalStore: new MemoryActiveOverlayJournalStore(),
 		});
 		expect(missingOverlay.reason).toBe("missing_overlay_entry");
+		expect(existingEngine.search("existing target").rankedCandidates[0]?.path).toBe("existing.md");
 	});
 
 	test("bootstrap prefers snapshot restore before registry fallback", async () => {
@@ -345,5 +443,52 @@ describe("coverage lexical v3 multi-shard snapshot", () => {
 		expect((await snapshotStore.loadManifests()).map((item) => item.snapshotId)).toEqual([
 			"new",
 		]);
+	});
+
+	test("dexie snapshot commit marks previous committed manifests garbage in one transaction", async () => {
+		const sealed = descriptor("sealed-1", "sealed", 1);
+		const transactionScope = new FakeTransactionScope();
+		const table = new FakeSnapshotTable<CoverageLexicalV3SnapshotManifest>([
+			manifest({ snapshotId: "old", status: "committed", createdAt: 1, shards: [sealed] }),
+			manifest({ snapshotId: "next", status: "building", createdAt: 2, shards: [sealed] }),
+		]);
+		const snapshotStore = createDexieCoverageLexicalV3SnapshotStore(
+			table,
+			transactionScope,
+		);
+
+		await snapshotStore.commitManifestAndMarkOthersGarbage("next");
+
+		expect(transactionScope.transactionCallCount).toBe(1);
+		expect(
+			(await snapshotStore.loadManifests()).map((item) => ({
+				snapshotId: item.snapshotId,
+				status: item.status,
+			})),
+		).toEqual([
+			{ snapshotId: "old", status: "garbage" },
+			{ snapshotId: "next", status: "committed" },
+		]);
+	});
+
+	test("snapshot commit leaves current committed manifest intact when target is missing", async () => {
+		const sealed = descriptor("sealed-1", "sealed", 1);
+		const snapshotStore = new MemoryCoverageLexicalV3SnapshotStore([
+			manifest({
+				snapshotId: "current",
+				status: "committed",
+				createdAt: 1,
+				shards: [sealed],
+			}),
+		]);
+
+		await snapshotStore.commitManifestAndMarkOthersGarbage("missing");
+
+		expect(
+			(await snapshotStore.loadManifests()).map((item) => ({
+				snapshotId: item.snapshotId,
+				status: item.status,
+			})),
+		).toEqual([{ snapshotId: "current", status: "committed" }]);
 	});
 });

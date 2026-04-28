@@ -494,8 +494,17 @@ function collectMatchedBigramOccurrencesForScope(
 	) {
 		return [];
 	}
+	const targetSurfaceGroupIndices = new Set(
+		context.singletonHanTargets
+			.map((target) => target.surfaceGroupIndex)
+			.filter((surfaceGroupIndex): surfaceGroupIndex is number => surfaceGroupIndex != null),
+	);
 	const hanSurfaceGroups = context.queryAnalysis.surfaceGroups.filter(
-		(group) => group.kind === "han" && group.hanBigramTexts.length > 0,
+		(group) =>
+			group.kind === "han" &&
+			group.hanBigramTexts.length > 0 &&
+			(targetSurfaceGroupIndices.size === 0 ||
+				targetSurfaceGroupIndices.has(group.index)),
 	);
 	if (hanSurfaceGroups.length === 0) {
 		return [];

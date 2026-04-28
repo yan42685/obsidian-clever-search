@@ -183,7 +183,13 @@ async function maybeRunOneCompactJob(params: {
 		});
 		return true;
 	}
-	const outputShardId = `sealed-compact-${params.now}`;
+	const compactIds = await allocateCompactJobIds({
+		registry,
+		compactJobStore: params.compactJobStore,
+		residentShardArtifactStore: params.residentShardArtifactStore,
+		now: params.now,
+	});
+	const outputShardId = compactIds.outputShardId;
 	const outputDescriptor: ResidentShardDescriptor = {
 		shardId: outputShardId,
 		generation: 1,
@@ -194,7 +200,7 @@ async function maybeRunOneCompactJob(params: {
 		artifactOwner: outputShardId,
 	};
 	const job: CompactJobManifest = {
-		jobId: `compact-${params.now}`,
+		jobId: compactIds.jobId,
 		kind: plan.kind,
 		inputShardIds: plan.inputShardIds,
 		outputShardId,
@@ -235,6 +241,49 @@ async function maybeRunOneCompactJob(params: {
 		now: params.now,
 	});
 	return true;
+}
+
+async function allocateCompactJobIds(params: {
+	registry: readonly ResidentShardDescriptor[];
+	compactJobStore: CompactJobManifestStore;
+	residentShardArtifactStore: CoverageLexicalV3ResidentShardArtifactStore;
+	now: number;
+}): Promise<Readonly<{ jobId: string; outputShardId: string }>> {
+	const jobs = await params.compactJobStore.loadJobs();
+	const usedShardIds = new Set([
+		...params.registry.map((descriptor) => descriptor.shardId),
+		...jobs.map((job) => job.outputShardId),
+	]);
+	const usedJobIds = new Set(jobs.map((job) => job.jobId));
+	for (let attempt = 0; ; attempt += 1) {
+		const suffix = attempt === 0 ? "" : `-${attempt}`;
+		const outputShardId = `sealed-compact-${params.now}${suffix}`;
+		const jobId = `compact-${params.now}${suffix}`;
+		if (
+			!usedShardIds.has(outputShardId) &&
+			!usedJobIds.has(jobId) &&
+			!(await compactArtifactExists(params.residentShardArtifactStore, outputShardId))
+		) {
+			return { jobId, outputShardId };
+		}
+	}
+}
+
+async function compactArtifactExists(
+	residentShardArtifactStore: CoverageLexicalV3ResidentShardArtifactStore,
+	outputShardId: string,
+): Promise<boolean> {
+	return (
+		(await residentShardArtifactStore.loadResidentShard({
+			shardId: outputShardId,
+			generation: 1,
+			state: "sealed",
+			sourceBytes: 0,
+			docCount: 0,
+			createdOrder: 0,
+			artifactOwner: outputShardId,
+		})) != null
+	);
 }
 
 async function markCompactInputsGarbage(params: {

@@ -323,8 +323,39 @@ function latestCommittedSnapshot(
 ): CoverageLexicalV3SnapshotManifest | undefined {
 	return [...manifests]
 		.filter((manifest) => manifest.status === "committed")
-		.sort((left, right) => left.createdAt - right.createdAt)
+		.sort(compareSnapshotManifestRecency)
 		.at(-1);
+}
+
+function compareSnapshotManifestRecency(
+	left: CoverageLexicalV3SnapshotManifest,
+	right: CoverageLexicalV3SnapshotManifest,
+): number {
+	const createdAtComparison = left.createdAt - right.createdAt;
+	if (createdAtComparison !== 0) {
+		return createdAtComparison;
+	}
+	const leftDefaultOrder = parseDefaultSnapshotOrder(left);
+	const rightDefaultOrder = parseDefaultSnapshotOrder(right);
+	if (leftDefaultOrder != null && rightDefaultOrder != null) {
+		return leftDefaultOrder - rightDefaultOrder;
+	}
+	return left.snapshotId.localeCompare(right.snapshotId);
+}
+
+function parseDefaultSnapshotOrder(
+	manifest: CoverageLexicalV3SnapshotManifest,
+): number | null {
+	const prefix = `v3-snapshot-${manifest.createdAt}`;
+	if (manifest.snapshotId === prefix) {
+		return 0;
+	}
+	const suffixPrefix = `${prefix}-`;
+	if (!manifest.snapshotId.startsWith(suffixPrefix)) {
+		return null;
+	}
+	const suffix = manifest.snapshotId.slice(suffixPrefix.length);
+	return /^\d+$/u.test(suffix) ? Number.parseInt(suffix, 10) : null;
 }
 
 function artifactRowIdForDescriptor(descriptor: ResidentShardDescriptor): string {

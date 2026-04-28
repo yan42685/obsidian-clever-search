@@ -257,4 +257,83 @@ describe("coverage lexical v3 storage gc", () => {
 		expect([...lexicalHanDocEvidence.rows.keys()]).toEqual([currentDocEvidenceId]);
 		expect([...lexicalHanBodyEvidence.rows.keys()]).toEqual([currentBlockEvidenceId]);
 	});
+
+	test("roots the latest same-ms committed snapshot deterministically", async () => {
+		const residentShardArtifacts = new MemoryTable(
+			[
+				{
+					id: "old@1",
+					shardId: "old",
+					generation: 1,
+					artifactOwner: "old",
+					base: {},
+					createdAt: 1,
+				},
+				{
+					id: "new@1",
+					shardId: "new",
+					generation: 1,
+					artifactOwner: "new",
+					base: {},
+					createdAt: 2,
+				},
+			],
+			(row) => row.id!,
+		);
+		const descriptor = (shardId: string) => ({
+			shardId,
+			generation: 1,
+			state: "sealed" as const,
+			sourceBytes: 1,
+			docCount: 1,
+			createdOrder: 1,
+			artifactOwner: shardId,
+		});
+		const snapshotManifests = new MemoryTable(
+			[
+				{
+					snapshotId: "v3-snapshot-20",
+					schemaVersion: 1,
+					createdAt: 20,
+					registryGeneration: 1,
+					shardDescriptors: [descriptor("old")],
+					activeShardId: null,
+					overlayIncluded: true,
+					artifactRefs: [{ shardId: "old", generation: 1, artifactOwner: "old" }],
+					overlayJournalRefs: [],
+					invalidationCount: 0,
+					status: "committed" as const,
+				},
+				{
+					snapshotId: "v3-snapshot-20-10",
+					schemaVersion: 1,
+					createdAt: 20,
+					registryGeneration: 1,
+					shardDescriptors: [descriptor("new")],
+					activeShardId: null,
+					overlayIncluded: true,
+					artifactRefs: [{ shardId: "new", generation: 1, artifactOwner: "new" }],
+					overlayJournalRefs: [],
+					invalidationCount: 0,
+					status: "committed" as const,
+				},
+			],
+			(row) => row.snapshotId!,
+		);
+
+		await runCoverageLexicalV3StorageGc({
+			tables: {
+				residentShardArtifacts: residentShardArtifacts as any,
+				snapshotManifests: snapshotManifests as any,
+				shardRegistry: new MemoryTable<any>([], (row) => row.shardId) as any,
+				activeOverlayJournal: new MemoryTable<any>([], (row) => row.id!) as any,
+				invalidations: new MemoryTable<any>([], (row) => row.id!) as any,
+				compactJobs: new MemoryTable<any>([], (row) => row.jobId!) as any,
+				compactTempArtifacts: new MemoryTable<any>([], (row) => row.jobId!) as any,
+			},
+		});
+
+		expect([...residentShardArtifacts.rows.keys()]).toEqual(["new@1"]);
+		expect([...snapshotManifests.rows.keys()]).toEqual(["v3-snapshot-20-10"]);
+	});
 });

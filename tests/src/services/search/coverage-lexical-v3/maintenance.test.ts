@@ -131,6 +131,143 @@ describe("coverage lexical v3 maintenance coordinator", () => {
 		expect(registry.find((shard) => shard.shardId === "sealed-1")?.state).toBe("garbage");
 	});
 
+	test("allocates unique compact job and output ids across same-ms maintenance runs", async () => {
+		const first = descriptor("sealed-1", 1);
+		const second = descriptor("sealed-2", 2);
+		const third = descriptor("sealed-3", 3);
+		const stores = createMemoryCoverageLexicalV3ProductionStores({
+			registry: [first, second, third],
+		});
+		const artifactTable = new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>(
+			(row) => row.id,
+		);
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			artifactTable,
+		);
+		const jobs = new MemoryCompactJobManifestStore();
+		const tempArtifacts = new MemoryCompactTempArtifactStore();
+		const docs = [
+			doc("one.md", "one target", 1),
+			doc("two.md", "two target", 2),
+			doc("three.md", "three target", 3),
+		];
+		for (const [index, shardDescriptor] of [first, second, third].entries()) {
+			await artifacts.publishResidentShardArtifact({
+				descriptor: shardDescriptor,
+				shard: residentShard(shardDescriptor.shardId, [docs[index]!]),
+				createdAt: 1,
+			});
+		}
+
+		await runCoverageLexicalV3Maintenance({
+			stores,
+			residentShardArtifactStore: artifacts,
+			overlayJournalStore: new MemoryActiveOverlayJournalStore(),
+			compactJobStore: jobs,
+			compactTempArtifactStore: tempArtifacts,
+			indexedSnapshotReader: indexedSnapshotReader(docs),
+			now: 40,
+		});
+		await runCoverageLexicalV3Maintenance({
+			stores,
+			residentShardArtifactStore: artifacts,
+			overlayJournalStore: new MemoryActiveOverlayJournalStore(),
+			compactJobStore: jobs,
+			compactTempArtifactStore: tempArtifacts,
+			indexedSnapshotReader: indexedSnapshotReader(docs),
+			now: 40,
+		});
+
+		const registry = await stores.shardRegistry.loadRegistry();
+		expect(registry.map((shard) => shard.shardId)).toEqual(
+			expect.arrayContaining(["sealed-compact-40", "sealed-compact-40-1"]),
+		);
+		expect(registry.find((shard) => shard.shardId === "sealed-compact-40")?.state).toBe(
+			"garbage",
+		);
+		expect(registry.find((shard) => shard.shardId === "sealed-compact-40-1")?.state).toBe(
+			"sealed",
+		);
+		expect(await artifacts.loadResidentShard({
+			shardId: "sealed-compact-40",
+			generation: 1,
+			state: "garbage",
+			sourceBytes: 2048,
+			docCount: 2,
+			createdOrder: 1,
+			artifactOwner: "sealed-compact-40",
+		})).toBeDefined();
+		expect(await artifacts.loadResidentShard({
+			shardId: "sealed-compact-40-1",
+			generation: 1,
+			state: "sealed",
+			sourceBytes: 3072,
+			docCount: 3,
+			createdOrder: 1,
+			artifactOwner: "sealed-compact-40-1",
+		})).toBeDefined();
+	});
+
+	test("allocates compact output ids without overwriting existing orphan artifacts", async () => {
+		const first = descriptor("sealed-1", 1);
+		const second = descriptor("sealed-2", 2);
+		const stores = createMemoryCoverageLexicalV3ProductionStores({
+			registry: [first, second],
+		});
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>(
+				(row) => row.id,
+			),
+		);
+		const docs = [
+			doc("one.md", "one target", 1),
+			doc("two.md", "two target", 2),
+		];
+		for (const [index, shardDescriptor] of [first, second].entries()) {
+			await artifacts.publishResidentShardArtifact({
+				descriptor: shardDescriptor,
+				shard: residentShard(shardDescriptor.shardId, [docs[index]!]),
+				createdAt: 1,
+			});
+		}
+		await artifacts.publishResidentShardArtifact({
+			descriptor: {
+				shardId: "sealed-compact-50",
+				generation: 1,
+				state: "sealed",
+				sourceBytes: 1,
+				docCount: 1,
+				createdOrder: 1,
+				artifactOwner: "sealed-compact-50",
+			},
+			shard: residentShard("sealed-compact-50", [doc("orphan.md", "orphan target", 99)]),
+			createdAt: 1,
+		});
+
+		await runCoverageLexicalV3Maintenance({
+			stores,
+			residentShardArtifactStore: artifacts,
+			overlayJournalStore: new MemoryActiveOverlayJournalStore(),
+			compactJobStore: new MemoryCompactJobManifestStore(),
+			compactTempArtifactStore: new MemoryCompactTempArtifactStore(),
+			indexedSnapshotReader: indexedSnapshotReader(docs),
+			now: 50,
+		});
+
+		const registry = await stores.shardRegistry.loadRegistry();
+		expect(registry.map((shard) => shard.shardId)).toContain("sealed-compact-50-1");
+		expect(registry.map((shard) => shard.shardId)).not.toContain("sealed-compact-50");
+		expect(await artifacts.loadResidentShard({
+			shardId: "sealed-compact-50",
+			generation: 1,
+			state: "sealed",
+			sourceBytes: 1,
+			docCount: 1,
+			createdOrder: 1,
+			artifactOwner: "sealed-compact-50",
+		})).toBeDefined();
+	});
+
 	test("compact drops invalidated sealed documents", async () => {
 		const first = descriptor("sealed-1", 1);
 		const second = descriptor("sealed-2", 2);

@@ -52,6 +52,21 @@ class FakeAsyncTable<Row extends Record<string, unknown>, Key extends string | n
 	}
 }
 
+class FakeTransactionScope {
+	public transactionCallCount = 0;
+	public readonly tableCounts: number[] = [];
+
+	async transaction(
+		_mode: "rw",
+		...args: [...unknown[], () => Promise<void>]
+	): Promise<void> {
+		this.transactionCallCount += 1;
+		this.tableCounts.push(Math.max(0, args.length - 1));
+		const callback = args[args.length - 1] as () => Promise<void>;
+		await callback();
+	}
+}
+
 function shard(shardId: string, createdOrder: number): ResidentShardDescriptor {
 	return {
 		shardId,
@@ -223,11 +238,13 @@ describe("coverage lexical v3 production stores", () => {
 		const table = new FakeAsyncTable<CoverageLexicalV3ShardRegistryRow, string>(
 			(row) => row.shardId,
 		);
+		const transactionScope = new FakeTransactionScope();
 		const stores = createDexieCoverageLexicalV3ProductionStores({
 			shardRegistry: table,
 			invalidations: new FakeAsyncTable<CoverageLexicalV3InvalidationRow, string>(
 				(row) => row.id,
 			),
+			transactionScope,
 		});
 
 		await stores.shardRegistry.saveRegistry([
@@ -239,12 +256,15 @@ describe("coverage lexical v3 production stores", () => {
 			"sealed-2",
 		]);
 		expect(table.clearCallCount).toBe(0);
+		expect(transactionScope.transactionCallCount).toBe(1);
+		expect(transactionScope.tableCounts).toEqual([1]);
 
 		await stores.shardRegistry.saveRegistry([shard("sealed-3", 3)]);
 		expect((await stores.shardRegistry.loadRegistry()).map((entry) => entry.shardId)).toEqual([
 			"sealed-3",
 		]);
 		expect(table.clearCallCount).toBe(0);
+		expect(transactionScope.transactionCallCount).toBe(2);
 
 		await stores.shardRegistry.updateShard({
 			...shard("sealed-3", 3),

@@ -1231,6 +1231,48 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(matchedFiles[0]?.matchedTerms).toContain("projected");
 	});
 
+	test("ignores stale resident rebuild completion after a newer rebuild starts", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		let resolveOldRebuild: (documents: IndexedDocument[]) => void = () => undefined;
+		const oldRebuildDocuments = new Promise<IndexedDocument[]>((resolve) => {
+			resolveOldRebuild = resolve;
+		});
+		let materializeCallCount = 0;
+		(engine as any).materializeIndexedDocuments = jest.fn(async () => {
+			materializeCallCount += 1;
+			if (materializeCallCount === 1) {
+				return await oldRebuildDocuments;
+			}
+			return [
+				createDocument({
+					docRef: 2,
+					path: "new.md",
+					basename: "new",
+					folder: "",
+					content: "newtarget",
+				}),
+			];
+		});
+
+		const oldRebuild = (engine as any).rebuildResidentBase();
+		await Promise.resolve();
+		const newRebuild = (engine as any).rebuildResidentBase();
+		await newRebuild;
+		resolveOldRebuild([
+			createDocument({
+				docRef: 1,
+				path: "old.md",
+				basename: "old",
+				folder: "",
+				content: "oldtarget",
+			}),
+		]);
+		await oldRebuild;
+
+		const indexView = (engine as any).engine.getResidentIndexView();
+		expect(Array.from(indexView.shards[0].base.docTable.docRefsByDocId)).toEqual([2]);
+	});
+
 	test("persists resident artifact and restores it without rebuilding documents", async () => {
 		const productionStores = createMemoryCoverageLexicalV3ProductionStores();
 		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(

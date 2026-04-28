@@ -325,6 +325,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	private readonly pendingDocumentMetadataByPath = new Map<string, PendingDocumentMetadata>();
 	private batchReindexing = false;
 	private pendingResidentRebuild: Promise<void> | null = null;
+	private residentRebuildGeneration = 0;
 	private lastRebuildStats: CoverageLexicalV3LastRebuildStats | null = null;
 	private lastMaintenanceStats: CoverageLexicalV3LastMaintenanceStats | null = null;
 	private benchmarkPhaseTimingState: CoverageLexicalV3BenchmarkPhaseTimingState | null =
@@ -348,6 +349,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	}
 
 	clearIndex(): void {
+		this.residentRebuildGeneration += 1;
 		this.documentViewsByPath.clear();
 		this.pendingDocumentContentsByPath.clear();
 		this.pendingDocumentMetadataByPath.clear();
@@ -856,6 +858,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		if (!result.loaded) {
 			return false;
 		}
+		this.residentRebuildGeneration += 1;
 		this.engine = restoredEngine;
 		this.documentViewsByPath.clear();
 		this.pendingDocumentContentsByPath.clear();
@@ -1332,7 +1335,12 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	private async rebuildResidentBase(
 		onProgress?: (progress: FileSearchRebuildProgress) => void,
 	): Promise<void> {
-		const rebuildPromise = this.rebuildResidentBaseInternal(onProgress);
+		const rebuildGeneration = this.residentRebuildGeneration + 1;
+		this.residentRebuildGeneration = rebuildGeneration;
+		const rebuildPromise = this.rebuildResidentBaseInternal(
+			rebuildGeneration,
+			onProgress,
+		);
 		this.pendingResidentRebuild = rebuildPromise;
 		try {
 			await rebuildPromise;
@@ -1344,10 +1352,13 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	}
 
 	private async rebuildResidentBaseInternal(
+		rebuildGeneration: number,
 		onProgress?: (progress: FileSearchRebuildProgress) => void,
 	): Promise<void> {
 		const documents = await this.materializeIndexedDocuments();
-		this.engine = new CoverageLexicalV3Engine();
+		if (rebuildGeneration !== this.residentRebuildGeneration) {
+			return;
+		}
 		const snapshotStore = this.getFileSnapshotStore();
 		const artifacts = await buildResidentHotBaseArtifactsStreaming(
 			documents,
@@ -1365,6 +1376,10 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			},
 			{ onProgress },
 		);
+		if (rebuildGeneration !== this.residentRebuildGeneration) {
+			return;
+		}
+		this.engine = new CoverageLexicalV3Engine();
 		this.lastRebuildStats = {
 			coldEvidenceFlushCount: artifacts.coldEvidenceFlushCount,
 			maxColdEvidenceChunkSize: artifacts.maxColdEvidenceChunkSize,
@@ -1674,6 +1689,9 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			productionStores: createDexieCoverageLexicalV3ProductionStores({
 				shardRegistry: database.db.coverageLexicalV3ShardRegistry,
 				invalidations: database.db.coverageLexicalV3Invalidations,
+				transactionScope: database.db as unknown as Parameters<
+					typeof createDexieCoverageLexicalV3ProductionStores
+				>[0]["transactionScope"],
 			}),
 			artifactStore: createDexieCoverageLexicalV3ResidentShardArtifactStore(
 				database.db.coverageLexicalV3ResidentShardArtifacts,
@@ -1687,6 +1705,9 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			}),
 			snapshotStore: createDexieCoverageLexicalV3SnapshotStore(
 				database.db.coverageLexicalV3SnapshotManifests,
+				database.db as unknown as Parameters<
+					typeof createDexieCoverageLexicalV3SnapshotStore
+				>[1],
 			),
 			compactJobStore: new DexieCompactJobManifestStore(
 				database.db.coverageLexicalV3CompactJobs,

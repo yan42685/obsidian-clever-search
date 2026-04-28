@@ -243,7 +243,7 @@ describe("coverage lexical v3 direct subitems", () => {
 		const matchedBigramAtoms = result.candidates.flatMap((candidate) =>
 			candidate.atoms.filter((atom) => atom.kind === "matched_bigram_atom"),
 		);
-		expect(matchedBigramAtoms).toContainEqual(
+		expect(matchedBigramAtoms).not.toContainEqual(
 			expect.objectContaining({
 				surfaceGroupIndex: 1,
 				bigramText: "\u5b87\u5b99",
@@ -450,6 +450,63 @@ describe("coverage lexical v3 direct subitems", () => {
 		});
 
 		expect(extractHighlightTexts(result)).toEqual(["\u751f\u547d\u529b"]);
+	});
+
+	test("matched bigram singleton anchors stay scoped to their Han surface group", () => {
+		const queryAnalysis = createQueryAnalysis({
+			queryText: "\u5b87\u5b99\u529b \u5b87\u5b99",
+			surfaceGroups: [
+				{
+					index: 0,
+					text: "\u5b87\u5b99\u529b",
+					kind: "han",
+					hanBigramTexts: ["\u5b87\u5b99", "\u5b99\u529b"],
+					coveredCharMask: [false, false, false],
+					queryResidualUniqueBigrams: ["\u5b87\u5b99", "\u5b99\u529b"],
+					hasQueryResidualHanCoverage: true,
+				},
+				{
+					index: 1,
+					text: "\u5b87\u5b99",
+					kind: "han",
+					hanBigramTexts: ["\u5b87\u5b99"],
+					coveredCharMask: [false, false],
+					queryResidualUniqueBigrams: ["\u5b87\u5b99"],
+					hasQueryResidualHanCoverage: true,
+				},
+			],
+			primaryUnits: [],
+			surfaceCoverageShapeKey: "hh",
+		});
+
+		const result = buildV3DirectSubitems({
+			snapshotText: "\u5b87\u5b99 \u529b",
+			queryAnalysis,
+			candidate: createCandidate({
+				path: "scoped-bigram-singleton.md",
+				realizedFamilies: [],
+				singletonHanCompletion: {
+					singletonHanChar: "\u529b",
+					singletonHanCharIndex: 2,
+					singletonHanSurfaceGroupIndex: 0,
+					matched: true,
+					matchSource: "body_same_block",
+					bestAnchorKind: "bigram",
+					bestAnchorDistance: 1,
+					sameBlockAsAnchor: true,
+					sameBlockAsBestBodyWindow: true,
+					tier: "tight",
+				},
+			}),
+			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
+			residentBase: createResidentBaseForBlockCounts([1]),
+		});
+
+		const matchedBigramAtoms = result.candidates[0]?.atoms.filter(
+			(atom) => atom.kind === "matched_bigram_atom",
+		) ?? [];
+		expect(result.candidates[0]?.matchedOpaqueBigramCount).toBe(1);
+		expect(matchedBigramAtoms.map((atom) => atom.surfaceGroupIndex)).toEqual([0]);
 	});
 
 	test("splits distant latin evidence when the weighted gap exceeds the local budget", () => {

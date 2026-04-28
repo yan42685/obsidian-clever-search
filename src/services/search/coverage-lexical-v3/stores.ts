@@ -9,6 +9,13 @@ type AsyncTable<Row, Key> = Readonly<{
 	clear: () => Promise<unknown>;
 }>;
 
+type AsyncTransactionScope = Readonly<{
+	transaction: (
+		mode: "rw",
+		...args: [...unknown[], () => Promise<void>]
+	) => Promise<unknown>;
+}>;
+
 export type CoverageLexicalV3ShardRegistryRow = ResidentShardDescriptor;
 
 export type CoverageLexicalV3InvalidationRow = ShardInvalidationEntry &
@@ -215,6 +222,7 @@ export class DexieCoverageLexicalV3ShardRegistryStore
 {
 	constructor(
 		private readonly table: AsyncTable<CoverageLexicalV3ShardRegistryRow, string>,
+		private readonly transactionScope?: AsyncTransactionScope,
 	) {}
 
 	async loadRegistry(): Promise<readonly ResidentShardDescriptor[]> {
@@ -224,12 +232,19 @@ export class DexieCoverageLexicalV3ShardRegistryStore
 	}
 
 	async saveRegistry(registry: readonly ResidentShardDescriptor[]): Promise<void> {
-		const nextShardIds = new Set(registry.map((descriptor) => descriptor.shardId));
-		const obsoleteShardIds = (await this.table.toArray())
-			.map((descriptor) => descriptor.shardId)
-			.filter((shardId) => !nextShardIds.has(shardId));
-		await this.table.bulkPut([...registry]);
-		await Promise.all(obsoleteShardIds.map((shardId) => this.table.delete(shardId)));
+		const replaceRegistry = async () => {
+			const nextShardIds = new Set(registry.map((descriptor) => descriptor.shardId));
+			const obsoleteShardIds = (await this.table.toArray())
+				.map((descriptor) => descriptor.shardId)
+				.filter((shardId) => !nextShardIds.has(shardId));
+			await this.table.bulkPut([...registry]);
+			await Promise.all(obsoleteShardIds.map((shardId) => this.table.delete(shardId)));
+		};
+		if (this.transactionScope == null) {
+			await replaceRegistry();
+			return;
+		}
+		await this.transactionScope.transaction("rw", this.table, replaceRegistry);
 	}
 
 	async updateShard(descriptor: ResidentShardDescriptor): Promise<void> {
@@ -281,9 +296,13 @@ export class DexieCoverageLexicalV3InvalidationStore
 export function createDexieCoverageLexicalV3ProductionStores(tables: {
 	shardRegistry: AsyncTable<CoverageLexicalV3ShardRegistryRow, string>;
 	invalidations: AsyncTable<CoverageLexicalV3InvalidationRow, string>;
+	transactionScope?: AsyncTransactionScope;
 }): CoverageLexicalV3ProductionStores {
 	return {
-		shardRegistry: new DexieCoverageLexicalV3ShardRegistryStore(tables.shardRegistry),
+		shardRegistry: new DexieCoverageLexicalV3ShardRegistryStore(
+			tables.shardRegistry,
+			tables.transactionScope,
+		),
 		invalidations: new DexieCoverageLexicalV3InvalidationStore(tables.invalidations),
 	};
 }

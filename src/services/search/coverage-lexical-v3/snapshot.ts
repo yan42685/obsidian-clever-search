@@ -61,6 +61,13 @@ type AsyncSnapshotTable<Row, Key> = Readonly<{
 	delete: (key: Key) => Promise<unknown>;
 }>;
 
+type AsyncTransactionScope = Readonly<{
+	transaction: (
+		mode: "rw",
+		...args: [...unknown[], () => Promise<void>]
+	) => Promise<unknown>;
+}>;
+
 export type CoverageLexicalV3SnapshotManifestRow = CoverageLexicalV3SnapshotManifest;
 
 export type CoverageLexicalV3SnapshotWriteResult = Readonly<{
@@ -116,6 +123,9 @@ export class MemoryCoverageLexicalV3SnapshotStore implements CoverageLexicalV3Sn
 	}
 
 	async commitManifestAndMarkOthersGarbage(snapshotId: string): Promise<void> {
+		if (!this.manifests.has(snapshotId)) {
+			return;
+		}
 		for (const manifest of this.manifests.values()) {
 			if (manifest.snapshotId === snapshotId) {
 				this.manifests.set(snapshotId, { ...manifest, status: "committed" });
@@ -144,6 +154,7 @@ export class MemoryCoverageLexicalV3SnapshotStore implements CoverageLexicalV3Sn
 export class DexieCoverageLexicalV3SnapshotStore implements CoverageLexicalV3SnapshotStore {
 	constructor(
 		private readonly table: AsyncSnapshotTable<CoverageLexicalV3SnapshotManifestRow, string>,
+		private readonly transactionScope?: AsyncTransactionScope,
 	) {}
 
 	async loadLatestCommittedManifest(): Promise<CoverageLexicalV3SnapshotManifest | undefined> {
@@ -163,18 +174,28 @@ export class DexieCoverageLexicalV3SnapshotStore implements CoverageLexicalV3Sna
 	}
 
 	async commitManifestAndMarkOthersGarbage(snapshotId: string): Promise<void> {
-		const manifests = await this.table.toArray();
-		await Promise.all(
-			manifests.map((manifest) => {
-				if (manifest.snapshotId === snapshotId) {
-					return this.table.put({ ...manifest, status: "committed" });
-				}
-				if (manifest.status === "committed") {
-					return this.table.put({ ...manifest, status: "garbage" });
-				}
-				return Promise.resolve();
-			}),
-		);
+		const commit = async () => {
+			const manifests = await this.table.toArray();
+			if (!manifests.some((manifest) => manifest.snapshotId === snapshotId)) {
+				return;
+			}
+			await Promise.all(
+				manifests.map((manifest) => {
+					if (manifest.snapshotId === snapshotId) {
+						return this.table.put({ ...manifest, status: "committed" });
+					}
+					if (manifest.status === "committed") {
+						return this.table.put({ ...manifest, status: "garbage" });
+					}
+					return Promise.resolve();
+				}),
+			);
+		};
+		if (this.transactionScope == null) {
+			await commit();
+			return;
+		}
+		await this.transactionScope.transaction("rw", this.table, commit);
 	}
 
 	async markGarbage(snapshotId: string): Promise<void> {
@@ -218,7 +239,8 @@ export async function writeCoverageLexicalV3Snapshot(params: {
 			});
 	const invalidations = await params.stores.invalidations.loadInvalidations();
 	const manifest: CoverageLexicalV3SnapshotManifest = {
-		snapshotId: params.snapshotId ?? `v3-snapshot-${now}`,
+		snapshotId:
+			params.snapshotId ?? (await allocateSnapshotId(params.snapshotStore, now)),
 		schemaVersion: COVERAGE_LEXICAL_V3_SNAPSHOT_SCHEMA_VERSION,
 		createdAt: now,
 		registryGeneration: maxRegistryGeneration(readableRegistry),
@@ -292,12 +314,6 @@ export async function restoreCoverageLexicalV3Snapshot(params: {
 			snapshotId: manifest.snapshotId,
 		};
 	}
-	params.engine.loadResidentIndexView({
-		version: 1,
-		shards: readableShards,
-		shardRegistry: readableRegistry,
-	} satisfies ResidentIndexView);
-	params.engine.loadShardInvalidations(await params.stores.invalidations.loadInvalidations());
 	const overlayEntries = await loadSnapshotOverlayEntries({
 		manifest,
 		overlayJournalStore: params.overlayJournalStore,
@@ -310,6 +326,12 @@ export async function restoreCoverageLexicalV3Snapshot(params: {
 			snapshotId: manifest.snapshotId,
 		};
 	}
+	params.engine.loadResidentIndexView({
+		version: 1,
+		shards: readableShards,
+		shardRegistry: readableRegistry,
+	} satisfies ResidentIndexView);
+	params.engine.loadShardInvalidations(await params.stores.invalidations.loadInvalidations());
 	if (overlayEntries.length > 0) {
 		params.engine.loadOverlayResidentShard(
 			buildOverlayResidentShard({
@@ -361,8 +383,25 @@ export async function healCoverageLexicalV3SnapshotState(params: {
 
 export function createDexieCoverageLexicalV3SnapshotStore(
 	table: AsyncSnapshotTable<CoverageLexicalV3SnapshotManifestRow, string>,
+	transactionScope?: AsyncTransactionScope,
 ): CoverageLexicalV3SnapshotStore {
-	return new DexieCoverageLexicalV3SnapshotStore(table);
+	return new DexieCoverageLexicalV3SnapshotStore(table, transactionScope);
+}
+
+async function allocateSnapshotId(
+	snapshotStore: CoverageLexicalV3SnapshotStore,
+	now: number,
+): Promise<string> {
+	const existingSnapshotIds = new Set(
+		(await snapshotStore.loadManifests()).map((manifest) => manifest.snapshotId),
+	);
+	for (let attempt = 0; ; attempt += 1) {
+		const suffix = attempt === 0 ? "" : `-${attempt}`;
+		const snapshotId = `v3-snapshot-${now}${suffix}`;
+		if (!existingSnapshotIds.has(snapshotId)) {
+			return snapshotId;
+		}
+	}
 }
 
 async function loadSnapshotOverlayEntries(params: {
@@ -402,9 +441,40 @@ function latestCommittedManifest(
 function sortManifests(
 	manifests: readonly CoverageLexicalV3SnapshotManifest[],
 ): readonly CoverageLexicalV3SnapshotManifest[] {
-	return [...manifests].sort((left, right) => left.createdAt - right.createdAt);
+	return [...manifests].sort(compareSnapshotManifestRecency);
 }
 
 function maxRegistryGeneration(registry: readonly ResidentShardDescriptor[]): number {
 	return registry.reduce((maxGeneration, descriptor) => Math.max(maxGeneration, descriptor.generation), 0);
+}
+
+function compareSnapshotManifestRecency(
+	left: CoverageLexicalV3SnapshotManifest,
+	right: CoverageLexicalV3SnapshotManifest,
+): number {
+	const createdAtComparison = left.createdAt - right.createdAt;
+	if (createdAtComparison !== 0) {
+		return createdAtComparison;
+	}
+	const leftDefaultOrder = parseDefaultSnapshotOrder(left);
+	const rightDefaultOrder = parseDefaultSnapshotOrder(right);
+	if (leftDefaultOrder != null && rightDefaultOrder != null) {
+		return leftDefaultOrder - rightDefaultOrder;
+	}
+	return left.snapshotId.localeCompare(right.snapshotId);
+}
+
+function parseDefaultSnapshotOrder(
+	manifest: CoverageLexicalV3SnapshotManifest,
+): number | null {
+	const prefix = `v3-snapshot-${manifest.createdAt}`;
+	if (manifest.snapshotId === prefix) {
+		return 0;
+	}
+	const suffixPrefix = `${prefix}-`;
+	if (!manifest.snapshotId.startsWith(suffixPrefix)) {
+		return null;
+	}
+	const suffix = manifest.snapshotId.slice(suffixPrefix.length);
+	return /^\d+$/u.test(suffix) ? Number.parseInt(suffix, 10) : null;
 }
