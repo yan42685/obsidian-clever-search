@@ -169,17 +169,25 @@ export function analyzeQuery(
 
 function pushPrimaryUnit(
 	target: V3QueryUnit[],
-	seenPrimaryTexts: Set<string>,
+	seenPrimaryKeys: Set<string>,
 	input: Omit<V3QueryUnit, "index">,
 ): void {
-	if (input.text.length === 0 || seenPrimaryTexts.has(input.text)) {
+	const key = buildPrimaryUnitDedupeKey(input);
+	if (input.text.length === 0 || seenPrimaryKeys.has(key)) {
 		return;
 	}
-	seenPrimaryTexts.add(input.text);
+	seenPrimaryKeys.add(key);
 	target.push({
 		index: target.length,
 		...input,
 	});
+}
+
+function buildPrimaryUnitDedupeKey(input: Omit<V3QueryUnit, "index">): string {
+	if (input.source === "han_tokenizer_real" && input.surfaceGroupIndex != null) {
+		return `${input.source}:${input.surfaceGroupIndex}:${input.text}`;
+	}
+	return input.text;
 }
 
 function collectHanPrimaryTerms(

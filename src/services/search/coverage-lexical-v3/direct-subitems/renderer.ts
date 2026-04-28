@@ -406,22 +406,33 @@ function buildInlineDisplayWindow(params: {
 	maxChars: number;
 }): DisplayWindow {
 	const coverLength = Math.max(1, params.coverEnd - params.coverStart);
+	const maxWindowLength = Math.max(params.maxChars, coverLength);
 	const remainingBudget = Math.max(0, params.maxChars - coverLength);
 	const preBudget =
 		coverLength <= 48 ? DISPLAY_PRE_CHARS_NARROW : DISPLAY_PRE_CHARS_WIDE;
 	const postBudget =
 		coverLength <= 48 ? DISPLAY_POST_CHARS_NARROW : DISPLAY_POST_CHARS_WIDE;
-	const start = Math.max(
-		0,
-		params.coverStart - Math.min(preBudget, remainingBudget),
+	const preChars = Math.min(preBudget, remainingBudget, params.coverStart);
+	const postChars = Math.min(
+		postBudget,
+		remainingBudget - preChars,
+		params.snapshotText.length - params.coverEnd,
 	);
-	const end = Math.min(
+	let start = params.coverStart - preChars;
+	let end = params.coverEnd + postChars;
+	let extraBudget = maxWindowLength - (end - start);
+	if (extraBudget > 0) {
+		const extraPostChars = Math.min(extraBudget, params.snapshotText.length - end);
+		end += extraPostChars;
+		extraBudget -= extraPostChars;
+	}
+	if (extraBudget > 0) {
+		const extraPreChars = Math.min(extraBudget, start);
+		start -= extraPreChars;
+	}
+	end = Math.min(
 		params.snapshotText.length,
-		Math.max(
-			params.coverEnd,
-			start + params.maxChars,
-			params.coverEnd + Math.min(postBudget, remainingBudget),
-		),
+		Math.max(params.coverEnd, Math.min(end, start + maxWindowLength)),
 	);
 	return { start, end };
 }

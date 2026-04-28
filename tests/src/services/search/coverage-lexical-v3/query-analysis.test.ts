@@ -60,6 +60,36 @@ describe("coverage lexical v3 query analysis", () => {
 		]);
 	});
 
+	test("keeps repeated Han tokenizer terms scoped to their surface group", () => {
+		const analysis = analyzeQuery("\u751f\u547d \u751f\u547d\u529b", ["\u751f\u547d"]);
+
+		expect(
+			analysis.primaryUnits.map((unit) => ({
+				text: unit.text,
+				source: unit.source,
+				surfaceGroupIndex: unit.surfaceGroupIndex,
+			})),
+		).toEqual([
+			{
+				text: "\u751f\u547d",
+				source: "han_tokenizer_real",
+				surfaceGroupIndex: 0,
+			},
+			{
+				text: "\u751f\u547d",
+				source: "han_tokenizer_real",
+				surfaceGroupIndex: 1,
+			},
+		]);
+		expect(analysis.hanBackstopGroups).toEqual([
+			expect.objectContaining({
+				surfaceGroupIndex: 1,
+				bigrams: ["\u547d\u529b"],
+				triggerKind: "bridge_bigram",
+			}),
+		]);
+	});
+
 	test("tracks Han cover by codepoint index for non-BMP Han", () => {
 		const left = "\u{20000}";
 		const middle = "\u{20001}";

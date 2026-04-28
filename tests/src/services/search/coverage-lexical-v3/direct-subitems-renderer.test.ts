@@ -167,6 +167,29 @@ describe("coverage lexical v3 direct subitems renderer", () => {
 		expect(highlighted).toContain("赢宋");
 		expect(highlighted).toContain("窄体");
 	});
-});
 
+	test("keeps inline fallback snippets within the requested character budget", () => {
+		const snapshotText = `${"p".repeat(100)}alpha${"q".repeat(100)}`;
+		const alphaStart = snapshotText.indexOf("alpha");
+		const payload = renderV3DirectSubitemCandidate({
+			snapshotText,
+			candidate: createCandidate({
+				start: alphaStart,
+				end: alphaStart + "alpha".length,
+				anchorOffset: alphaStart,
+				atoms: [
+					createAtom({
+						start: alphaStart,
+						end: alphaStart + "alpha".length,
+						matchedText: "alpha",
+					}),
+				],
+			}),
+			maxChars: 40,
+		});
+
+		expect(payload.text).toContain("alpha");
+		expect(payload.text.length).toBeLessThanOrEqual(40);
+	});
+});
 
