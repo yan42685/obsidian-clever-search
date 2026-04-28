@@ -325,6 +325,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	private readonly pendingDocumentMetadataByPath = new Map<string, PendingDocumentMetadata>();
 	private batchReindexing = false;
 	private pendingResidentRebuild: Promise<void> | null = null;
+	private pendingOverlayRecovery: Promise<void> = Promise.resolve();
 	private residentRebuildGeneration = 0;
 	private lastRebuildStats: CoverageLexicalV3LastRebuildStats | null = null;
 	private lastMaintenanceStats: CoverageLexicalV3LastMaintenanceStats | null = null;
@@ -424,6 +425,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	}
 
 	async searchFiles(request: FileSearchRequest): Promise<MatchedFile[]> {
+		await this.awaitPendingOverlayRecovery();
 		await this.awaitPendingResidentRebuild();
 		if (this.documentViewsByPath.size === 0) {
 			return [];
@@ -959,6 +961,20 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	private async applyOverlayRecoveryChanges(
 		changes: PersistentFileIndexRecoveryChanges,
 	): Promise<boolean> {
+		const previousRecovery = this.pendingOverlayRecovery;
+		const recovery = previousRecovery
+			.catch(() => undefined)
+			.then(() => this.applyOverlayRecoveryChangesInternal(changes));
+		this.pendingOverlayRecovery = recovery.then(
+			() => undefined,
+			() => undefined,
+		);
+		return await recovery;
+	}
+
+	private async applyOverlayRecoveryChangesInternal(
+		changes: PersistentFileIndexRecoveryChanges,
+	): Promise<boolean> {
 		const activeShard = this.getActiveBaseShardDescriptor();
 		if (activeShard == null) {
 			return false;
@@ -1147,6 +1163,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	}
 
 	async persistFileIndexArtifact(): Promise<void> {
+		await this.awaitPendingOverlayRecovery();
 		const indexView = this.engine.getResidentIndexView();
 		if (indexView == null || indexView.shards.length === 0) {
 			await this.clearPersistedFileIndexArtifact();
@@ -1548,6 +1565,10 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 
 	private async awaitPendingResidentRebuild(): Promise<void> {
 		await this.pendingResidentRebuild;
+	}
+
+	private async awaitPendingOverlayRecovery(): Promise<void> {
+		await this.pendingOverlayRecovery;
 	}
 
 	private async hydrateFuzzyRescueForQuery(
