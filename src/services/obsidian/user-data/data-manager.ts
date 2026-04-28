@@ -4075,7 +4075,12 @@ export class DataManager {
       await this.hybridEngine.persistIndicesForBatch();
     }
     if (isDevEnvironment) {
-      await this.noticeDevStorageStats();
+      void this.noticeDevStorageStats().catch((error) => {
+        logger.warn(
+          "[clever-search] dev storage/runtime diagnostics failed:",
+          error,
+        );
+      });
     }
   }
 

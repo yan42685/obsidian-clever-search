@@ -153,6 +153,8 @@ describe("coverage lexical v3 startup snapshot benchmark", () => {
 		const rebuildStartedAt = performance.now();
 		await source.addDocuments(coverageV3Documents);
 		const rebuildMs = performance.now() - rebuildStartedAt;
+		const rebuildStats = source.getLastRebuildStats?.() ?? null;
+		const rebuildMemory = process.memoryUsage();
 		const snapshotWriteStartedAt = performance.now();
 		await source.persistFileIndexArtifact();
 		const snapshotWriteMs = performance.now() - snapshotWriteStartedAt;
@@ -174,6 +176,20 @@ describe("coverage lexical v3 startup snapshot benchmark", () => {
 					hydrateMs: round(hydrateMs),
 					readyToSearchMs: round(readyToSearchMs),
 					fallbackRebuildMs: round(rebuildMs),
+					rebuildPhases: {
+						batchMaxRawTextBytes: round(rebuildStats?.batchMaxRawTextBytes ?? 0),
+						pass1Ms: round(rebuildStats?.pass1Ms ?? 0),
+						pass2Ms: round(rebuildStats?.pass2Ms ?? 0),
+						mergeMs: round(rebuildStats?.mergeMs ?? 0),
+						diagnosticsMs: 0,
+						coldEvidenceFlushCount: rebuildStats?.coldEvidenceFlushCount ?? 0,
+						maxColdEvidenceChunkSize:
+							rebuildStats?.maxColdEvidenceChunkSize ?? 0,
+					},
+					memory: {
+						heapUsedBytes: rebuildMemory.heapUsed,
+						rssBytes: rebuildMemory.rss,
+					},
 					selfHealRepairMs: 0,
 					repairChangedDocCount: 0,
 					schemaVersion: 1,

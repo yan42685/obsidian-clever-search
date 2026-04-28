@@ -384,6 +384,8 @@ describe("coverage lexical v3 TestVault startup benchmark", () => {
 		const rebuildStartedAt = performance.now();
 		await source.addDocuments(documents);
 		const rebuildMs = performance.now() - rebuildStartedAt;
+		const rebuildStats = source.getLastRebuildStats?.() ?? null;
+		const rebuildMemory = process.memoryUsage();
 		const snapshotWriteStartedAt = performance.now();
 		await source.persistFileIndexArtifact();
 		const snapshotWriteMs = performance.now() - snapshotWriteStartedAt;
@@ -394,7 +396,9 @@ describe("coverage lexical v3 TestVault startup benchmark", () => {
 		const hydrateMs = performance.now() - hydrateStartedAt;
 		const readyToSearchMs = hydrateMs;
 		const estimatedResidentIndexBytes = restored.estimateIndexBytes?.() ?? 0;
+		const diagnosticsStartedAt = performance.now();
 		const restoredBreakdown = restored.getIndexBreakdown?.() ?? null;
+		const diagnosticsMs = performance.now() - diagnosticsStartedAt;
 		const manifestBytes = mockEstimateBenchmarkValueBytes(
 			await persistentStores.snapshotStore.loadManifests(),
 		);
@@ -432,6 +436,20 @@ describe("coverage lexical v3 TestVault startup benchmark", () => {
 					hydrateMs: round(hydrateMs),
 					readyToSearchMs: round(readyToSearchMs),
 					fallbackRebuildMs: round(rebuildMs),
+					rebuildPhases: {
+						batchMaxRawTextBytes: round(rebuildStats?.batchMaxRawTextBytes ?? 0),
+						pass1Ms: round(rebuildStats?.pass1Ms ?? 0),
+						pass2Ms: round(rebuildStats?.pass2Ms ?? 0),
+						mergeMs: round(rebuildStats?.mergeMs ?? 0),
+						diagnosticsMs: round(diagnosticsMs),
+						coldEvidenceFlushCount: rebuildStats?.coldEvidenceFlushCount ?? 0,
+						maxColdEvidenceChunkSize:
+							rebuildStats?.maxColdEvidenceChunkSize ?? 0,
+					},
+					memory: {
+						heapUsedBytes: rebuildMemory.heapUsed,
+						rssBytes: rebuildMemory.rss,
+					},
 					selfHealRepairMs: 0,
 					repairChangedDocCount: 0,
 					schemaVersion: 1,

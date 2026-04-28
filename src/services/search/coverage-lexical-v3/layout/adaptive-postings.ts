@@ -47,7 +47,9 @@ export function buildAdaptivePostingField(
 	const postings = [...postingsByTermId.entries()]
 		.map(([termId, rawValueIds]) => ({
 			termId,
-			valueIds: [...rawValueIds].sort((left, right) => left - right),
+			valueIds: isSortedAscending(rawValueIds)
+				? rawValueIds
+				: [...rawValueIds].sort((left, right) => left - right),
 		}))
 		.sort((left, right) => left.termId - right.termId);
 
@@ -87,6 +89,15 @@ export function buildAdaptivePostingField(
 		deltaTapeStarts: buildIntegerArray(deltaTapeStarts),
 		postingTape: Uint8Array.from(postingTape),
 	};
+}
+
+function isSortedAscending(values: readonly number[]): boolean {
+	for (let index = 1; index < values.length; index += 1) {
+		if ((values[index - 1] ?? 0) > (values[index] ?? 0)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 export function decodeAdaptivePosting(

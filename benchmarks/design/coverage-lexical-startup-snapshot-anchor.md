@@ -124,6 +124,37 @@ The startup benchmark should run three distinct modes once binary persistence ex
 
 ## Current Anchor State
 
+- Coverage V3 startup/rebuild update:
+  - V3 restore dirty tracking now preserves the ready marker for persistent V3 snapshots when runtime file changes mark the snapshot dirty.
+  - production V3 rebuild now uses a two-pass segmented streaming builder instead of retaining a full-vault `PreparedDocument[]` in the streaming path.
+  - pass 1 collects only global family/source-mask state; pass 2 prepares documents in byte-capped batches and flushes cold evidence chunks.
+  - build-scope memoization is bounded and rebuild-local for tokenizer output, Han bigram ids, Han char ids, and witness match keys.
+  - adaptive posting build now skips defensive value sorting when posting values are already ascending.
+  - startup benchmarks now report rebuild phase timings, batch max raw bytes, diagnostics time, and heap/rss samples.
+  - synthetic large-corpus startup benchmark was added for configurable `COVERAGE_LEXICAL_V3_SYNTHETIC_MB` runs.
+  - pass1 now uses a family/source-mask-only scanner instead of constructing full body block drafts.
+  - pass2 now builds body-block Han witness/bigram/char analysis from one normalized block scan.
+  - build-scope memoization now also caches short family occurrence surfaces.
+  - pass1 body scan now uses a family-text-only query helper, avoiding exact offsets/support-mask allocation on the lexicon/source-mask pass.
+  - startup commit dev diagnostics now run in the background after searchable state is marked, so expensive memory breakdown no longer blocks the commit path.
+- latest TestVault V3 startup anchor after segmented rebuild compression:
+  - note count: `185`
+  - markdown bytes: `851,255`
+  - snapshot write ms: `1.386`
+  - hydrate ms: `1.625`
+  - ready-to-search ms: `1.625`
+  - fallback rebuild ms: `2,835.162`
+  - rebuild pass1 ms: `952.110`
+  - rebuild pass2 ms: `1,610.002`
+  - rebuild merge ms: `222.695`
+  - diagnostics ms: `141.559`
+  - batch max raw text bytes: `859,435`
+  - resident index bytes: `1,381,041`
+  - persisted V3 bytes: `3,882,176`
+  - `hydrate / rebuild`: `0.001`
+  - `readyToSearch / rebuild`: `0.001`
+  - resident index bytes / markdown bytes: `1.622`
+  - persisted V3 bytes / markdown bytes: `4.561`
 - first live-memory slimming cut is now landed:
   - `CoverageLexicalDocument` no longer stores resident `bodyText`
   - `getDirectSubItems()` reads body text on demand from `FileSnapshotStore`

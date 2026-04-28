@@ -36,14 +36,22 @@ import { buildResidentBaseMetrics } from "../metrics";
 import {
 	encodeHanBigramId,
 	encodeHanCharId,
+	createV3BodyBlockChunkRanges,
 	extractDocumentFamilySequence,
+	extractDocumentFamilySupportOccurrences,
+	extractDocumentFamilyTextSetOnly,
 	extractDocumentFamilyTexts,
 	extractHanBigrams,
 	extractHanChars,
 	extractHanSegments,
+	normalizeText,
 	splitBodyBlocks,
 	splitBodyBlocksWithDocumentTokenizer,
+	splitBodyBlockFamilyTextSetsWithDocumentTokenizer,
 	splitTagValues,
+	V3_BODY_BLOCK_MAX_TOKENS,
+	V3_BODY_BLOCK_TARGET_TOKENS,
+	type V3FamilyOccurrence,
 	type V3DocumentTokenizer,
 } from "../query";
 import {
@@ -83,6 +91,7 @@ const STRING_SOURCE_IDENTITY_WITNESS = 1 << 2;
 const STRING_SOURCE_ROUTE_WITNESS = 1 << 3;
 const STRING_SOURCE_HEADING_WITNESS = 1 << 4;
 const STRING_SOURCE_BODY_WITNESS = 1 << 5;
+const HAN_SEQUENCE_REGEX = /\p{Script=Han}+/gu;
 
 export const DEFAULT_RESIDENT_SHARD_ID = "base-0";
 export const DEFAULT_RESIDENT_SHARD_GENERATION = 1;
@@ -141,6 +150,10 @@ export type ResidentHotBaseStreamingArtifacts = Readonly<{
 	fuzzyRescueIndex: ResidentFuzzyRescueIndex;
 	coldEvidenceFlushCount: number;
 	maxColdEvidenceChunkSize: number;
+	batchMaxRawTextBytes: number;
+	pass1Ms: number;
+	pass2Ms: number;
+	mergeMs: number;
 }>;
 
 export type ResidentColdEvidenceSink = Readonly<{
@@ -150,6 +163,92 @@ export type ResidentColdEvidenceSink = Readonly<{
 }>;
 
 export const DEFAULT_COLD_EVIDENCE_CHUNK_SIZE = 128;
+export const DEFAULT_RESIDENT_REBUILD_BATCH_RAW_TEXT_BYTE_CAP = 32 * 1024 * 1024;
+export const LOW_MEMORY_RESIDENT_REBUILD_BATCH_RAW_TEXT_BYTE_CAP = 16 * 1024 * 1024;
+
+type CoverageV3BuildMemo = Readonly<{
+	encodeHanBigramId: (bigram: string) => number;
+	encodeHanCharId: (char: string) => number;
+	buildStableWitnessMatchKey: (text: string) => number;
+	extractFamilyOccurrences: (text: string) => readonly V3FamilyOccurrence[];
+	extractFamilyTexts: (text: string) => readonly string[];
+	tokenizeDocumentText: V3DocumentTokenizer | undefined;
+}>;
+
+function createCoverageV3BuildMemo(
+	tokenizeDocumentText?: V3DocumentTokenizer,
+): CoverageV3BuildMemo {
+	const hanBigramIds = new BoundedBuildCache<string, number>(65_536);
+	const hanCharIds = new BoundedBuildCache<string, number>(8_192);
+	const witnessMatchKeys = new BoundedBuildCache<string, number>(32_768);
+	const tokenizerOutputs = new BoundedBuildCache<string, readonly string[]>(4_096);
+	const familyOccurrences = new BoundedBuildCache<string, readonly V3FamilyOccurrence[]>(4_096);
+	const familyTextSets = new BoundedBuildCache<string, readonly string[]>(4_096);
+	const memoizedTokenizer: V3DocumentTokenizer | undefined =
+		tokenizeDocumentText == null
+			? undefined
+			: (surfaceText: string): string[] => {
+					if (surfaceText.length > 256) {
+						return [...tokenizeDocumentText(surfaceText)];
+					}
+					return [
+						...tokenizerOutputs.getOrCreate(surfaceText, () => [
+							...tokenizeDocumentText(surfaceText),
+						]),
+					];
+				};
+	return {
+		encodeHanBigramId: (bigram) =>
+			hanBigramIds.getOrCreate(bigram, () => encodeHanBigramId(bigram)),
+		encodeHanCharId: (char) =>
+			hanCharIds.getOrCreate(char, () => encodeHanCharId(char)),
+		buildStableWitnessMatchKey: (text) =>
+			witnessMatchKeys.getOrCreate(text, () => buildStableWitnessMatchKey(text)),
+		extractFamilyOccurrences: (text) => {
+			if (text.length > 256) {
+				return extractDocumentFamilySupportOccurrences(text, memoizedTokenizer);
+			}
+			return familyOccurrences.getOrCreate(text, () => [
+				...extractDocumentFamilySupportOccurrences(text, memoizedTokenizer),
+			]);
+		},
+		extractFamilyTexts: (text) =>
+			text.length > 256
+				? extractDocumentFamilyTextSetOnly(text, memoizedTokenizer)
+				: [
+						...familyTextSets.getOrCreate(text, () => [
+							...extractDocumentFamilyTextSetOnly(text, memoizedTokenizer),
+						]),
+					],
+		tokenizeDocumentText: memoizedTokenizer,
+	};
+}
+
+class BoundedBuildCache<K, V> {
+	private readonly values = new Map<K, V>();
+
+	constructor(private readonly maxEntries: number) {}
+
+	getOrCreate(key: K, createValue: () => V): V {
+		const existing = this.values.get(key);
+		if (existing !== undefined) {
+			return existing;
+		}
+		const value = createValue();
+		if (this.values.size >= this.maxEntries) {
+			const oldestKey = this.values.keys().next().value as K | undefined;
+			if (oldestKey !== undefined) {
+				this.values.delete(oldestKey);
+			}
+		}
+		this.values.set(key, value);
+		return value;
+	}
+}
+
+function nowMs(): number {
+	return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
 
 export function buildResidentBase(
 	documents: readonly IndexedDocument[],
@@ -439,19 +538,41 @@ export async function buildResidentHotBaseArtifactsStreaming(
 	documents: readonly IndexedDocument[],
 	tokenizeDocumentText: V3DocumentTokenizer | undefined,
 	coldEvidenceSink: ResidentColdEvidenceSink,
-	options: Readonly<{ coldEvidenceChunkSize?: number }> = {},
+	options: Readonly<{
+		coldEvidenceChunkSize?: number;
+		batchRawTextByteCap?: number;
+	}> = {},
 ): Promise<ResidentHotBaseStreamingArtifacts> {
 	const chunkSize = Math.max(
 		1,
 		Math.floor(options.coldEvidenceChunkSize ?? DEFAULT_COLD_EVIDENCE_CHUNK_SIZE),
 	);
+	const batchRawTextByteCap = Math.max(
+		1,
+		Math.floor(
+			options.batchRawTextByteCap ?? DEFAULT_RESIDENT_REBUILD_BATCH_RAW_TEXT_BYTE_CAP,
+		),
+	);
+	const buildMemo = createCoverageV3BuildMemo(tokenizeDocumentText);
 	const stringArenaBuilder = new StringArenaBuilder();
-	const preparedDocuments = [...documents]
-		.sort((left, right) => left.path.localeCompare(right.path))
-		.map((document, docId) =>
-			prepareDocument(document, docId, tokenizeDocumentText),
+	const sortedDocuments = [...documents].sort((left, right) =>
+		left.path.localeCompare(right.path),
+	);
+	const pass1StartMs = nowMs();
+	const familySourceMaskByText = new Map<string, number>();
+	for (let docId = 0; docId < sortedDocuments.length; docId += 1) {
+		const document = sortedDocuments[docId];
+		if (!document) {
+			continue;
+		}
+		collectFamilySourceMasksFromIndexedDocument(
+			familySourceMaskByText,
+			document,
+			buildMemo,
 		);
-	const familySourceMaskByText = collectFamilySourceMasks(preparedDocuments);
+	}
+	const pass1Ms = nowMs() - pass1StartMs;
+	const mergeStartMs = nowMs();
 	const familyTexts = [...familySourceMaskByText.keys()].sort((left, right) =>
 		left.localeCompare(right),
 	);
@@ -466,35 +587,22 @@ export async function buildResidentHotBaseArtifactsStreaming(
 			};
 		}),
 	);
+	const mergeFamilyMs = nowMs() - mergeStartMs;
 	const fuzzyRescue = buildResidentFuzzyRescueIndex({
 		familyTexts,
 		familyFlagsByFamilyId: familyLexicon.familyFlagsByFamilyId,
 		shardLocalFamilySlotByFamilyId:
 			familyLexicon.shardLocalFamilySlotByFamilyId,
 	});
-	const identityFamilyIdsByDoc = preparedDocuments.map((document) =>
-		mapFamilyTextsToIds(document.identityFamilyTexts, familyIdByText),
-	);
-	const identitySourceMasksByDoc = preparedDocuments.map(
-		(document) => document.identitySourceMasks,
-	);
-	const routeFamilyIdsByDoc = preparedDocuments.map((document) =>
-		mapFamilyTextsToIds(document.routeFamilyTexts, familyIdByText),
-	);
-	const routeSourceMasksByDoc = preparedDocuments.map(
-		(document) => document.routeSourceMasks,
-	);
-	const headingFamilyIdsByDoc = preparedDocuments.map((document) =>
-		mapFamilyTextsToIds(document.headingFamilyTexts, familyIdByText),
-	);
-	const metadataContainers = buildMetadataContainerArena({
-		familyCount: familyLexicon.familyCount,
-		identityFamilyIdsByDoc,
-		identitySourceMasksByDoc,
-		routeFamilyIdsByDoc,
-		routeSourceMasksByDoc,
-		headingFamilyIdsByDoc,
-	});
+	const pass2StartMs = nowMs();
+	const identityFamilyIdsByDoc: number[][] = [];
+	const identitySourceMasksByDoc: Array<readonly number[]> = [];
+	const routeFamilyIdsByDoc: number[][] = [];
+	const routeSourceMasksByDoc: Array<readonly number[]> = [];
+	const headingFamilyIdsByDoc: number[][] = [];
+	const docRefsByDocId: number[] = [];
+	const generationsByDocId: number[] = [];
+	const pathStringIdsByDocId: number[] = [];
 	const blockInputs: Array<{
 		docId: number;
 		ordinal: number;
@@ -502,8 +610,14 @@ export async function buildResidentHotBaseArtifactsStreaming(
 	}> = [];
 	const bodyBlockStartByDocId: number[] = [];
 	const bodyBlockCountByDocId: number[] = [];
+	const metadataDocIdsByBigramId = new Map<number, number[]>();
+	const metadataDocIdsByCharId = new Map<number, number[]>();
+	const bodyPostingsByBigramId = new Map<number, number[]>();
+	const bodyPostingsByCharId = new Map<number, number[]>();
 	let coldEvidenceFlushCount = 0;
 	let maxColdEvidenceChunkSize = 0;
+	let batchRawTextBytes = 0;
+	let batchMaxRawTextBytes = 0;
 	let bodyEvidenceChunk: LexicalBodyEvidencePublishRow[] = [];
 	let hanBodyEvidenceChunk: LexicalHanBodyEvidenceRow[] = [];
 	let hanDocEvidenceChunk: LexicalHanDocEvidenceRow[] = [];
@@ -537,7 +651,67 @@ export async function buildResidentHotBaseArtifactsStreaming(
 		coldEvidenceFlushCount += 1;
 		await coldEvidenceSink.publishHanDocEvidence(rows);
 	};
-	for (const document of preparedDocuments) {
+	const flushBatch = async (): Promise<void> => {
+		await flushBodyEvidence();
+		await flushHanBodyEvidence();
+		await flushHanDocEvidence();
+		batchMaxRawTextBytes = Math.max(batchMaxRawTextBytes, batchRawTextBytes);
+		batchRawTextBytes = 0;
+	};
+	for (let docId = 0; docId < sortedDocuments.length; docId += 1) {
+		const sourceDocument = sortedDocuments[docId];
+		if (!sourceDocument) {
+			continue;
+		}
+		const documentRawBytes = estimateIndexedDocumentRawTextBytes(sourceDocument);
+		if (batchRawTextBytes > 0 && batchRawTextBytes + documentRawBytes > batchRawTextByteCap) {
+			await flushBatch();
+		}
+		batchRawTextBytes += documentRawBytes;
+		const document = prepareDocument(
+			sourceDocument,
+			docId,
+			tokenizeDocumentText,
+			buildMemo,
+		);
+		docRefsByDocId.push(document.docRef);
+		generationsByDocId.push(document.generation);
+		pathStringIdsByDocId.push(
+			stringArenaBuilder.intern(document.path, STRING_SOURCE_PATH),
+		);
+		const identityFamilyIds = mapFamilyTextsToIds(
+			document.identityFamilyTexts,
+			familyIdByText,
+		);
+		const routeFamilyIds = mapFamilyTextsToIds(
+			document.routeFamilyTexts,
+			familyIdByText,
+		);
+		const headingFamilyIds = mapFamilyTextsToIds(
+			document.headingFamilyTexts,
+			familyIdByText,
+		);
+		identityFamilyIdsByDoc.push(identityFamilyIds);
+		identitySourceMasksByDoc.push(document.identitySourceMasks);
+		routeFamilyIdsByDoc.push(routeFamilyIds);
+		routeSourceMasksByDoc.push(document.routeSourceMasks);
+		headingFamilyIdsByDoc.push(headingFamilyIds);
+		pushPostingMapValues(
+			metadataDocIdsByBigramId,
+			dedupeSortedNumbers([
+				...document.identityHanBigramIds,
+				...document.routeHanBigramIds,
+			]),
+			docId,
+		);
+		pushPostingMapValues(
+			metadataDocIdsByCharId,
+			dedupeSortedNumbers([
+				...document.identityHanCharIds,
+				...document.routeHanCharIds,
+			]),
+			docId,
+		);
 		bodyBlockStartByDocId.push(blockInputs.length);
 		for (const block of document.bodyBlocks) {
 			const summaryFamilyIds = mapFamilyTextsToIds(
@@ -549,6 +723,9 @@ export async function buildResidentHotBaseArtifactsStreaming(
 				ordinal: block.ordinal,
 				summaryFamilyIds,
 			});
+			const blockId = blockInputs.length - 1;
+			pushPostingMapValues(bodyPostingsByBigramId, block.hanBigramIds, blockId);
+			pushPostingMapValues(bodyPostingsByCharId, block.hanCharIds, blockId);
 			if (document.docRef > 0) {
 				const exactFamilyIds = mapFamilyTextsToIds(
 					block.exactFamilyTexts,
@@ -599,7 +776,7 @@ export async function buildResidentHotBaseArtifactsStreaming(
 					generation: document.generation,
 					blockOrdinal: block.ordinal,
 					bodyWitnessMatchKeys: toInt32Array(
-						block.hanWitnessTexts.map(buildStableWitnessMatchKey),
+						block.hanWitnessTexts.map(buildMemo.buildStableWitnessMatchKey),
 					),
 					bodyWitnessTexts: [...block.hanWitnessTexts],
 					bodyWitnessStartOffsets: toUint32Array(block.hanWitnessStartOffsets),
@@ -626,21 +803,21 @@ export async function buildResidentHotBaseArtifactsStreaming(
 				docRef: document.docRef,
 				generation: document.generation,
 				identityWitnessMatchKeys: toInt32Array(
-					document.identityHanWitnessTexts.map(buildStableWitnessMatchKey),
+					document.identityHanWitnessTexts.map(buildMemo.buildStableWitnessMatchKey),
 				),
 				identityWitnessTexts: [...document.identityHanWitnessTexts],
 				identityWitnessSourceMaskByDocEntry: toUint8Array(
 					document.identityHanWitnessSourceMasks,
 				),
 				routeWitnessMatchKeys: toInt32Array(
-					document.routeHanWitnessTexts.map(buildStableWitnessMatchKey),
+					document.routeHanWitnessTexts.map(buildMemo.buildStableWitnessMatchKey),
 				),
 				routeWitnessTexts: [...document.routeHanWitnessTexts],
 				routeWitnessSourceMaskByDocEntry: toUint8Array(
 					document.routeHanWitnessSourceMasks,
 				),
 				headingWitnessMatchKeys: toInt32Array(
-					document.headingHanWitnessTexts.map(buildStableWitnessMatchKey),
+					document.headingHanWitnessTexts.map(buildMemo.buildStableWitnessMatchKey),
 				),
 				headingWitnessTexts: [...document.headingHanWitnessTexts],
 			});
@@ -649,9 +826,17 @@ export async function buildResidentHotBaseArtifactsStreaming(
 			}
 		}
 	}
-	await flushBodyEvidence();
-	await flushHanBodyEvidence();
-	await flushHanDocEvidence();
+	await flushBatch();
+	const pass2Ms = nowMs() - pass2StartMs;
+	const finalMergeStartMs = nowMs();
+	const metadataContainers = buildMetadataContainerArena({
+		familyCount: familyLexicon.familyCount,
+		identityFamilyIdsByDoc,
+		identitySourceMasksByDoc,
+		routeFamilyIdsByDoc,
+		routeSourceMasksByDoc,
+		headingFamilyIdsByDoc,
+	});
 	const bodyFamilyPosting = buildBodyFamilyPostingField({
 		shardLocalFamilySlotsByBlock: blockInputs.map((block) => block.summaryFamilyIds),
 	});
@@ -667,10 +852,10 @@ export async function buildResidentHotBaseArtifactsStreaming(
 		})),
 	);
 	const docTable = buildDocTable(
-		preparedDocuments.map((document, docId) => ({
-			docRef: document.docRef,
-			pathStringId: stringArenaBuilder.intern(document.path, STRING_SOURCE_PATH),
-			generation: document.generation,
+		docRefsByDocId.map((docRef, docId) => ({
+			docRef,
+			pathStringId: pathStringIdsByDocId[docId] ?? 0,
+			generation: generationsByDocId[docId] ?? 0,
 			identityStart: metadataContainers.identityStartByDocId[docId] ?? 0,
 			identityCount: metadataContainers.identityCountByDocId[docId] ?? 0,
 			routeStart: metadataContainers.routeStartByDocId[docId] ?? 0,
@@ -681,27 +866,28 @@ export async function buildResidentHotBaseArtifactsStreaming(
 			bodyBlockCount: bodyBlockCountByDocId[docId] ?? 0,
 		})),
 	);
+	const metadataBigramIds = [...metadataDocIdsByBigramId.keys()].sort((left, right) => left - right);
+	const metadataCharIds = [...metadataDocIdsByCharId.keys()].sort((left, right) => left - right);
 	const hanRoute = buildHanRouteArena({
-		bigramIds: dedupeSortedNumbers([
-			...preparedDocuments.flatMap((document) => document.identityHanBigramIds),
-			...preparedDocuments.flatMap((document) => document.routeHanBigramIds),
-		]),
-		metadataDocIdsByBigram: buildMetadataPostingsByBigram(preparedDocuments),
-		bodyPostingsByBigramId: buildBodyPostingsByBigram(preparedDocuments),
-		metadataCharIds: dedupeSortedNumbers([
-			...preparedDocuments.flatMap((document) => document.identityHanCharIds),
-			...preparedDocuments.flatMap((document) => document.routeHanCharIds),
-		]),
-		metadataDocIdsByChar: buildMetadataPostingsByChar(preparedDocuments),
-		bodyPostingsByCharId: buildBodyPostingsByChar(preparedDocuments),
-		identityWitnessTextIdsByDoc: preparedDocuments.map(() => []),
-		identityWitnessSourceMasksByDoc: preparedDocuments.map(() => []),
-		routeWitnessTextIdsByDoc: preparedDocuments.map(() => []),
-		routeWitnessSourceMasksByDoc: preparedDocuments.map(() => []),
-		headingWitnessTextIdsByDoc: preparedDocuments.map(() => []),
+		bigramIds: metadataBigramIds,
+		metadataDocIdsByBigram: metadataBigramIds.map(
+			(bigramId) => metadataDocIdsByBigramId.get(bigramId) ?? [],
+		),
+		bodyPostingsByBigramId,
+		metadataCharIds,
+		metadataDocIdsByChar: metadataCharIds.map(
+			(charId) => metadataDocIdsByCharId.get(charId) ?? [],
+		),
+		bodyPostingsByCharId,
+		identityWitnessTextIdsByDoc: docRefsByDocId.map(() => []),
+		identityWitnessSourceMasksByDoc: docRefsByDocId.map(() => []),
+		routeWitnessTextIdsByDoc: docRefsByDocId.map(() => []),
+		routeWitnessSourceMasksByDoc: docRefsByDocId.map(() => []),
+		headingWitnessTextIdsByDoc: docRefsByDocId.map(() => []),
 		bodyWitnessOccurrenceTextIdsByBlock: blockInputs.map(() => []),
 		bodyWitnessOccurrenceStartOffsetsByBlock: blockInputs.map(() => []),
 	});
+	const mergeMs = mergeFamilyMs + (nowMs() - finalMergeStartMs);
 	const stringArenaSourceBreakdown = stringArenaBuilder.describeSourceUtf8Bytes();
 	const stringArena = stringArenaBuilder.build();
 	const emptyExactTapes = createEmptyResidentExactTapeArena();
@@ -736,6 +922,10 @@ export async function buildResidentHotBaseArtifactsStreaming(
 		fuzzyRescueIndex: fuzzyRescue,
 		coldEvidenceFlushCount,
 		maxColdEvidenceChunkSize,
+		batchMaxRawTextBytes,
+		pass1Ms,
+		pass2Ms,
+		mergeMs,
 	};
 }
 
@@ -785,6 +975,7 @@ function prepareDocument(
 	document: IndexedDocument,
 	docId: number,
 	tokenizeDocumentText?: V3DocumentTokenizer,
+	buildMemo: CoverageV3BuildMemo = createCoverageV3BuildMemo(tokenizeDocumentText),
 ): PreparedDocument {
 	const generation = document.generation;
 	if (generation == null) {
@@ -797,36 +988,24 @@ function prepareDocument(
 	const headingsText = document.headings ?? "";
 	const contentText = document.content ?? "";
 	const basenameFamilyTexts = dedupeSorted(
-		extractDocumentFamilyTexts(document.basename ?? "", tokenizeDocumentText),
+		buildMemo.extractFamilyTexts(document.basename ?? ""),
 	);
 	const aliasFamilyTexts = dedupeSorted(
-		extractDocumentFamilyTexts(aliasesText, tokenizeDocumentText),
+		buildMemo.extractFamilyTexts(aliasesText),
 	);
 	const folderFamilyTexts = dedupeSorted(
-		extractDocumentFamilyTexts(document.folder ?? "", tokenizeDocumentText),
+		buildMemo.extractFamilyTexts(document.folder ?? ""),
 	);
 	const tagFamilyTexts = dedupeSorted(
 		splitTagValues(tagsText).flatMap((tag) =>
-			extractDocumentFamilyTexts(tag, tokenizeDocumentText),
+			buildMemo.extractFamilyTexts(tag),
 		),
 	);
-	const bodyBlocks = splitBodyBlocksWithDocumentTokenizer(
+	const bodyBlocks = splitPreparedBodyBlocksWithBuildMemo(
 		contentText,
-		tokenizeDocumentText,
-	).map<PreparedBodyBlock>((block) => ({
 		docId,
-		ordinal: block.ordinal,
-		summaryFamilyTexts: dedupeSorted(block.familyTexts),
-		exactFamilyTexts: block.exactFamilyTexts,
-		exactFamilyStartOffsets: block.exactFamilyStartOffsets,
-		exactFamilySupportMasks: block.exactFamilySupportMasks,
-		hanWitnessTexts: block.hanWitnessTexts,
-		hanWitnessStartOffsets: block.hanWitnessStartOffsets,
-		hanBigramIds: dedupeSorted(block.hanBigramTexts).map(encodeHanBigramId),
-		hanCharIds: dedupeSorted(
-			block.hanWitnessTexts.flatMap((text) => extractHanChars(text)),
-		).map(encodeHanCharId),
-	}));
+		buildMemo,
+	);
 	const identityHanWitnessEntries = [
 		...extractHanSegments(document.basename ?? "").map((text) => ({
 			text,
@@ -903,7 +1082,7 @@ function prepareDocument(
 			],
 		),
 		headingFamilyTexts: dedupeSorted(
-			extractDocumentFamilyTexts(headingsText, tokenizeDocumentText),
+			buildMemo.extractFamilyTexts(headingsText),
 		),
 		identityHanWitnessTexts,
 		identityHanWitnessSourceMasks,
@@ -913,22 +1092,22 @@ function prepareDocument(
 		identityHanBigramIds: dedupeSorted([
 			...extractHanBigrams(document.basename ?? ""),
 			...extractHanBigrams(aliasesText),
-		]).map(encodeHanBigramId),
+		]).map(buildMemo.encodeHanBigramId),
 		routeHanBigramIds: dedupeSorted([
 			...extractHanBigrams(document.folder ?? ""),
 			...splitTagValues(tagsText).flatMap((tag) => extractHanBigrams(tag)),
-		]).map(encodeHanBigramId),
+		]).map(buildMemo.encodeHanBigramId),
 		headingHanBigramIds: dedupeSorted(
 			extractHanBigrams(headingsText),
-		).map(encodeHanBigramId),
+		).map(buildMemo.encodeHanBigramId),
 		identityHanCharIds: dedupeSorted([
 			...extractHanChars(document.basename ?? ""),
 			...extractHanChars(aliasesText),
-		]).map(encodeHanCharId),
+		]).map(buildMemo.encodeHanCharId),
 		routeHanCharIds: dedupeSorted([
 			...extractHanChars(document.folder ?? ""),
 			...splitTagValues(tagsText).flatMap((tag) => extractHanChars(tag)),
-		]).map(encodeHanCharId),
+		]).map(buildMemo.encodeHanCharId),
 		bodyBlocks,
 	};
 }
@@ -938,6 +1117,15 @@ function collectFamilySourceMasks(
 ): Map<string, number> {
 	const familySourceMaskByText = new Map<string, number>();
 	for (const document of documents) {
+		collectFamilySourceMasksFromDocument(familySourceMaskByText, document);
+	}
+	return familySourceMaskByText;
+}
+
+function collectFamilySourceMasksFromDocument(
+	familySourceMaskByText: Map<string, number>,
+	document: PreparedDocument,
+): void {
 		mergeSourceMask(
 			familySourceMaskByText,
 			document.identityFamilyTexts,
@@ -960,8 +1148,163 @@ function collectFamilySourceMasks(
 				FAMILY_SOURCE_MASK_BODY,
 			);
 		}
+}
+
+function collectFamilySourceMasksFromIndexedDocument(
+	familySourceMaskByText: Map<string, number>,
+	document: IndexedDocument,
+	buildMemo: CoverageV3BuildMemo,
+): void {
+	const aliasesText = document.aliases ?? "";
+	const tagsText = document.tags ?? "";
+	const basenameFamilyTexts = dedupeSorted(
+		buildMemo.extractFamilyTexts(document.basename ?? ""),
+	);
+	const aliasFamilyTexts = dedupeSorted(
+		buildMemo.extractFamilyTexts(aliasesText),
+	);
+	const folderFamilyTexts = dedupeSorted(
+		buildMemo.extractFamilyTexts(document.folder ?? ""),
+	);
+	const tagFamilyTexts = dedupeSorted(
+		splitTagValues(tagsText).flatMap((tag) =>
+			buildMemo.extractFamilyTexts(tag),
+		),
+	);
+	mergeSourceMask(
+		familySourceMaskByText,
+		dedupeSorted([...basenameFamilyTexts, ...aliasFamilyTexts]),
+		FAMILY_SOURCE_MASK_IDENTITY,
+	);
+	mergeSourceMask(
+		familySourceMaskByText,
+		dedupeSorted([...folderFamilyTexts, ...tagFamilyTexts]),
+		FAMILY_SOURCE_MASK_ROUTE,
+	);
+	mergeSourceMask(
+		familySourceMaskByText,
+		dedupeSorted(
+			buildMemo.extractFamilyTexts(document.headings ?? ""),
+		),
+		FAMILY_SOURCE_MASK_HEADING,
+	);
+	for (const familyTexts of splitBodyBlockFamilyTextsWithBuildMemo(
+		document.content ?? "",
+		buildMemo,
+	)) {
+		mergeSourceMask(
+			familySourceMaskByText,
+			dedupeSorted(familyTexts),
+			FAMILY_SOURCE_MASK_BODY,
+		);
 	}
-	return familySourceMaskByText;
+}
+
+function splitBodyBlockFamilyTextsWithBuildMemo(
+	text: string,
+	buildMemo: CoverageV3BuildMemo,
+): readonly (readonly string[])[] {
+	return splitBodyBlockFamilyTextSetsWithDocumentTokenizer(
+		text,
+		buildMemo.tokenizeDocumentText,
+	);
+}
+
+function splitPreparedBodyBlocksWithBuildMemo(
+	text: string,
+	docId: number,
+	buildMemo: CoverageV3BuildMemo,
+): readonly PreparedBodyBlock[] {
+	return splitNormalizedBodyBlockTextsForBuild(text)
+		.map<PreparedBodyBlock>((block, index) => {
+			const exactFamilyOccurrences = buildMemo.extractFamilyOccurrences(block);
+			const hanAnalysis = analyzeNormalizedBlockHanSurface(block);
+			return {
+				docId,
+				ordinal: index,
+				summaryFamilyTexts: dedupeSorted(
+					dedupePreservingOrderStrings(
+						exactFamilyOccurrences.map((occurrence) => occurrence.text),
+					),
+				),
+				exactFamilyTexts: exactFamilyOccurrences.map(
+					(occurrence) => occurrence.text,
+				),
+				exactFamilyStartOffsets: exactFamilyOccurrences.map(
+					(occurrence) => occurrence.startOffset,
+				),
+				exactFamilySupportMasks: exactFamilyOccurrences.map(
+					(occurrence) => occurrence.bodySupportMask,
+				),
+				hanWitnessTexts: hanAnalysis.witnessTexts,
+				hanWitnessStartOffsets: hanAnalysis.witnessStartOffsets,
+				hanBigramIds: hanAnalysis.bigramTexts.map(buildMemo.encodeHanBigramId),
+				hanCharIds: hanAnalysis.charTexts.map(buildMemo.encodeHanCharId),
+			};
+		})
+		.filter(
+			(block) =>
+				block.summaryFamilyTexts.length > 0 ||
+				block.hanWitnessTexts.length > 0 ||
+				block.hanBigramIds.length > 0,
+		);
+}
+
+function splitNormalizedBodyBlockTextsForBuild(text: string): string[] {
+	const normalized = normalizeText(text).replace(/\r\n?/gu, "\n");
+	if (normalized.trim().length === 0) {
+		return [];
+	}
+	return createV3BodyBlockChunkRanges(
+		normalized,
+		V3_BODY_BLOCK_TARGET_TOKENS,
+		V3_BODY_BLOCK_MAX_TOKENS,
+	)
+		.map((range) => normalized.slice(range.startOffset, range.endOffset).trim())
+		.filter((block) => block.length > 0);
+}
+
+function analyzeNormalizedBlockHanSurface(block: string): Readonly<{
+	witnessTexts: readonly string[];
+	witnessStartOffsets: readonly number[];
+	bigramTexts: readonly string[];
+	charTexts: readonly string[];
+}> {
+	const witnessTexts: string[] = [];
+	const witnessStartOffsets: number[] = [];
+	const bigramTexts: string[] = [];
+	const charTexts: string[] = [];
+	const seenBigrams = new Set<string>();
+	const seenChars = new Set<string>();
+	for (const match of block.matchAll(HAN_SEQUENCE_REGEX)) {
+		const segment = match[0]?.trim() ?? "";
+		if (segment.length === 0) {
+			continue;
+		}
+		witnessTexts.push(segment);
+		witnessStartOffsets.push(match.index ?? 0);
+		const chars = Array.from(segment);
+		for (const char of chars) {
+			if (!seenChars.has(char)) {
+				seenChars.add(char);
+				charTexts.push(char);
+			}
+		}
+		for (let index = 0; index < chars.length - 1; index += 1) {
+			const bigram = `${chars[index] ?? ""}${chars[index + 1] ?? ""}`;
+			if (bigram.length === 0 || seenBigrams.has(bigram)) {
+				continue;
+			}
+			seenBigrams.add(bigram);
+			bigramTexts.push(bigram);
+		}
+	}
+	return {
+		witnessTexts,
+		witnessStartOffsets,
+		bigramTexts,
+		charTexts,
+	};
 }
 
 function buildResidentHanRoute(
@@ -1322,6 +1665,19 @@ function dedupeSorted(values: readonly string[]): string[] {
 	);
 }
 
+function dedupePreservingOrderStrings(values: readonly string[]): string[] {
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const value of values) {
+		if (value.length === 0 || seen.has(value)) {
+			continue;
+		}
+		seen.add(value);
+		out.push(value);
+	}
+	return out;
+}
+
 function dedupeSortedNumbers(values: readonly number[]): number[] {
 	return [...new Set(values)].sort((left, right) => left - right);
 }
@@ -1350,6 +1706,35 @@ function pushBigramPostings(
 		}
 		postingsByBigram[bigramIndex].push(value);
 	}
+}
+
+function pushPostingMapValues(
+	postingsByTermId: Map<number, number[]>,
+	termIds: readonly number[],
+	value: number,
+): void {
+	for (const termId of termIds) {
+		let values = postingsByTermId.get(termId);
+		if (!values) {
+			values = [];
+			postingsByTermId.set(termId, values);
+		}
+		values.push(value);
+	}
+}
+
+function estimateIndexedDocumentRawTextBytes(document: IndexedDocument): number {
+	if (typeof document.size === "number" && document.size > 0) {
+		return document.size;
+	}
+	return (
+		estimateUtf8Bytes(document.basename ?? "") +
+		estimateUtf8Bytes(document.folder ?? "") +
+		estimateUtf8Bytes(document.aliases ?? "") +
+		estimateUtf8Bytes(document.tags ?? "") +
+		estimateUtf8Bytes(document.headings ?? "") +
+		estimateUtf8Bytes(document.content ?? "")
+	);
 }
 
 function estimateUtf8Bytes(text: string): number {

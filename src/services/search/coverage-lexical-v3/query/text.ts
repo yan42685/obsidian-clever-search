@@ -151,6 +151,33 @@ export function extractDocumentFamilyTexts(
 	);
 }
 
+export function extractDocumentFamilyTextSetOnly(
+	text: string,
+	tokenizeDocumentText?: V3DocumentTokenizer,
+): string[] {
+	const out: string[] = [];
+	const seen = new Set<string>();
+	for (const match of text.matchAll(RAW_SEGMENT_REGEX)) {
+		const rawToken = match[0] ?? "";
+		const token = normalizeText(rawToken).trim();
+		if (token.length === 0) {
+			continue;
+		}
+		if (classifySurfaceKind(token) !== "han") {
+			pushLatinFamilyTexts(out, seen, rawToken);
+			continue;
+		}
+		if (tokenizeDocumentText == null) {
+			pushFamilyText(out, seen, token);
+			continue;
+		}
+		for (const term of collectHanTokenizerTerms(token, tokenizeDocumentText)) {
+			pushFamilyText(out, seen, term);
+		}
+	}
+	return out;
+}
+
 export function extractDocumentFamilySequence(
 	text: string,
 	tokenizeDocumentText?: V3DocumentTokenizer,
@@ -385,6 +412,16 @@ export function splitBodyBlocksWithDocumentTokenizer(
 		);
 }
 
+export function splitBodyBlockFamilyTextSetsWithDocumentTokenizer(
+	text: string,
+	tokenizeDocumentText?: V3DocumentTokenizer,
+): string[][] {
+	const normalized = normalizeText(text).replace(/\r\n?/gu, "\n");
+	return splitNormalizedBodyBlockTexts(normalized)
+		.map((block) => extractDocumentFamilyTextSetOnly(block, tokenizeDocumentText))
+		.filter((familyTexts) => familyTexts.length > 0);
+}
+
 export function extractOrderedFamilyOccurrences(text: string): V3TextOccurrence[] {
 	return extractOrderedFamilySupportOccurrences(text).map(
 		({ text: occurrenceText, startOffset: occurrenceStartOffset }) => ({
@@ -476,6 +513,32 @@ function collectLatinFamilyOccurrences(
 		}
 	}
 	return occurrences;
+}
+
+function pushLatinFamilyTexts(
+	target: string[],
+	seen: Set<string>,
+	rawToken: string,
+): void {
+	pushFamilyText(target, seen, normalizeText(rawToken).trim());
+	for (const segment of collectLatinWordSegments(rawToken, 0)) {
+		pushFamilyText(target, seen, normalizeText(segment.text).trim());
+		for (const part of splitCamelCaseSegments(segment.text, 0)) {
+			pushFamilyText(target, seen, normalizeText(part.text).trim());
+		}
+	}
+}
+
+function pushFamilyText(
+	target: string[],
+	seen: Set<string>,
+	text: string,
+): void {
+	if (text.length === 0 || seen.has(text)) {
+		return;
+	}
+	seen.add(text);
+	target.push(text);
 }
 
 function pushLatinOccurrence(

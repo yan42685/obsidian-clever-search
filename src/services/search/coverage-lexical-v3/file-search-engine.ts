@@ -144,6 +144,15 @@ type CoverageLexicalV3PersistentStores = Readonly<{
 	snapshotStore: CoverageLexicalV3SnapshotStore;
 }>;
 
+export type CoverageLexicalV3LastRebuildStats = Readonly<{
+	coldEvidenceFlushCount: number;
+	maxColdEvidenceChunkSize: number;
+	batchMaxRawTextBytes: number;
+	pass1Ms: number;
+	pass2Ms: number;
+	mergeMs: number;
+}>;
+
 type HydratedRankingEvidence = Readonly<{
 	hydratedEvidenceByCandidateKey: ReadonlyMap<string, CandidateEvidencePackage>;
 }>;
@@ -283,6 +292,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	private readonly pendingDocumentMetadataByPath = new Map<string, PendingDocumentMetadata>();
 	private batchReindexing = false;
 	private pendingResidentRebuild: Promise<void> | null = null;
+	private lastRebuildStats: CoverageLexicalV3LastRebuildStats | null = null;
 	private benchmarkPhaseTimingState: CoverageLexicalV3BenchmarkPhaseTimingState | null =
 		null;
 
@@ -308,6 +318,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		this.pendingDocumentContentsByPath.clear();
 		this.pendingDocumentMetadataByPath.clear();
 		this.pendingResidentRebuild = null;
+		this.lastRebuildStats = null;
 		this.engine = new CoverageLexicalV3Engine();
 		if (this.benchmarkPhaseTimingState != null) {
 			this.engine.setBenchmarkPhaseTrackingEnabled(true);
@@ -765,6 +776,10 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		};
 	}
 
+	getLastRebuildStats(): CoverageLexicalV3LastRebuildStats | null {
+		return this.lastRebuildStats;
+	}
+
 	supportsPersistentFileIndex(): boolean {
 		return true;
 	}
@@ -972,6 +987,14 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				},
 			},
 		);
+		this.lastRebuildStats = {
+			coldEvidenceFlushCount: artifacts.coldEvidenceFlushCount,
+			maxColdEvidenceChunkSize: artifacts.maxColdEvidenceChunkSize,
+			batchMaxRawTextBytes: artifacts.batchMaxRawTextBytes,
+			pass1Ms: artifacts.pass1Ms,
+			pass2Ms: artifacts.pass2Ms,
+			mergeMs: artifacts.mergeMs,
+		};
 		this.engine.loadResidentIndexView({
 			version: 1,
 			shards: [
