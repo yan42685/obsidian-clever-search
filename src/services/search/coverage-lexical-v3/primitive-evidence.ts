@@ -1,5 +1,10 @@
 import type { RealizedQueryUnitFamily } from "./ranking/types";
 import type { V3QueryAnalysis, V3QuerySurfaceGroup, V3QueryUnit } from "./query/analysis";
+import {
+	mapNormalizedRangeToOriginalRange,
+	normalizeText,
+	normalizeTextWithOffsetMap,
+} from "./query/text";
 
 export type PrimitiveTextOccurrence = Readonly<{
 	start: number;
@@ -35,8 +40,31 @@ export function findPrimitiveTextOccurrences(
 	if (haystack.length === 0 || needle.length === 0) {
 		return out;
 	}
-	const haystackText = caseInsensitive ? haystack.toLowerCase() : haystack;
-	const needleText = caseInsensitive ? needle.toLowerCase() : needle;
+	if (caseInsensitive) {
+		const normalizedHaystack = normalizeTextWithOffsetMap(haystack);
+		const needleText = normalizeText(needle);
+		let searchStart = 0;
+		while (searchStart < normalizedHaystack.text.length) {
+			const foundIndex = normalizedHaystack.text.indexOf(needleText, searchStart);
+			if (foundIndex < 0) {
+				break;
+			}
+			const range = mapNormalizedRangeToOriginalRange(
+				normalizedHaystack,
+				foundIndex,
+				foundIndex + needleText.length,
+			);
+			out.push({
+				start: range.start,
+				end: range.end,
+				matchedText: needle,
+			});
+			searchStart = foundIndex + 1;
+		}
+		return out;
+	}
+	const haystackText = haystack;
+	const needleText = needle;
 	let searchStart = 0;
 	while (searchStart < haystackText.length) {
 		const foundIndex = haystackText.indexOf(needleText, searchStart);

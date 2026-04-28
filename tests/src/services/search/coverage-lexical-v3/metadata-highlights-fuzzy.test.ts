@@ -148,6 +148,44 @@ describe("coverage lexical v3 fuzzy metadata highlights", () => {
 		).toEqual([]);
 	});
 
+	test("metadata highlights map normalized Latin matches back to original ranges", () => {
+		const queryAnalysis = analyzeQuery("file");
+		const basenameText = "\ufb01le note";
+		const highlights = buildV3MetadataFieldHighlightRanges({
+			queryAnalysis,
+			candidate: createPackingProfile({
+				path: "notes/file.md",
+				realizedFamilies: [
+					{
+						queryUnitIndex: 0,
+						queryUnitText: "file",
+						querySurfaceGroupIndex: 0,
+						familyId: 1,
+						shardLocalFamilySlot: 1,
+						familyText: "file",
+						matchKind: "exact",
+						editDistance: 0,
+						identityMetadataSource: "basename",
+						routeMetadataSource: "none",
+						metadataPackingSource: "basename",
+						bodyPrefixSupportKind: "none",
+						inIdentity: true,
+						inRoute: false,
+						inHeading: false,
+						inBestBodyWindow: false,
+						inBodyResidue: false,
+					},
+				],
+			}),
+			basenameText,
+			folderText: "notes/",
+		});
+
+		expect(sliceHighlights(basenameText, highlights.basenameHighlightRanges)).toEqual([
+			"\ufb01le",
+		]);
+	});
+
 	test("singleton Han metadata matches render as strong ranges", () => {
 		const queryAnalysis = analyzeQuery("\u9910");
 		const highlights = buildV3MetadataFieldHighlightRanges({
