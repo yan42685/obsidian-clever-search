@@ -1936,12 +1936,7 @@ function mergeExistingShardDescriptor(
 	if (existing == null) {
 		return descriptor;
 	}
-	return {
-		...descriptor,
-		state: existing.state,
-		createdOrder: existing.createdOrder,
-		artifactOwner: existing.artifactOwner,
-	};
+	return existing;
 }
 
 function estimateResidentShardSourceBytes(base: ResidentBase): number {
