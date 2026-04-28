@@ -651,4 +651,37 @@ describe("coverage lexical v3 direct subitems", () => {
 		expect(result.subItems[0]?.snippetText).toContain("\u5feb\u6377\u952e");
 		expect(extractHighlightTexts(result)).toContain("\u5feb\u6377\u952e");
 	});
+
+	test("renders direct subitem snippets with original offsets after normalization expands text", () => {
+		const result = buildV3DirectSubitems({
+			snapshotText: "ﬁ\ncache restore",
+			queryAnalysis: createQueryAnalysis({
+				queryText: "cache",
+				surfaceGroups: [
+					{
+						index: 0,
+						text: "cache",
+						kind: "latin",
+						hanBigramTexts: [],
+						coveredCharMask: [],
+						queryResidualUniqueBigrams: [],
+						hasQueryResidualHanCoverage: false,
+					},
+				],
+				primaryUnits: [
+					{ index: 0, text: "cache", source: "surface", surfaceGroupIndex: 0 },
+				],
+			}),
+			candidate: createCandidate({
+				realizedFamilies: [createRealizedFamily(0, "cache")],
+			}),
+			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
+			residentBase: createResidentBaseForBlockCounts([1]),
+		});
+
+		expect(result.renderPayloads[0]?.row).toBe(1);
+		expect(result.renderPayloads[0]?.col).toBe(0);
+		expect(result.subItems[0]?.snippetText).toContain("ﬁ\ncache");
+		expect(extractHighlightTexts(result)).toContain("cache");
+	});
 });

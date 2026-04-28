@@ -34,6 +34,8 @@ import type {
 } from "./contracts";
 import type { V3DirectSubitemPreparedText } from "./contracts";
 
+const COMBINING_MARK_REGEX = /\p{M}/u;
+
 export function normalizeV3DirectSubitemSnapshotText(snapshotText: string): string {
 	return normalizeText(snapshotText).replace(/\r\n?/gu, "\n");
 }
@@ -41,7 +43,8 @@ export function normalizeV3DirectSubitemSnapshotText(snapshotText: string): stri
 export function prepareV3DirectSubitemSnapshotText(
 	snapshotText: string,
 ): V3DirectSubitemPreparedText {
-	const normalizedText = normalizeV3DirectSubitemSnapshotText(snapshotText);
+	const normalized = normalizeDirectSubitemTextWithOffsetMap(snapshotText);
+	const normalizedText = normalized.text;
 	const blocks = splitBodyBlocksWithDocumentTokenizer(normalizedText);
 	let offset = 0;
 	const rawBlocks: V3DirectSubitemPreparedText["rawBlocks"] = blocks.map((block, index) => {
@@ -59,8 +62,61 @@ export function prepareV3DirectSubitemSnapshotText(
 	});
 	return {
 		text: normalizedText,
+		normalizedOffsetToOriginalOffset: normalized.normalizedOffsetToOriginalOffset,
 		rawBlocks,
 	};
+}
+
+function normalizeDirectSubitemTextWithOffsetMap(
+	text: string,
+): Pick<V3DirectSubitemPreparedText, "text" | "normalizedOffsetToOriginalOffset"> {
+	let normalizedText = "";
+	const normalizedOffsetToOriginalOffset: number[] = [];
+	for (let offset = 0; offset < text.length;) {
+		const rawChar = text[offset] ?? "";
+		if (rawChar === "\r") {
+			const nextOffset = text[offset + 1] === "\n" ? offset + 2 : offset + 1;
+			normalizedOffsetToOriginalOffset[normalizedText.length] = offset;
+			normalizedText += "\n";
+			normalizedOffsetToOriginalOffset[normalizedText.length] = nextOffset;
+			offset = nextOffset;
+			continue;
+		}
+		const nextOffset = findNormalizationClusterEnd(text, offset);
+		const normalizedChar = normalizeText(text.slice(offset, nextOffset));
+		for (let index = 0; index < normalizedChar.length; index += 1) {
+			normalizedOffsetToOriginalOffset[normalizedText.length + index] = offset;
+		}
+		normalizedText += normalizedChar;
+		normalizedOffsetToOriginalOffset[normalizedText.length] = nextOffset;
+		offset = nextOffset;
+	}
+	normalizedOffsetToOriginalOffset[normalizedText.length] = text.length;
+	return {
+		text: normalizedText,
+		normalizedOffsetToOriginalOffset,
+	};
+}
+
+function findNormalizationClusterEnd(text: string, offset: number): number {
+	let end = nextCodePointOffset(text, offset);
+	while (end < text.length) {
+		const nextEnd = nextCodePointOffset(text, end);
+		const char = text.slice(end, nextEnd);
+		if (!COMBINING_MARK_REGEX.test(char)) {
+			break;
+		}
+		end = nextEnd;
+	}
+	return end;
+}
+
+function nextCodePointOffset(text: string, offset: number): number {
+	const codePoint = text.codePointAt(offset);
+	if (codePoint == null) {
+		return offset + 1;
+	}
+	return offset + String.fromCodePoint(codePoint).length;
 }
 
 const DIRECT_SUBITEM_SINGLETON_HAN_TIER_SCORE = {

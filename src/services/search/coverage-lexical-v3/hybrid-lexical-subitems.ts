@@ -1,7 +1,10 @@
 import { buildLineOffsets, offsetToLine } from "../hybrid/chunker";
 import {
   extractHanChars,
+  mapNormalizedRangeToOriginalRange,
   normalizeText,
+  normalizeTextWithOffsetMap,
+  type V3NormalizedTextWithOffsetMap,
 } from "./query/text";
 
 export type CoverageLexicalV3HybridLexicalSubitemsMatchTier =
@@ -86,8 +89,8 @@ export function buildCoverageLexicalV3HybridLexicalSubitems(params: {
     };
   }
 
-  const normalizedSnapshotText = normalizeText(params.snapshotText);
-  const occurrences = collectBridgeOccurrences(normalizedSnapshotText, queryTerms);
+  const normalizedSnapshot = normalizeTextWithOffsetMap(params.snapshotText);
+  const occurrences = collectBridgeOccurrences(normalizedSnapshot, queryTerms);
   const candidateSpans = buildBridgeCandidateSpans(
     params.snapshotText,
     queryTerms,
@@ -161,12 +164,12 @@ function buildHanBridgeTerms(normalizedText: string): string[] {
 }
 
 function collectBridgeOccurrences(
-  normalizedSnapshotText: string,
+  normalizedSnapshot: V3NormalizedTextWithOffsetMap,
   queryTerms: readonly CoverageLexicalV3HybridLexicalSubitemsQueryTerm[],
 ): CoverageLexicalV3HybridLexicalSubitemsOccurrence[] {
   const occurrences: CoverageLexicalV3HybridLexicalSubitemsOccurrence[] = [];
   for (const queryTerm of queryTerms) {
-    for (const occurrence of collectExactBridgeOccurrences(normalizedSnapshotText, queryTerm)) {
+    for (const occurrence of collectExactBridgeOccurrences(normalizedSnapshot, queryTerm)) {
       occurrences.push(occurrence);
     }
   }
@@ -174,26 +177,27 @@ function collectBridgeOccurrences(
 }
 
 function collectExactBridgeOccurrences(
-  normalizedSnapshotText: string,
+  normalizedSnapshot: V3NormalizedTextWithOffsetMap,
   queryTerm: CoverageLexicalV3HybridLexicalSubitemsQueryTerm,
 ): CoverageLexicalV3HybridLexicalSubitemsOccurrence[] {
   const occurrences: CoverageLexicalV3HybridLexicalSubitemsOccurrence[] = [];
   let searchFrom = 0;
-  while (searchFrom < normalizedSnapshotText.length) {
-    const start = normalizedSnapshotText.indexOf(queryTerm.normalizedText, searchFrom);
+  while (searchFrom < normalizedSnapshot.text.length) {
+    const start = normalizedSnapshot.text.indexOf(queryTerm.normalizedText, searchFrom);
     if (start < 0) {
       break;
     }
     const end = start + queryTerm.normalizedText.length;
     searchFrom = Math.max(start + 1, end);
-    if (queryTerm.kind === "non_han_run" && !isWordBoundaryMatch(normalizedSnapshotText, start, end)) {
+    if (queryTerm.kind === "non_han_run" && !isWordBoundaryMatch(normalizedSnapshot.text, start, end)) {
       continue;
     }
+    const originalRange = mapNormalizedRangeToOriginalRange(normalizedSnapshot, start, end);
     occurrences.push({
       termId: queryTerm.termId,
       tier: "exact",
-      start,
-      end,
+      start: originalRange.start,
+      end: originalRange.end,
       distancePenalty: 0,
     });
   }

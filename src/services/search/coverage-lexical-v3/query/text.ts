@@ -3,6 +3,7 @@ const HAN_SEQUENCE_REGEX = /\p{Script=Han}+/gu;
 const HAN_REGEX = /\p{Script=Han}/u;
 const LATIN_REGEX = /[a-z0-9]/u;
 const TAG_SPLIT_REGEX = /\s+/u;
+const COMBINING_MARK_REGEX = /\p{M}/u;
 export const V3_BODY_BLOCK_TARGET_TOKENS = 300;
 export const V3_BODY_BLOCK_MAX_OVERFLOW_RATIO = 0.15;
 export const V3_BODY_BLOCK_MAX_TOKENS =
@@ -66,6 +67,10 @@ export type V3TextOccurrence = Readonly<{
 	text: string;
 	startOffset: number;
 }>;
+export type V3NormalizedTextWithOffsetMap = Readonly<{
+	text: string;
+	normalizedOffsetToOriginalOffset: readonly number[];
+}>;
 export type V3FamilyOccurrence = V3TextOccurrence &
 	Readonly<{
 		bodySupportMask: number;
@@ -100,6 +105,44 @@ export type V3BodyBlockChunkRange = ChunkRange;
 
 export function normalizeText(text: string): string {
 	return text.toLowerCase().normalize("NFKC");
+}
+
+export function normalizeTextWithOffsetMap(text: string): V3NormalizedTextWithOffsetMap {
+	let normalizedText = "";
+	const normalizedOffsetToOriginalOffset: number[] = [];
+	for (let offset = 0; offset < text.length;) {
+		const nextOffset = findNormalizationClusterEnd(text, offset);
+		const rawCluster = text.slice(offset, nextOffset);
+		const normalizedChar = normalizeText(rawCluster);
+		for (let index = 0; index < normalizedChar.length; index += 1) {
+			normalizedOffsetToOriginalOffset[normalizedText.length + index] = offset;
+		}
+		normalizedText += normalizedChar;
+		normalizedOffsetToOriginalOffset[normalizedText.length] = nextOffset;
+		offset = nextOffset;
+	}
+	normalizedOffsetToOriginalOffset[normalizedText.length] = text.length;
+	return {
+		text: normalizedText,
+		normalizedOffsetToOriginalOffset,
+	};
+}
+
+export function mapNormalizedRangeToOriginalRange(
+	normalizedText: V3NormalizedTextWithOffsetMap,
+	start: number,
+	end: number,
+): { start: number; end: number } {
+	const originalStart =
+		normalizedText.normalizedOffsetToOriginalOffset[start] ??
+		start;
+	const directEnd =
+		normalizedText.normalizedOffsetToOriginalOffset[end] ??
+		end;
+	return {
+		start: originalStart,
+		end: Math.max(directEnd, findNextOriginalOffsetAfter(normalizedText, end, originalStart)),
+	};
 }
 
 export function classifySurfaceKind(text: string): V3SurfaceKind {
@@ -1002,4 +1045,46 @@ function dedupePreservingOrder(values: readonly string[]): string[] {
 		out.push(value);
 	}
 	return out;
+}
+
+function findNextOriginalOffsetAfter(
+	normalizedText: V3NormalizedTextWithOffsetMap,
+	normalizedOffset: number,
+	originalStart: number,
+): number {
+	for (
+		let index = Math.min(
+			normalizedOffset,
+			normalizedText.normalizedOffsetToOriginalOffset.length - 1,
+		);
+		index < normalizedText.normalizedOffsetToOriginalOffset.length;
+		index += 1
+	) {
+		const originalOffset = normalizedText.normalizedOffsetToOriginalOffset[index];
+		if (originalOffset > originalStart) {
+			return originalOffset;
+		}
+	}
+	return normalizedText.normalizedOffsetToOriginalOffset.at(-1) ?? originalStart;
+}
+
+function findNormalizationClusterEnd(text: string, offset: number): number {
+	let end = nextCodePointOffset(text, offset);
+	while (end < text.length) {
+		const nextEnd = nextCodePointOffset(text, end);
+		const char = text.slice(end, nextEnd);
+		if (!COMBINING_MARK_REGEX.test(char)) {
+			break;
+		}
+		end = nextEnd;
+	}
+	return end;
+}
+
+function nextCodePointOffset(text: string, offset: number): number {
+	const codePoint = text.codePointAt(offset);
+	if (codePoint == null) {
+		return offset + 1;
+	}
+	return offset + String.fromCodePoint(codePoint).length;
 }

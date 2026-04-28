@@ -31,5 +31,16 @@ describe("coverage lexical v3 hybrid lexical subitems", () => {
     expect(result.candidateSpans).toEqual([]);
     expect(result.renderPayloads).toEqual([]);
   });
-});
 
+  test("maps normalized matches back to original snapshot offsets", () => {
+    const result = buildCoverageLexicalV3HybridLexicalSubitems({
+      queryText: "cache",
+      filePath: "docs/cache.md",
+      snapshotText: "ﬁ\ncache restore",
+    });
+
+    expect(result.candidateSpans[0].score.anchorOffset).toBe(2);
+    expect(result.renderPayloads[0]).toEqual({ row: 1, col: 0 });
+  });
+
+});

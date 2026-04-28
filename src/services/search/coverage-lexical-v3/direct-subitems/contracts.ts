@@ -101,6 +101,7 @@ export type V3DirectSubitemsBuildResult = Readonly<{
 
 export type V3DirectSubitemPreparedText = Readonly<{
 	text: string;
+	normalizedOffsetToOriginalOffset: readonly number[];
 	rawBlocks: readonly Readonly<{
 		blockId: number;
 		ordinal: number;

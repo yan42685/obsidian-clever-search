@@ -8,6 +8,7 @@ import {
 	buildV3DirectSubitemCandidates,
 	prepareV3DirectSubitemSnapshotText,
 } from "./evidence";
+import { mapNormalizedRangeToOriginalRange } from "../query/text";
 import { compareV3DirectSubitemCandidates } from "./ranker";
 import { renderV3DirectSubitemCandidate } from "./renderer";
 
@@ -15,7 +16,7 @@ export function buildV3DirectSubitems(
 	params: V3DirectSubitemsBuildParams,
 ): V3DirectSubitemsBuildResult {
 	const preparedText = prepareV3DirectSubitemSnapshotText(params.snapshotText);
-	const candidates = applyWeakFilePruneMode(
+	const normalizedCandidates = applyWeakFilePruneMode(
 		buildV3DirectSubitemCandidates({
 			snapshotText: preparedText.text,
 			queryAnalysis: params.queryAnalysis,
@@ -28,10 +29,13 @@ export function buildV3DirectSubitems(
 			.sort(compareV3DirectSubitemCandidates),
 		params,
 	);
+	const candidates = normalizedCandidates.map((candidate) =>
+		mapDirectSubitemCandidateToOriginalOffsets(candidate, preparedText),
+	);
 	const limitedCandidates = candidates.slice(0, Math.max(1, params.maxSubItemResults ?? 5));
 	const renderPayloads = limitedCandidates.map((candidate) =>
 		renderV3DirectSubitemCandidate({
-			snapshotText: preparedText.text,
+			snapshotText: params.snapshotText,
 			candidate,
 		}),
 	);
@@ -62,6 +66,61 @@ export function buildV3DirectSubitems(
 		renderPayloads,
 		subItems,
 	};
+}
+
+function mapDirectSubitemCandidateToOriginalOffsets(
+	candidate: V3DirectSubitemCandidate,
+	preparedText: ReturnType<typeof prepareV3DirectSubitemSnapshotText>,
+): V3DirectSubitemCandidate {
+	const atoms = candidate.atoms.map((atom) => mapDirectSubitemAtomToOriginalOffsets(atom, preparedText));
+	const displayAtoms = candidate.displayAtoms.map((atom) =>
+		mapDirectSubitemAtomToOriginalOffsets(atom, preparedText),
+	);
+	const componentAtoms = candidate.component.atoms.map((atom) =>
+		mapDirectSubitemAtomToOriginalOffsets(atom, preparedText),
+	);
+	const candidateRange = mapNormalizedRangeToOriginalRange(preparedText, candidate.start, candidate.end);
+	const componentRange = mapNormalizedRangeToOriginalRange(
+		preparedText,
+		candidate.component.scopeStart,
+		candidate.component.scopeEnd,
+	);
+	return {
+		...candidate,
+		start: candidateRange.start,
+		end: candidateRange.end,
+		anchorOffset: mapNormalizedOffsetToOriginalOffset(preparedText, candidate.anchorOffset),
+		component: {
+			...candidate.component,
+			scopeStart: componentRange.start,
+			scopeEnd: componentRange.end,
+			atoms: componentAtoms,
+		},
+		atoms,
+		displayAtoms,
+	};
+}
+
+function mapDirectSubitemAtomToOriginalOffsets(
+	atom: V3DirectSubitemCandidate["atoms"][number],
+	preparedText: ReturnType<typeof prepareV3DirectSubitemSnapshotText>,
+): V3DirectSubitemCandidate["atoms"][number] {
+	const range = mapNormalizedRangeToOriginalRange(preparedText, atom.start, atom.end);
+	return {
+		...atom,
+		start: range.start,
+		end: range.end,
+	};
+}
+
+function mapNormalizedOffsetToOriginalOffset(
+	preparedText: ReturnType<typeof prepareV3DirectSubitemSnapshotText>,
+	offset: number,
+): number {
+	return (
+		preparedText.normalizedOffsetToOriginalOffset[offset] ??
+		offset
+	);
 }
 
 function applyWeakFilePruneMode(

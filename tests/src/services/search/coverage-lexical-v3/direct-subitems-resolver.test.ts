@@ -2,6 +2,11 @@ jest.mock("src/services/search/coverage-lexical-v3/direct-subitems/evidence", ()
 	buildV3DirectSubitemCandidates: jest.fn(),
 	prepareV3DirectSubitemSnapshotText: jest.fn((snapshotText: string) => ({
 		text: snapshotText,
+		normalizedOffsetToOriginalOffset: Array.from(
+			{ length: snapshotText.length + 1 },
+			(_, index) => index,
+		),
+		rawBlocks: [],
 	})),
 }));
 

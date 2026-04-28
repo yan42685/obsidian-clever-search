@@ -1415,6 +1415,10 @@ generation-aligned contracts found during the compact/overlay/snapshot audit:
   resident shard generations, capping `staleDocCount` and `staleSourceBytes` by
   each shard's descriptor totals so compact planning can see sustained
   supersede/delete pressure.
+- direct subitem and hybrid lexical subitem rendering now keep a normalized-to-
+  original offset map, so NFKC-expanded text can still search against normalized
+  content while row/column jumps, snippets, and highlight ranges are emitted in
+  original snapshot coordinates.
 
 Validation completed for this update:
 
@@ -1441,3 +1445,6 @@ Validation completed for this update:
   space.
 - store regression coverage verifies invalidation writes can update descriptor
   stale estimates by shard generation.
+- direct-subitem and hybrid lexical subitem regression coverage verifies
+  normalized matches map back to original offsets when NFKC expands a preceding
+  character.
