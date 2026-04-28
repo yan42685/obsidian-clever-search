@@ -14,6 +14,7 @@ import {
 	type CoverageLexicalV3ShardRegistryRow,
 	MemoryCoverageLexicalV3InvalidationStore,
 	MemoryCoverageLexicalV3ShardRegistryStore,
+	recordShardInvalidationStaleStats,
 } from "src/services/search/coverage-lexical-v3/stores";
 
 class FakeAsyncTable<Row extends Record<string, unknown>, Key extends string | number> {
@@ -144,6 +145,37 @@ describe("coverage lexical v3 production stores", () => {
 
 		expect(await stores.shardRegistry.loadRegistry()).toHaveLength(1);
 		expect(await stores.invalidations.loadInvalidations()).toHaveLength(1);
+	});
+
+	test("records stale descriptor stats for invalidated readable shard generations", async () => {
+		const stores = createMemoryCoverageLexicalV3ProductionStores({
+			registry: [
+				{ ...shard("sealed-1", 1), sourceBytes: 1000, docCount: 4 },
+				{ ...shard("sealed-2", 2), generation: 2, sourceBytes: 500, docCount: 2 },
+				{ ...shard("garbage-1", 3), state: "garbage", sourceBytes: 500, docCount: 2 },
+			],
+		});
+
+		await recordShardInvalidationStaleStats({
+			stores,
+			entries: [
+				invalidation("sealed-1", 1),
+				invalidation("sealed-1", 2),
+				{ ...invalidation("sealed-2", 3), shardGeneration: 2 },
+				invalidation("garbage-1", 4),
+			],
+		});
+
+		const registry = await stores.shardRegistry.loadRegistry();
+		expect(registry.find((entry) => entry.shardId === "sealed-1")).toMatchObject({
+			staleDocCount: 2,
+			staleSourceBytes: 500,
+		});
+		expect(registry.find((entry) => entry.shardId === "sealed-2")).toMatchObject({
+			staleDocCount: 1,
+			staleSourceBytes: 250,
+		});
+		expect(registry.find((entry) => entry.shardId === "garbage-1")?.staleDocCount).toBeUndefined();
 	});
 
 	test("dexie registry adapter saves, sorts, updates, and removes descriptors", async () => {

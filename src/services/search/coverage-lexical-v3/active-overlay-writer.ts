@@ -8,7 +8,10 @@ import {
 	type ActiveOverlayJournalStore,
 } from "./active-overlay-journal";
 import type { ResidentShardDescriptor } from "./shards";
-import type { CoverageLexicalV3ProductionStores } from "./stores";
+import {
+	recordShardInvalidationStaleStats,
+	type CoverageLexicalV3ProductionStores,
+} from "./stores";
 
 export type ActiveOverlayWriteResult = Readonly<{
 	entries: readonly ActiveOverlayJournalEntry[];
@@ -74,6 +77,10 @@ export async function writeActiveOverlayChanges(params: {
 			await params.stores.invalidations.appendInvalidations(invalidations);
 		}
 	}
+	await recordShardInvalidationStaleStats({
+		stores: params.stores,
+		entries: invalidations,
+	});
 	return {
 		entries,
 		invalidationCount: invalidations.length,

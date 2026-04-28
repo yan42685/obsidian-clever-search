@@ -349,7 +349,7 @@ describe("coverage lexical v3 active shard publisher", () => {
 			plannerOptions: { sealSourceBytes: 1024 * 1024, now: 100 },
 		});
 
-		expect(order).toEqual(["artifact", "registry", "invalidations"]);
+		expect(order).toEqual(["artifact", "registry", "invalidations", "registry"]);
 	});
 
 	test("splits oversized append batch into bounded sealed shards plus one active shard", async () => {

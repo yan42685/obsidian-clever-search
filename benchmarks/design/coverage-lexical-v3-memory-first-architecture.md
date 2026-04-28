@@ -1385,6 +1385,9 @@ generation-aligned contracts found during the compact/overlay/snapshot audit:
 - storage GC treats snapshot overlay refs as an integrity floor rather than a
   replay upper bound: it roots the full active-shard journal tail and the
   overlay cold evidence reachable from that tail.
+- storage GC also roots invalidations owned by the kept active-overlay tail, so
+  overlay-local supersede/delete tombstones cannot be collected before snapshot
+  restore replays the tail.
 - snapshot restore now documents that manifest overlay refs are an integrity
   floor for the committed resident base, while restore intentionally replays the
   whole active-shard overlay tail for crash recovery.
@@ -1408,6 +1411,10 @@ generation-aligned contracts found during the compact/overlay/snapshot audit:
 - prefix fanout guard budgeting, filtered-candidate debug summaries, and Han
   surface dominance profiles now key candidates by
   `shardId + shardGeneration + liveDocSlot` rather than bare `liveDocSlot`.
+- invalidation write paths now advance descriptor stale estimates for readable
+  resident shard generations, capping `staleDocCount` and `staleSourceBytes` by
+  each shard's descriptor totals so compact planning can see sustained
+  supersede/delete pressure.
 
 Validation completed for this update:
 
@@ -1420,6 +1427,8 @@ Validation completed for this update:
   active document hydration by requested generation.
 - GC regression coverage now verifies that stale manifest refs do not cause the
   active overlay tail or its overlay cold evidence to be collected.
+- GC regression coverage now verifies that active-overlay tail invalidations are
+  retained alongside the kept tail rows.
 - active-overlay fold regression coverage verifies delete tombstones and
   superseding updates are reflected in the folded active shard.
 - compact maintenance regression coverage verifies fully stale compact inputs
@@ -1430,3 +1439,5 @@ Validation completed for this update:
 - multi-shard fuzzy and prefix-guard regression coverage verifies shard-local
   family slots, body block ids, and live doc slots no longer share a global key
   space.
+- store regression coverage verifies invalidation writes can update descriptor
+  stale estimates by shard generation.

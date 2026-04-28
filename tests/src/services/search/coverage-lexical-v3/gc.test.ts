@@ -81,6 +81,7 @@ describe("coverage lexical v3 storage gc", () => {
 		const invalidations = new MemoryTable(
 			[
 				{ id: "active", shardId: "active-1", shardGeneration: 1, docRef: 1, docGeneration: 1, reason: "superseded", createdAt: 1 },
+				{ id: "active-overlay", shardId: "active-1:overlay", shardGeneration: 1, docRef: 2, docGeneration: 1, reason: "superseded", createdAt: 1 },
 				{ id: "old", shardId: "old-active", shardGeneration: 1, docRef: 1, docGeneration: 1, reason: "deleted", createdAt: 1 },
 			],
 			(row) => row.id!,
@@ -140,6 +141,7 @@ describe("coverage lexical v3 storage gc", () => {
 			"active-1@1:1",
 			"active-1@1:2",
 		]);
+		expect([...invalidations.rows.keys()]).toEqual(["active", "active-overlay"]);
 		expect([...lexicalBodyEvidence.rows.keys()]).toEqual(["active-overlay-evidence"]);
 	});
 });

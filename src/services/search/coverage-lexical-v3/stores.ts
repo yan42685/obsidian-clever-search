@@ -1,5 +1,5 @@
 import type { ShardInvalidationEntry } from "./invalidation";
-import type { ResidentShardDescriptor } from "./shards";
+import { isReadableShardState, type ResidentShardDescriptor } from "./shards";
 
 type AsyncTable<Row, Key> = Readonly<{
 	toArray: () => Promise<Row[]>;
@@ -33,6 +33,53 @@ export type CoverageLexicalV3ProductionStores = Readonly<{
 	shardRegistry: CoverageLexicalV3ShardRegistryStore;
 	invalidations: CoverageLexicalV3InvalidationStore;
 }>;
+
+export async function recordShardInvalidationStaleStats(params: {
+	stores: CoverageLexicalV3ProductionStores;
+	entries: readonly ShardInvalidationEntry[];
+}): Promise<void> {
+	if (params.entries.length === 0) {
+		return;
+	}
+	const invalidationCountByShardKey = new Map<string, number>();
+	for (const entry of params.entries) {
+		const key = shardGenerationKey(entry.shardId, entry.shardGeneration);
+		invalidationCountByShardKey.set(key, (invalidationCountByShardKey.get(key) ?? 0) + 1);
+	}
+	const registry = await params.stores.shardRegistry.loadRegistry();
+	const updatedDescriptors: ResidentShardDescriptor[] = [];
+	for (const descriptor of registry) {
+		if (!isReadableShardState(descriptor.state) || descriptor.docCount <= 0) {
+			continue;
+		}
+		const invalidationCount = invalidationCountByShardKey.get(
+			shardGenerationKey(descriptor.shardId, descriptor.generation),
+		);
+		if (invalidationCount == null || invalidationCount <= 0) {
+			continue;
+		}
+		const currentStaleDocCount = descriptor.staleDocCount ?? 0;
+		const remainingLiveDocBudget = Math.max(0, descriptor.docCount - currentStaleDocCount);
+		const addedStaleDocCount = Math.min(invalidationCount, remainingLiveDocBudget);
+		if (addedStaleDocCount <= 0) {
+			continue;
+		}
+		const estimatedSourceBytesPerDoc = descriptor.sourceBytes / descriptor.docCount;
+		const currentStaleSourceBytes = descriptor.staleSourceBytes ?? 0;
+		updatedDescriptors.push({
+			...descriptor,
+			staleDocCount: Math.min(
+				descriptor.docCount,
+				currentStaleDocCount + addedStaleDocCount,
+			),
+			staleSourceBytes: Math.min(
+				descriptor.sourceBytes,
+				Math.ceil(currentStaleSourceBytes + estimatedSourceBytesPerDoc * addedStaleDocCount),
+			),
+		});
+	}
+	await params.stores.shardRegistry.updateShards(updatedDescriptors);
+}
 
 export class MemoryCoverageLexicalV3ShardRegistryStore
 	implements CoverageLexicalV3ShardRegistryStore
@@ -202,4 +249,8 @@ function toInvalidationRow(entry: ShardInvalidationEntry): CoverageLexicalV3Inva
 		...entry,
 		id: `${entry.shardId}@${entry.shardGeneration}:docref:${entry.docRef}@${entry.docGeneration}`,
 	};
+}
+
+function shardGenerationKey(shardId: string, generation: number): string {
+	return `${shardId}@${generation}`;
 }

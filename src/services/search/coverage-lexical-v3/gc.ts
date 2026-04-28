@@ -138,6 +138,10 @@ export async function runCoverageLexicalV3StorageGc(params: {
 		...readableShardKeys,
 		...overlayShardKeys,
 	]);
+	const rootedInvalidationShardKeys = new Set([
+		...readableShardKeys,
+		...overlayShardKeys,
+	]);
 
 	const orphanArtifactRowsRemoved = await deleteIfBudgetAllows(
 		artifactRows.filter((row) => !rootedArtifactIds.has(row.id)),
@@ -162,7 +166,7 @@ export async function runCoverageLexicalV3StorageGc(params: {
 	);
 	const invalidationsRemoved = await deleteIfBudgetAllows(
 		invalidationRows.filter(
-			(row) => !readableShardKeys.has(shardKeyFromParts(row.shardId, row.shardGeneration)),
+			(row) => !rootedInvalidationShardKeys.has(shardKeyFromParts(row.shardId, row.shardGeneration)),
 		),
 		params.tables.invalidations,
 		(row) => row.id,

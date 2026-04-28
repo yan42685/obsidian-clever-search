@@ -24,7 +24,10 @@ import {
 	DEFAULT_SHARD_SEAL_SOURCE_BYTES,
 	type ResidentShardDescriptor,
 } from "./shards";
-import type { CoverageLexicalV3ProductionStores } from "./stores";
+import {
+	recordShardInvalidationStaleStats,
+	type CoverageLexicalV3ProductionStores,
+} from "./stores";
 
 export type ActiveShardPublishResult = Readonly<{
 	appendTargetShard: ResidentShardDescriptor;
@@ -179,6 +182,10 @@ async function appendInvalidations(
 ): Promise<void> {
 	if (plan.invalidationEntries.length > 0) {
 		await params.stores.invalidations.appendInvalidations(plan.invalidationEntries);
+		await recordShardInvalidationStaleStats({
+			stores: params.stores,
+			entries: plan.invalidationEntries,
+		});
 	}
 }
 
