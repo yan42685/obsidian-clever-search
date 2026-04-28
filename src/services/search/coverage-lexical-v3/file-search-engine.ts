@@ -1276,15 +1276,25 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 
 	async clearPersistedFileIndexArtifact(): Promise<void> {
 		const database = this.getDatabase();
-		await Promise.all([
-			database.db.coverageLexicalV3ShardRegistry.clear(),
-			database.db.coverageLexicalV3Invalidations.clear(),
-			database.db.coverageLexicalV3ResidentShardArtifacts.clear(),
-			database.db.coverageLexicalV3ActiveOverlayJournal.clear(),
-			database.db.coverageLexicalV3SnapshotManifests.clear(),
-			database.db.coverageLexicalV3CompactJobs.clear(),
-			database.db.coverageLexicalV3CompactTempArtifacts.clear(),
-		]);
+		const tables = [
+			database.db.coverageLexicalV3ShardRegistry,
+			database.db.coverageLexicalV3Invalidations,
+			database.db.coverageLexicalV3ResidentShardArtifacts,
+			database.db.coverageLexicalV3ActiveOverlayJournal,
+			database.db.coverageLexicalV3SnapshotManifests,
+			database.db.coverageLexicalV3CompactJobs,
+			database.db.coverageLexicalV3CompactTempArtifacts,
+			database.db.lexicalBodyEvidence,
+			database.db.lexicalHanDocEvidence,
+			database.db.lexicalHanBodyEvidence,
+		] as const;
+		const transaction = database.db.transaction.bind(database.db) as (
+			mode: "rw",
+			...args: [...unknown[], () => Promise<void>]
+		) => Promise<unknown>;
+		await transaction("rw", ...tables, async () => {
+			await Promise.all(tables.map((table) => table.clear()));
+		});
 	}
 
 	beginBatchReindex(): void {

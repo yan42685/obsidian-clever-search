@@ -1340,14 +1340,25 @@ describe("coverage lexical v3 file search engine", () => {
 			"coverageLexicalV3SnapshotManifests",
 			"coverageLexicalV3CompactJobs",
 			"coverageLexicalV3CompactTempArtifacts",
+			"lexicalBodyEvidence",
+			"lexicalHanDocEvidence",
+			"lexicalHanBodyEvidence",
 		];
 		const tables = Object.fromEntries(
 			tableNames.map((tableName) => [tableName, { clear: jest.fn(async () => {}) }]),
 		);
-		(engine as any).getDatabase = () => ({ db: tables });
+		const transaction = jest.fn(
+			async (_mode: "rw", ...args: [...unknown[], () => Promise<void>]) => {
+				const callback = args[args.length - 1] as () => Promise<void>;
+				await callback();
+			},
+		);
+		(engine as any).getDatabase = () => ({ db: { ...tables, transaction } });
 
 		await engine.clearPersistedFileIndexArtifact();
 
+		expect(transaction).toHaveBeenCalledTimes(1);
+		expect(transaction.mock.calls[0]?.length).toBe(tableNames.length + 2);
 		for (const tableName of tableNames) {
 			expect(tables[tableName].clear).toHaveBeenCalledTimes(1);
 		}
