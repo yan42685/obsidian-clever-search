@@ -49,6 +49,11 @@ export type PersistentFileIndexRecoveryPlan = {
 	docsToMove: PersistentFileIndexRecoveryMove[];
 };
 
+export type PersistentFileIndexRecoveryChanges = {
+	deletePaths: string[];
+	upsertDocuments: IndexedDocument[];
+};
+
 export type FileSearchIndexTimingPhaseSummary = {
 	phase: string;
 	totalMs: number;
@@ -98,6 +103,9 @@ export interface FileSearchEngine {
 	planPersistentRecovery?(
 		currentIndexedRefs: readonly BaseIndexedFileRef[],
 	): Promise<PersistentFileIndexRecoveryPlan>;
+	applyPersistentRecoveryChanges?(
+		changes: PersistentFileIndexRecoveryChanges,
+	): Promise<boolean>;
 	persistFileIndexArtifact?(): Promise<void>;
 	clearPersistedFileIndexArtifact?(): Promise<void>;
 	notifyIndexedTextsCommitted?(

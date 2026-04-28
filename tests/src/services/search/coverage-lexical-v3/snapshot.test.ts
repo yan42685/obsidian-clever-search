@@ -238,6 +238,47 @@ describe("coverage lexical v3 multi-shard snapshot", () => {
 		expect(search.recallState.candidateDocs[0]?.shardId).toBe("active-1:overlay");
 	});
 
+	test("restore includes active overlay entries even when committed snapshot refs are stale", async () => {
+		const active = descriptor("active-1", "active", 1);
+		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>((row) => row.id),
+		);
+		await artifactStore.publishResidentShardArtifact({
+			descriptor: active,
+			shard: residentShard("active-1", []),
+			createdAt: 1,
+		});
+		const overlayEntry = {
+			id: buildActiveOverlayJournalEntryId({
+				activeShardId: "active-1",
+				activeShardGeneration: 1,
+				sequence: 1,
+			}),
+			sequence: 1,
+			activeShardId: "active-1",
+			activeShardGeneration: 1,
+			operation: "append" as const,
+			document: doc("overlay.md", "crash recovered overlay", 2),
+			previousVersion: null,
+			sourceBytes: 23,
+			createdAt: 1,
+		};
+		const engine = new CoverageLexicalV3Engine();
+
+		const result = await restoreCoverageLexicalV3Snapshot({
+			snapshotStore: new MemoryCoverageLexicalV3SnapshotStore([
+				manifest({ snapshotId: "snapshot-before-overlay", status: "committed", createdAt: 1, shards: [active] }),
+			]),
+			engine,
+			stores: createMemoryCoverageLexicalV3ProductionStores({ registry: [active] }),
+			residentShardArtifactLoader: artifactStore,
+			overlayJournalStore: new MemoryActiveOverlayJournalStore([overlayEntry]),
+		});
+
+		expect(result.restored).toBe(true);
+		expect(engine.search("crash recovered overlay").rankedCandidates[0]?.path).toBe("overlay.md");
+	});
+
 	test("missing referenced artifact or overlay entry forces rebuild fallback", async () => {
 		const active = descriptor("active-1", "active", 1);
 		const baseManifest = manifest({ snapshotId: "snapshot-1", status: "committed", createdAt: 1, shards: [active] });
@@ -300,10 +341,9 @@ describe("coverage lexical v3 multi-shard snapshot", () => {
 
 		const result = await healCoverageLexicalV3SnapshotState({ snapshotStore });
 
-		expect(result).toEqual({ removedGarbageSnapshots: 2, markedOldCommittedGarbage: 1 });
+		expect(result).toEqual({ removedGarbageSnapshots: 3, markedOldCommittedGarbage: 1 });
 		expect((await snapshotStore.loadManifests()).map((item) => item.snapshotId)).toEqual([
 			"new",
-			"building",
 		]);
 	});
 });

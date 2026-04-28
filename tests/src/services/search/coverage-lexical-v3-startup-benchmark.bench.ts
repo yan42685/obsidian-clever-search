@@ -158,6 +158,7 @@ describe("coverage lexical v3 startup snapshot benchmark", () => {
 		const snapshotWriteStartedAt = performance.now();
 		await source.persistFileIndexArtifact();
 		const snapshotWriteMs = performance.now() - snapshotWriteStartedAt;
+		const maintenanceStats = source.getLastMaintenanceStats?.() ?? null;
 		const restored = new CoverageLexicalV3FileSearchEngine();
 		(restored as any).getPersistentStores = () => persistentStores;
 		const hydrateStartedAt = performance.now();
@@ -185,6 +186,19 @@ describe("coverage lexical v3 startup snapshot benchmark", () => {
 						coldEvidenceFlushCount: rebuildStats?.coldEvidenceFlushCount ?? 0,
 						maxColdEvidenceChunkSize:
 							rebuildStats?.maxColdEvidenceChunkSize ?? 0,
+					},
+					maintenance: {
+						gcMs: round(maintenanceStats?.gcMs ?? 0),
+						orphanArtifactRowsRemoved:
+							maintenanceStats?.orphanArtifactRowsRemoved ?? 0,
+						overlayEntriesRemoved: maintenanceStats?.overlayEntriesRemoved ?? 0,
+						invalidationsRemoved: maintenanceStats?.invalidationsRemoved ?? 0,
+						compactTempArtifactsRemoved:
+							maintenanceStats?.compactTempArtifactsRemoved ?? 0,
+						foldMs: round(maintenanceStats?.foldMs ?? 0),
+						compactMs: round(maintenanceStats?.compactMs ?? 0),
+						compactJobsHealed: maintenanceStats?.compactJobsHealed ?? 0,
+						compactJobsStarted: maintenanceStats?.compactJobsStarted ?? 0,
 					},
 					memory: {
 						heapUsedBytes: rebuildMemory.heapUsed,

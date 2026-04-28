@@ -10,7 +10,7 @@ import type { CoverageLexicalV3SearchResult } from "src/services/search/coverage
 import { EMPTY_RESIDENT_FUZZY_RESCUE_INDEX } from "src/services/search/coverage-lexical-v3/layout/fuzzy-rescue";
 import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
 import { buildBlockPositionLane } from "src/services/search/coverage-lexical-v3/layout/position-lanes";
-import { buildStableWitnessMatchKey } from "src/services/search/coverage-lexical-v3/build";
+import { buildResidentHotBaseArtifacts, buildStableWitnessMatchKey } from "src/services/search/coverage-lexical-v3/build";
 import { createDexieCoverageLexicalV3ResidentShardArtifactStore } from "src/services/search/coverage-lexical-v3/artifact-loader";
 import { MemoryActiveOverlayJournalStore } from "src/services/search/coverage-lexical-v3/active-overlay-journal";
 import { MemoryCoverageLexicalV3SnapshotStore } from "src/services/search/coverage-lexical-v3/snapshot";
@@ -1274,6 +1274,216 @@ describe("coverage lexical v3 file search engine", () => {
 			status: "needs_heal",
 			docsToUpdate: ["notes/restored.md"],
 		});
+	});
+
+	test("clears all persisted V3 bootstrap and maintenance stores on reset", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		const tableNames = [
+			"coverageLexicalV3ShardRegistry",
+			"coverageLexicalV3Invalidations",
+			"coverageLexicalV3ResidentShardArtifacts",
+			"coverageLexicalV3ActiveOverlayJournal",
+			"coverageLexicalV3SnapshotManifests",
+			"coverageLexicalV3CompactJobs",
+			"coverageLexicalV3CompactTempArtifacts",
+		];
+		const tables = Object.fromEntries(
+			tableNames.map((tableName) => [tableName, { clear: jest.fn(async () => {}) }]),
+		);
+		(engine as any).getDatabase = () => ({ db: tables });
+
+		await engine.clearPersistedFileIndexArtifact();
+
+		for (const tableName of tableNames) {
+			expect(tables[tableName].clear).toHaveBeenCalledTimes(1);
+		}
+	});
+
+	test("preserves restored shard artifact owners when persisting snapshot artifacts", async () => {
+		const productionStores = createMemoryCoverageLexicalV3ProductionStores();
+		const artifactTable = new FakeArtifactTable((row) => row.id);
+		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			artifactTable,
+		);
+		const persistentStores = {
+			productionStores,
+			artifactStore,
+			overlayJournalStore: new MemoryActiveOverlayJournalStore(),
+			snapshotStore: new MemoryCoverageLexicalV3SnapshotStore(),
+		};
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		(engine as any).getPersistentStores = () => persistentStores;
+		const residentArtifacts = buildResidentHotBaseArtifacts([
+			createDocument({
+				docRef: 37,
+				path: "notes/custom-owner.md",
+				basename: "custom-owner",
+				folder: "notes",
+				content: "custom owner target",
+				generation: 2,
+			}),
+		]);
+		(engine as any).engine.loadResidentIndexView({
+			version: 1,
+			shards: [
+				{
+					shardId: "active-1",
+					generation: 2,
+					base: {
+						...residentArtifacts.base,
+						fuzzyRescue: residentArtifacts.fuzzyRescueIndex,
+					},
+				},
+			],
+			shardRegistry: [
+				{
+					shardId: "active-1",
+					generation: 2,
+					state: "active",
+					sourceBytes: 123,
+					docCount: 1,
+					createdOrder: 9,
+					artifactOwner: "custom-owner",
+				},
+			],
+		});
+
+		await engine.persistFileIndexArtifact();
+
+		expect(artifactTable.rows.has("custom-owner@2")).toBe(true);
+		expect(artifactTable.rows.has("active-1@2")).toBe(false);
+		await expect(productionStores.shardRegistry.loadRegistry()).resolves.toEqual([
+			expect.objectContaining({
+				shardId: "active-1",
+				generation: 2,
+				state: "active",
+				createdOrder: 9,
+				artifactOwner: "custom-owner",
+			}),
+		]);
+	});
+
+	test("applies persistent recovery updates through V3 overlay without resident rebuild", async () => {
+		const productionStores = createMemoryCoverageLexicalV3ProductionStores();
+		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable((row) => row.id),
+		);
+		const overlayJournalStore = new MemoryActiveOverlayJournalStore();
+		const snapshotStore = new MemoryCoverageLexicalV3SnapshotStore();
+		const persistentStores = {
+			productionStores,
+			artifactStore,
+			overlayJournalStore,
+			snapshotStore,
+		};
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		(engine as any).getPersistentStores = () => persistentStores;
+		const persistedBodyEvidence = new Map<string, any>();
+		const persistedHanDocEvidence = new Map<string, any>();
+		const persistedHanBodyEvidence = new Map<string, any>();
+		const evidenceSnapshotStore = {
+			readIndexedTexts: jest.fn(async () => new Map<string, string>()),
+			readIndexedMetadata: jest.fn(async () => new Map()),
+			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
+			publishLexicalBodyEvidence: jest.fn(async (rows: readonly any[]) => {
+				for (const row of rows) {
+					persistedBodyEvidence.set(row.id, row);
+				}
+			}),
+			readLexicalBodyEvidenceForBlocks: jest.fn(async () => persistedBodyEvidence),
+			publishLexicalHanDocEvidence: jest.fn(async (rows: readonly any[]) => {
+				for (const row of rows) {
+					persistedHanDocEvidence.set(row.id, row);
+				}
+			}),
+			readLexicalHanDocEvidenceForDocs: jest.fn(async () => persistedHanDocEvidence),
+			publishLexicalHanBodyEvidence: jest.fn(async (rows: readonly any[]) => {
+				for (const row of rows) {
+					persistedHanBodyEvidence.set(row.id, row);
+				}
+			}),
+			readLexicalHanBodyEvidenceForBlocks: jest.fn(async () => persistedHanBodyEvidence),
+			readLexicalFuzzyRescue: jest.fn(async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX),
+		};
+		(engine as any).getFileSnapshotStore = () => evidenceSnapshotStore;
+		await engine.reIndexAll([
+			createDocument({
+				docRef: 17,
+				path: "notes/healed.md",
+				basename: "healed",
+				folder: "notes",
+				content: "ancientresidentonly",
+				generation: 1,
+			}),
+		]);
+		(engine as any).rebuildResidentBase = jest.fn(async () => {
+			throw new Error("persistent recovery should not rebuild resident base");
+		});
+
+		await expect(
+			engine.applyPersistentRecoveryChanges({
+				deletePaths: [],
+				upsertDocuments: [
+					createDocument({
+						docRef: 17,
+						path: "notes/healed.md",
+						basename: "healed",
+						folder: "notes",
+						content: "brandnewoverlayonly",
+						generation: 2,
+					}),
+				],
+			}),
+		).resolves.toBe(true);
+
+		expect((engine as any).rebuildResidentBase).not.toHaveBeenCalled();
+		await expect(productionStores.invalidations.loadInvalidations()).resolves.toEqual([
+			expect.objectContaining({
+				shardId: "base-0",
+				shardGeneration: 1,
+				docRef: 17,
+				docGeneration: 1,
+			}),
+		]);
+		await expect(
+			overlayJournalStore.loadActiveOverlayEntries({
+				activeShardId: "base-0",
+				activeShardGeneration: 1,
+			}),
+		).resolves.toHaveLength(1);
+		const oldResults = await engine.searchFiles({
+			queryText: "ancientresidentonly",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+		expect(oldResults.map((result) => result.path)).not.toContain("notes/healed.md");
+		const newResults = await engine.searchFiles({
+			queryText: "brandnewoverlayonly",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+		expect(newResults[0]?.path).toBe("notes/healed.md");
+		expect(newResults[0]?.snapshotGeneration).toBe(2);
+
+		await engine.persistFileIndexArtifact();
+		const restoredEngine = new CoverageLexicalV3FileSearchEngine();
+		(restoredEngine as any).getPersistentStores = () => persistentStores;
+		(restoredEngine as any).getFileSnapshotStore = () => evidenceSnapshotStore;
+		await expect(restoredEngine.restorePersistedFileIndex()).resolves.toBe(true);
+		const restoredResults = await restoredEngine.searchFiles({
+			queryText: "brandnewoverlayonly",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+		expect(restoredResults[0]?.path).toBe("notes/healed.md");
+		await expect(
+			restoredEngine.planPersistentRecovery([
+				{ docRef: 17, path: "notes/healed.md", generation: 2 },
+			]),
+		).resolves.toMatchObject({ status: "up_to_date" });
 	});
 
 	test("releases pending content after indexed snapshot commit and can rebuild from snapshots", async () => {

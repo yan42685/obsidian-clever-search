@@ -30,6 +30,7 @@ import { container, singleton } from "tsyringe";
 import type {
 	FileSearchEngine,
 	FileSearchRequest,
+	PersistentFileIndexRecoveryChanges,
 	PersistentFileIndexRecoveryPlan,
 	SerializedFileSearchIndex,
 } from "../file-search-engine";
@@ -38,7 +39,28 @@ import {
 	type CoverageLexicalV3ResidentShardArtifactStore,
 } from "./artifact-loader";
 import { bootstrapCoverageLexicalV3Engine } from "./bootstrap";
-import { createDexieActiveOverlayJournalStore, type ActiveOverlayJournalStore } from "./active-overlay-journal";
+import {
+	buildOverlayResidentArtifacts,
+	createAtomicDexieActiveOverlayJournalStore,
+	type ActiveOverlayJournalStore,
+} from "./active-overlay-journal";
+import { writeActiveOverlayChanges } from "./active-overlay-writer";
+import type { ExistingShardDocVersion } from "./append-planner";
+import {
+	DexieCompactJobManifestStore,
+	DexieCompactTempArtifactStore,
+	type CompactJobManifestStore,
+	type CompactTempArtifactStore,
+} from "./compact";
+import {
+	runCoverageLexicalV3StorageGc,
+	type CoverageLexicalV3StorageGcResult,
+	type CoverageLexicalV3StorageGcTables,
+} from "./gc";
+import {
+	runCoverageLexicalV3Maintenance,
+	type CoverageLexicalV3MaintenanceResult,
+} from "./maintenance";
 import { buildV3MetadataFieldHighlightRanges } from "./metadata-highlights";
 import {
 	CoverageLexicalV3Engine,
@@ -93,6 +115,7 @@ import {
 } from "./snapshot";
 import {
 	buildDefaultShardDescriptor,
+	isReadableShardState,
 	type ResidentShardDescriptor,
 } from "./shards";
 
@@ -125,6 +148,8 @@ type IndexedDocumentView = Readonly<{
 	folder: string;
 }>;
 
+type CurrentDocumentVersion = ExistingShardDocVersion & Readonly<{ path: string }>;
+
 type PendingDocumentContent = Readonly<{
 	generation?: number;
 	text: string;
@@ -142,6 +167,9 @@ type CoverageLexicalV3PersistentStores = Readonly<{
 	artifactStore: CoverageLexicalV3ResidentShardArtifactStore;
 	overlayJournalStore: ActiveOverlayJournalStore;
 	snapshotStore: CoverageLexicalV3SnapshotStore;
+	compactJobStore?: CompactJobManifestStore;
+	compactTempArtifactStore?: CompactTempArtifactStore;
+	storageGcTables?: CoverageLexicalV3StorageGcTables;
 }>;
 
 export type CoverageLexicalV3LastRebuildStats = Readonly<{
@@ -152,6 +180,10 @@ export type CoverageLexicalV3LastRebuildStats = Readonly<{
 	pass2Ms: number;
 	mergeMs: number;
 }>;
+
+export type CoverageLexicalV3LastMaintenanceStats =
+	CoverageLexicalV3MaintenanceResult &
+	Pick<CoverageLexicalV3StorageGcResult, "snapshotManifestsRemoved" | "coldEvidenceRowsRemoved">;
 
 type HydratedRankingEvidence = Readonly<{
 	hydratedEvidenceByCandidateKey: ReadonlyMap<string, CandidateEvidencePackage>;
@@ -293,6 +325,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	private batchReindexing = false;
 	private pendingResidentRebuild: Promise<void> | null = null;
 	private lastRebuildStats: CoverageLexicalV3LastRebuildStats | null = null;
+	private lastMaintenanceStats: CoverageLexicalV3LastMaintenanceStats | null = null;
 	private benchmarkPhaseTimingState: CoverageLexicalV3BenchmarkPhaseTimingState | null =
 		null;
 
@@ -319,6 +352,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		this.pendingDocumentMetadataByPath.clear();
 		this.pendingResidentRebuild = null;
 		this.lastRebuildStats = null;
+		this.lastMaintenanceStats = null;
 		this.engine = new CoverageLexicalV3Engine();
 		if (this.benchmarkPhaseTimingState != null) {
 			this.engine.setBenchmarkPhaseTrackingEnabled(true);
@@ -363,6 +397,17 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		oldPath: string,
 		document: IndexedDocument,
 	): Promise<boolean> {
+		const overlayApplied = await this.applyOverlayRecoveryChanges({
+			deletePaths: [oldPath],
+			upsertDocuments: [document],
+		});
+		if (overlayApplied) {
+			this.pendingDocumentContentsByPath.delete(oldPath);
+			this.pendingDocumentMetadataByPath.delete(oldPath);
+			this.documentViewsByPath.delete(oldPath);
+			this.storeIndexedDocument(document);
+			return true;
+		}
 		if (oldPath !== document.path) {
 			this.documentViewsByPath.delete(oldPath);
 			this.pendingDocumentContentsByPath.delete(oldPath);
@@ -780,6 +825,10 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		return this.lastRebuildStats;
 	}
 
+	getLastMaintenanceStats(): CoverageLexicalV3LastMaintenanceStats | null {
+		return this.lastMaintenanceStats;
+	}
+
 	supportsPersistentFileIndex(): boolean {
 		return true;
 	}
@@ -806,6 +855,10 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		this.pendingDocumentContentsByPath.clear();
 		this.pendingDocumentMetadataByPath.clear();
 		this.loadDocumentViewsFromResidentIndex();
+		const activeShard = this.getActiveBaseShardDescriptor();
+		if (activeShard != null) {
+			await this.reloadOverlayRuntimeState(persistentStores, activeShard);
+		}
 		return this.documentViewsByPath.size > 0;
 	}
 
@@ -870,6 +923,211 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		};
 	}
 
+	async applyPersistentRecoveryChanges(
+		changes: PersistentFileIndexRecoveryChanges,
+	): Promise<boolean> {
+		if (
+			changes.deletePaths.length === 0 &&
+			changes.upsertDocuments.length === 0
+		) {
+			return true;
+		}
+		const applied = await this.applyOverlayRecoveryChanges(changes);
+		if (!applied) {
+			for (const path of changes.deletePaths) {
+				this.pendingDocumentContentsByPath.delete(path);
+				this.pendingDocumentMetadataByPath.delete(path);
+				this.documentViewsByPath.delete(path);
+			}
+			for (const document of changes.upsertDocuments) {
+				this.storeIndexedDocument(document);
+			}
+			await this.rebuildResidentBase();
+		}
+		return true;
+	}
+
+	private async applyOverlayRecoveryChanges(
+		changes: PersistentFileIndexRecoveryChanges,
+	): Promise<boolean> {
+		const activeShard = this.getActiveBaseShardDescriptor();
+		if (activeShard == null) {
+			return false;
+		}
+		const previousVersionByPath = this.collectCurrentDocumentVersionsByPath();
+		const overlayChanges = [
+			...changes.deletePaths.flatMap((path) => {
+				const previousVersion = previousVersionByPath.get(path);
+				return previousVersion == null
+					? []
+					: [
+							{
+								document: {
+									path,
+									basename: basenameOfPath(path),
+									folder: folderOfPath(path),
+									docRef: previousVersion.docRef,
+									generation: previousVersion.docGeneration,
+								},
+								deleted: true,
+								previousVersion,
+							},
+					  ];
+			}),
+			...changes.upsertDocuments.map((document) => {
+				const previousVersion =
+					previousVersionByPath.get(document.path) ??
+					(document.docRef == null
+						? null
+						: this.findCurrentDocumentVersionByDocRef(document.docRef));
+				return {
+					document,
+					previousVersion,
+				};
+			}),
+		];
+		if (overlayChanges.length === 0) {
+			return true;
+		}
+		const persistentStores = this.getPersistentStores();
+		const sequenceStart =
+			(await this.getNextOverlaySequence(persistentStores.overlayJournalStore, activeShard));
+		await writeActiveOverlayChanges({
+			stores: persistentStores.productionStores,
+			overlayJournalStore: persistentStores.overlayJournalStore,
+			activeShard,
+			changes: overlayChanges,
+			sequenceStart,
+		});
+		await this.reloadOverlayRuntimeState(persistentStores, activeShard);
+		for (const path of changes.deletePaths) {
+			this.pendingDocumentContentsByPath.delete(path);
+			this.pendingDocumentMetadataByPath.delete(path);
+			this.documentViewsByPath.delete(path);
+		}
+		for (const document of changes.upsertDocuments) {
+			this.storeIndexedDocument(document);
+		}
+		return true;
+	}
+
+	private async getNextOverlaySequence(
+		overlayJournalStore: ActiveOverlayJournalStore,
+		activeShard: ResidentShardDescriptor,
+	): Promise<number> {
+		const entries = await overlayJournalStore.loadActiveOverlayEntries({
+			activeShardId: activeShard.shardId,
+			activeShardGeneration: activeShard.generation,
+		});
+		return entries.reduce((max, entry) => Math.max(max, entry.sequence), 0) + 1;
+	}
+
+	private async reloadOverlayRuntimeState(
+		persistentStores: CoverageLexicalV3PersistentStores,
+		activeShard: ResidentShardDescriptor,
+	): Promise<void> {
+		this.engine.loadShardInvalidations(
+			await persistentStores.productionStores.invalidations.loadInvalidations(),
+		);
+		const entries = await persistentStores.overlayJournalStore.loadActiveOverlayEntries({
+			activeShardId: activeShard.shardId,
+			activeShardGeneration: activeShard.generation,
+		});
+		const overlayArtifacts = buildOverlayResidentArtifacts({
+			activeShardId: activeShard.shardId,
+			activeShardGeneration: activeShard.generation,
+			entries,
+			tokenizeDocumentText: (text) => this.getDocumentTerms(text),
+		});
+		const snapshotStore = this.getFileSnapshotStore();
+		await Promise.all([
+			overlayArtifacts.bodyEvidenceRows.length > 0
+				? snapshotStore.publishLexicalBodyEvidence?.(
+						overlayArtifacts.bodyEvidenceRows,
+					) ?? Promise.resolve()
+				: Promise.resolve(),
+			overlayArtifacts.hanDocEvidenceRows.length > 0
+				? snapshotStore.publishLexicalHanDocEvidence?.(
+						overlayArtifacts.hanDocEvidenceRows,
+					) ?? Promise.resolve()
+				: Promise.resolve(),
+			overlayArtifacts.hanBodyEvidenceRows.length > 0
+				? snapshotStore.publishLexicalHanBodyEvidence?.(
+						overlayArtifacts.hanBodyEvidenceRows,
+					) ?? Promise.resolve()
+				: Promise.resolve(),
+		]);
+		this.engine.loadOverlayResidentShard(overlayArtifacts.shard);
+	}
+
+	private getActiveBaseShardDescriptor(): ResidentShardDescriptor | null {
+		const indexView = this.engine.getResidentIndexView();
+		if (indexView == null) {
+			return null;
+		}
+		const registryActive = indexView.shardRegistry
+			?.filter((descriptor) => isReadableShardState(descriptor.state))
+			.find((descriptor) => descriptor.state === "active");
+		if (registryActive != null) {
+			return registryActive;
+		}
+		const baseShards = indexView.shards.filter(
+			(shard) => !shard.shardId.endsWith(":overlay"),
+		);
+		const activeShard = baseShards[baseShards.length - 1];
+		if (activeShard == null) {
+			return null;
+		}
+		const descriptors = buildShardDescriptorsForIndexView(baseShards);
+		return (
+			descriptors.find((descriptor) => descriptor.shardId === activeShard.shardId) ??
+			null
+		);
+	}
+
+	private collectCurrentDocumentVersionsByPath(): Map<string, CurrentDocumentVersion> {
+		const indexView = this.engine.getResidentIndexView();
+		const versionsByPath = new Map<string, CurrentDocumentVersion>();
+		if (indexView == null) {
+			return versionsByPath;
+		}
+		for (const shard of indexView.shards) {
+			const shardKey = {
+				shardId: shard.shardId,
+				shardGeneration: shard.generation,
+			};
+			for (let docId = 0; docId < shard.base.docTable.docCount; docId += 1) {
+				const path = getDocPath(shard.base, docId);
+				if (path.length === 0) {
+					continue;
+				}
+				const docRef = shard.base.docTable.docRefsByDocId[docId];
+				const docGeneration = shard.base.docTable.generationByDocId[docId];
+				if (!Number.isFinite(docRef) || docRef <= 0) {
+					continue;
+				}
+				versionsByPath.set(path, {
+					...shardKey,
+					path,
+					docRef,
+					docGeneration: Number.isFinite(docGeneration) ? docGeneration : 0,
+				});
+			}
+		}
+		return versionsByPath;
+	}
+
+	private findCurrentDocumentVersionByDocRef(
+		docRef: number,
+	): CurrentDocumentVersion | null {
+		for (const version of this.collectCurrentDocumentVersionsByPath().values()) {
+			if (version.docRef === docRef) {
+				return version;
+			}
+		}
+		return null;
+	}
+
 	async persistFileIndexArtifact(): Promise<void> {
 		const indexView = this.engine.getResidentIndexView();
 		if (indexView == null || indexView.shards.length === 0) {
@@ -877,7 +1135,10 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			return;
 		}
 		const persistentStores = this.getPersistentStores();
-		const descriptors = buildShardDescriptorsForIndexView(indexView.shards);
+		const descriptors = buildShardDescriptorsForIndexView(
+			indexView.shards,
+			indexView.shardRegistry,
+		);
 		for (const shard of indexView.shards.filter((item) => !item.shardId.endsWith(":overlay"))) {
 			const descriptor = descriptors.find(
 				(item) => item.shardId === shard.shardId && item.generation === shard.generation,
@@ -900,6 +1161,98 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		await healCoverageLexicalV3SnapshotState({
 			snapshotStore: persistentStores.snapshotStore,
 		});
+		await this.runPostSnapshotMaintenance(persistentStores);
+	}
+
+	private async runPostSnapshotMaintenance(
+		persistentStores: CoverageLexicalV3PersistentStores,
+	): Promise<void> {
+		if (
+			persistentStores.storageGcTables == null &&
+			persistentStores.compactJobStore == null &&
+			persistentStores.compactTempArtifactStore == null
+		) {
+			this.lastMaintenanceStats = {
+				stateChanged: false,
+				gcMs: 0,
+				orphanArtifactRowsRemoved: 0,
+				overlayEntriesRemoved: 0,
+				invalidationsRemoved: 0,
+				compactTempArtifactsRemoved: 0,
+				foldMs: 0,
+				compactMs: 0,
+				compactJobsHealed: 0,
+				compactJobsStarted: 0,
+				snapshotManifestsRemoved: 0,
+				coldEvidenceRowsRemoved: 0,
+			};
+			return;
+		}
+		const coldEvidencePublisher = this.getColdEvidencePublisher();
+		const maintenanceResult = await runCoverageLexicalV3Maintenance({
+			stores: persistentStores.productionStores,
+			residentShardArtifactStore: persistentStores.artifactStore,
+			overlayJournalStore: persistentStores.overlayJournalStore,
+			compactJobStore: persistentStores.compactJobStore,
+			compactTempArtifactStore: persistentStores.compactTempArtifactStore,
+			indexedSnapshotReader: this.getFileSnapshotStore(),
+			coldEvidencePublisher,
+			tokenizeDocumentText: (text) => this.getDocumentTerms(text),
+		});
+		let snapshotManifestsRemoved = 0;
+		let coldEvidenceRowsRemoved = 0;
+		let gcResult: CoverageLexicalV3StorageGcResult | null = null;
+		if (maintenanceResult.stateChanged) {
+			await writeCoverageLexicalV3Snapshot({
+				snapshotStore: persistentStores.snapshotStore,
+				stores: persistentStores.productionStores,
+				overlayJournalStore: persistentStores.overlayJournalStore,
+			});
+			await healCoverageLexicalV3SnapshotState({
+				snapshotStore: persistentStores.snapshotStore,
+			});
+		}
+		if (persistentStores.storageGcTables != null) {
+			gcResult = await runCoverageLexicalV3StorageGc({
+				tables: persistentStores.storageGcTables,
+				maxRowsToDelete: 256,
+			});
+			snapshotManifestsRemoved = gcResult.snapshotManifestsRemoved;
+			coldEvidenceRowsRemoved = gcResult.coldEvidenceRowsRemoved;
+		}
+		this.lastMaintenanceStats = {
+			...maintenanceResult,
+			gcMs: gcResult?.gcMs ?? maintenanceResult.gcMs,
+			orphanArtifactRowsRemoved:
+				gcResult?.orphanArtifactRowsRemoved ??
+				maintenanceResult.orphanArtifactRowsRemoved,
+			overlayEntriesRemoved:
+				gcResult?.overlayEntriesRemoved ?? maintenanceResult.overlayEntriesRemoved,
+			invalidationsRemoved:
+				gcResult?.invalidationsRemoved ?? maintenanceResult.invalidationsRemoved,
+			compactTempArtifactsRemoved:
+				gcResult?.compactTempArtifactsRemoved ??
+				maintenanceResult.compactTempArtifactsRemoved,
+			snapshotManifestsRemoved,
+			coldEvidenceRowsRemoved,
+		};
+	}
+
+	private getColdEvidencePublisher() {
+		const snapshotStore = this.getFileSnapshotStore();
+		return {
+			publishBodyEvidence: async (rows) => {
+				await snapshotStore.publishLexicalBodyEvidence?.(rows);
+			},
+			publishHanDocEvidence: async (rows) => {
+				await snapshotStore.publishLexicalHanDocEvidence?.(rows);
+			},
+			publishHanBodyEvidence: async (rows) => {
+				await snapshotStore.publishLexicalHanBodyEvidence?.(rows);
+			},
+		} satisfies NonNullable<
+			Parameters<typeof runCoverageLexicalV3Maintenance>[0]["coldEvidencePublisher"]
+		>;
 	}
 
 	async clearPersistedFileIndexArtifact(): Promise<void> {
@@ -910,6 +1263,8 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			database.db.coverageLexicalV3ResidentShardArtifacts.clear(),
 			database.db.coverageLexicalV3ActiveOverlayJournal.clear(),
 			database.db.coverageLexicalV3SnapshotManifests.clear(),
+			database.db.coverageLexicalV3CompactJobs.clear(),
+			database.db.coverageLexicalV3CompactTempArtifacts.clear(),
 		]);
 	}
 
@@ -995,15 +1350,16 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			pass2Ms: artifacts.pass2Ms,
 			mergeMs: artifacts.mergeMs,
 		};
+		const shard = {
+			shardId: DEFAULT_RESIDENT_SHARD_ID,
+			generation: DEFAULT_RESIDENT_SHARD_GENERATION,
+			base: artifacts.base,
+		};
+		const shardRegistry = buildShardDescriptorsForIndexView([shard]);
 		this.engine.loadResidentIndexView({
 			version: 1,
-			shards: [
-				{
-					shardId: DEFAULT_RESIDENT_SHARD_ID,
-					generation: DEFAULT_RESIDENT_SHARD_GENERATION,
-					base: artifacts.base,
-				},
-			],
+			shards: [shard],
+			shardRegistry,
 		});
 		this.engine.setFuzzyRescueIndex(artifacts.fuzzyRescueIndex);
 		await snapshotStore.publishLexicalFuzzyRescue?.(
@@ -1295,12 +1651,34 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			artifactStore: createDexieCoverageLexicalV3ResidentShardArtifactStore(
 				database.db.coverageLexicalV3ResidentShardArtifacts,
 			),
-			overlayJournalStore: createDexieActiveOverlayJournalStore(
-				database.db.coverageLexicalV3ActiveOverlayJournal,
-			),
+			overlayJournalStore: createAtomicDexieActiveOverlayJournalStore({
+				overlayTable: database.db.coverageLexicalV3ActiveOverlayJournal,
+				invalidationTable: database.db.coverageLexicalV3Invalidations,
+				transactionScope: database.db as unknown as Parameters<
+					typeof createAtomicDexieActiveOverlayJournalStore
+				>[0]["transactionScope"],
+			}),
 			snapshotStore: createDexieCoverageLexicalV3SnapshotStore(
 				database.db.coverageLexicalV3SnapshotManifests,
 			),
+			compactJobStore: new DexieCompactJobManifestStore(
+				database.db.coverageLexicalV3CompactJobs,
+			),
+			compactTempArtifactStore: new DexieCompactTempArtifactStore(
+				database.db.coverageLexicalV3CompactTempArtifacts,
+			),
+			storageGcTables: {
+				residentShardArtifacts: database.db.coverageLexicalV3ResidentShardArtifacts,
+				snapshotManifests: database.db.coverageLexicalV3SnapshotManifests,
+				shardRegistry: database.db.coverageLexicalV3ShardRegistry,
+				activeOverlayJournal: database.db.coverageLexicalV3ActiveOverlayJournal,
+				invalidations: database.db.coverageLexicalV3Invalidations,
+				compactJobs: database.db.coverageLexicalV3CompactJobs,
+				compactTempArtifacts: database.db.coverageLexicalV3CompactTempArtifacts,
+				lexicalBodyEvidence: database.db.lexicalBodyEvidence,
+				lexicalHanDocEvidence: database.db.lexicalHanDocEvidence,
+				lexicalHanBodyEvidence: database.db.lexicalHanBodyEvidence,
+			},
 		};
 	}
 
@@ -1501,19 +1879,43 @@ function emptyPersistentRecoveryPlan(
 
 function buildShardDescriptorsForIndexView(
 	shards: readonly ResidentShard[],
+	existingRegistry: readonly ResidentShardDescriptor[] = [],
 ): ResidentShardDescriptor[] {
 	const baseShards = shards.filter((shard) => !shard.shardId.endsWith(":overlay"));
 	return baseShards.map((shard, index) =>
-		buildDefaultShardDescriptor({
-			shardId: shard.shardId,
-			generation: shard.generation,
-			state: index === baseShards.length - 1 ? "active" : "sealed",
-			sourceBytes: estimateResidentShardSourceBytes(shard.base),
-			docCount: shard.base.docTable.docCount,
-			createdOrder: index,
-			artifactOwner: shard.shardId,
-		}),
+		mergeExistingShardDescriptor(
+			buildDefaultShardDescriptor({
+				shardId: shard.shardId,
+				generation: shard.generation,
+				state: index === baseShards.length - 1 ? "active" : "sealed",
+				sourceBytes: estimateResidentShardSourceBytes(shard.base),
+				docCount: shard.base.docTable.docCount,
+				createdOrder: index,
+				artifactOwner: shard.shardId,
+			}),
+			existingRegistry,
+		),
 	);
+}
+
+function mergeExistingShardDescriptor(
+	descriptor: ResidentShardDescriptor,
+	existingRegistry: readonly ResidentShardDescriptor[],
+): ResidentShardDescriptor {
+	const existing = existingRegistry.find(
+		(candidate) =>
+			candidate.shardId === descriptor.shardId &&
+			candidate.generation === descriptor.generation,
+	);
+	if (existing == null) {
+		return descriptor;
+	}
+	return {
+		...descriptor,
+		state: existing.state,
+		createdOrder: existing.createdOrder,
+		artifactOwner: existing.artifactOwner,
+	};
 }
 
 function estimateResidentShardSourceBytes(base: ResidentBase): number {

@@ -1,4 +1,5 @@
 import type { CoverageLexicalV3ResidentShardArtifactStore } from "../artifact-loader";
+import type { ActiveShardColdEvidencePublisher } from "../active-shard-publisher";
 import type { ResidentShardDescriptor } from "../shards";
 import type { CoverageLexicalV3ProductionStores } from "../stores";
 import { planCompactMaintenanceHeal } from "./heal";
@@ -18,6 +19,7 @@ export async function commitCompactTempArtifact(params: {
 	tempArtifactStore: CompactTempArtifactStore;
 	job: CompactJobManifest;
 	outputDescriptor: ResidentShardDescriptor;
+	coldEvidencePublisher?: ActiveShardColdEvidencePublisher;
 	now?: number;
 }): Promise<CompactCommitResult> {
 	const startedAt = Date.now();
@@ -27,6 +29,7 @@ export async function commitCompactTempArtifact(params: {
 		await params.jobStore.saveJob(failedJob);
 		return { committed: false, job: failedJob, commitMs: Date.now() - startedAt };
 	}
+	await publishTempArtifactColdEvidence(params.coldEvidencePublisher, tempArtifact);
 	await params.residentShardArtifactStore.publishResidentShardArtifact({
 		descriptor: params.outputDescriptor,
 		shard: tempArtifact.shard,
@@ -81,6 +84,7 @@ export async function runCompactMaintenanceHeal(params: {
 	jobStore: CompactJobManifestStore;
 	tempArtifactStore: CompactTempArtifactStore;
 	outputDescriptorsByJobId: ReadonlyMap<string, ResidentShardDescriptor>;
+	coldEvidencePublisher?: ActiveShardColdEvidencePublisher;
 	now?: number;
 }): Promise<readonly CompactMaintenanceExecutorResult[]> {
 	const jobs = await params.jobStore.loadJobs();
@@ -109,6 +113,26 @@ export async function runCompactMaintenanceHeal(params: {
 		}
 	}
 	return results;
+}
+
+async function publishTempArtifactColdEvidence(
+	publisher: ActiveShardColdEvidencePublisher | undefined,
+	tempArtifact: NonNullable<Awaited<ReturnType<CompactTempArtifactStore["loadTempArtifact"]>>>,
+): Promise<void> {
+	if (publisher == null) {
+		return;
+	}
+	await Promise.all([
+		(tempArtifact.bodyEvidenceRows?.length ?? 0) > 0
+			? publisher.publishBodyEvidence?.(tempArtifact.bodyEvidenceRows ?? []) ?? Promise.resolve()
+			: Promise.resolve(),
+		(tempArtifact.hanDocEvidenceRows?.length ?? 0) > 0
+			? publisher.publishHanDocEvidence?.(tempArtifact.hanDocEvidenceRows ?? []) ?? Promise.resolve()
+			: Promise.resolve(),
+		(tempArtifact.hanBodyEvidenceRows?.length ?? 0) > 0
+			? publisher.publishHanBodyEvidence?.(tempArtifact.hanBodyEvidenceRows ?? []) ?? Promise.resolve()
+			: Promise.resolve(),
+	]);
 }
 
 function updateJob(

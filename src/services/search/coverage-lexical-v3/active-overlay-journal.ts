@@ -1,6 +1,18 @@
 import type { IndexedDocument } from "src/globals/search-types";
 import type { ExistingShardDocVersion } from "./append-planner";
-import { buildResidentHotBaseArtifacts } from "./build";
+import {
+	buildLexicalBlockEvidenceRowId,
+	buildLexicalDocEvidenceRowId,
+	type LexicalBodyEvidencePublishRow,
+} from "../shared/file-snapshot-store";
+import {
+	buildResidentHotBaseArtifacts,
+	type ResidentHotBaseArtifacts,
+} from "./build";
+import type {
+	LexicalHanBodyEvidenceRow,
+	LexicalHanDocEvidenceRow,
+} from "src/services/database/database";
 import type { ShardInvalidationEntry } from "./invalidation";
 import type { ResidentShard } from "./layout/types";
 import type { V3DocumentTokenizer } from "./query";
@@ -61,6 +73,13 @@ type AsyncTransactionScope = Readonly<{
 
 export type ActiveOverlayJournalRow = ActiveOverlayJournalEntry;
 type ActiveOverlayInvalidationRow = ShardInvalidationEntry & Readonly<{ id: string }>;
+
+export type ActiveOverlayResidentArtifacts = Readonly<{
+	shard: ResidentShard | null;
+	bodyEvidenceRows: readonly LexicalBodyEvidencePublishRow[];
+	hanDocEvidenceRows: readonly LexicalHanDocEvidenceRow[];
+	hanBodyEvidenceRows: readonly LexicalHanBodyEvidenceRow[];
+}>;
 
 export class MemoryActiveOverlayJournalStore implements ActiveOverlayJournalStore {
 	private entries: ActiveOverlayJournalEntry[];
@@ -228,18 +247,50 @@ export function buildOverlayResidentShard(params: {
 	entries: readonly ActiveOverlayJournalEntry[];
 	tokenizeDocumentText?: V3DocumentTokenizer;
 }): ResidentShard | null {
+	return buildOverlayResidentArtifacts(params).shard;
+}
+
+export function buildOverlayResidentArtifacts(params: {
+	activeShardId: string;
+	activeShardGeneration: number;
+	entries: readonly ActiveOverlayJournalEntry[];
+	tokenizeDocumentText?: V3DocumentTokenizer;
+}): ActiveOverlayResidentArtifacts {
 	const documents = materializeOverlayDocuments(params.entries);
 	if (documents.length === 0) {
-		return null;
+		return {
+			shard: null,
+			bodyEvidenceRows: [],
+			hanDocEvidenceRows: [],
+			hanBodyEvidenceRows: [],
+		};
 	}
 	const artifacts = buildResidentHotBaseArtifacts(documents, params.tokenizeDocumentText);
+	const overlayShardId = buildOverlayShardId(params.activeShardId);
 	return {
-		shardId: buildOverlayShardId(params.activeShardId),
-		generation: params.activeShardGeneration,
-		base: {
-			...artifacts.base,
-			fuzzyRescue: artifacts.fuzzyRescueIndex,
+		shard: {
+			shardId: overlayShardId,
+			generation: params.activeShardGeneration,
+			base: {
+				...artifacts.base,
+				fuzzyRescue: artifacts.fuzzyRescueIndex,
+			},
 		},
+		bodyEvidenceRows: remapOverlayBodyEvidenceRows(
+			artifacts,
+			overlayShardId,
+			params.activeShardGeneration,
+		),
+		hanDocEvidenceRows: remapOverlayHanDocEvidenceRows(
+			artifacts,
+			overlayShardId,
+			params.activeShardGeneration,
+		),
+		hanBodyEvidenceRows: remapOverlayHanBodyEvidenceRows(
+			artifacts,
+			overlayShardId,
+			params.activeShardGeneration,
+		),
 	};
 }
 
@@ -289,6 +340,62 @@ function sortEntries(
 	entries: readonly ActiveOverlayJournalEntry[],
 ): readonly ActiveOverlayJournalEntry[] {
 	return [...entries].sort((left, right) => left.sequence - right.sequence);
+}
+
+function remapOverlayBodyEvidenceRows(
+	artifacts: ResidentHotBaseArtifacts,
+	shardId: string,
+	shardGeneration: number,
+): LexicalBodyEvidencePublishRow[] {
+	return artifacts.bodyEvidenceRows.map((row) => ({
+		...row,
+		id: buildLexicalBlockEvidenceRowId({
+			shardId,
+			shardGeneration,
+			docRef: row.docRef,
+			generation: row.generation,
+			blockOrdinal: row.blockOrdinal,
+		}),
+		shardId,
+		shardGeneration,
+	}));
+}
+
+function remapOverlayHanDocEvidenceRows(
+	artifacts: ResidentHotBaseArtifacts,
+	shardId: string,
+	shardGeneration: number,
+): LexicalHanDocEvidenceRow[] {
+	return artifacts.hanDocEvidenceRows.map((row) => ({
+		...row,
+		id: buildLexicalDocEvidenceRowId({
+			shardId,
+			shardGeneration,
+			docRef: row.docRef,
+			generation: row.generation,
+		}),
+		shardId,
+		shardGeneration,
+	}));
+}
+
+function remapOverlayHanBodyEvidenceRows(
+	artifacts: ResidentHotBaseArtifacts,
+	shardId: string,
+	shardGeneration: number,
+): LexicalHanBodyEvidenceRow[] {
+	return artifacts.hanBodyEvidenceRows.map((row) => ({
+		...row,
+		id: buildLexicalBlockEvidenceRowId({
+			shardId,
+			shardGeneration,
+			docRef: row.docRef,
+			generation: row.generation,
+			blockOrdinal: row.blockOrdinal,
+		}),
+		shardId,
+		shardGeneration,
+	}));
 }
 
 function toInvalidationRow(entry: ShardInvalidationEntry): ActiveOverlayInvalidationRow {

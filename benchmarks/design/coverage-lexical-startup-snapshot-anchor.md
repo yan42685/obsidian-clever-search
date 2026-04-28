@@ -137,20 +137,36 @@ The startup benchmark should run three distinct modes once binary persistence ex
   - build-scope memoization now also caches short family occurrence surfaces.
   - pass1 body scan now uses a family-text-only query helper, avoiding exact offsets/support-mask allocation on the lexicon/source-mask pass.
   - startup commit dev diagnostics now run in the background after searchable state is marked, so expensive memory breakdown no longer blocks the commit path.
-- latest TestVault V3 startup anchor after segmented rebuild compression:
+  - persistent V3 startup heal now applies small vault drift through the active overlay journal plus shard invalidations instead of forcing a resident-base rebuild.
+  - overlay heal publishes remapped body/Han cold evidence sidecars for the overlay shard, so body-only overlay hits rank with the same hydration path after both live heal and restore.
+  - overlay journal and invalidation writes now use the atomic Dexie overlay store in production to avoid a visible overlay without its corresponding invalidation if Obsidian closes mid-write.
+  - snapshot bootstrap now refuses registry fallback when a committed snapshot references missing overlay entries, preferring a safe rebuild over serving base invalidations without their overlay replacements.
+  - stale committed snapshots still restore active overlay entries for the same active shard generation, covering the crash window after overlay journal commit but before a new snapshot manifest commit.
+  - active-shard append publishing now writes resident artifacts and registry before invalidations, so a crash can leave at worst duplicate stale candidates, not hidden documents without replacements.
+  - snapshot heal now removes abandoned `building` manifests, and persistent V3 reset clears compact job/temp-artifact tables with the rest of the V3 bootstrap stores.
+  - V3 artifact persistence preserves restored shard registry ownership (`artifactOwner`, `createdOrder`, `state`) to avoid creating orphan artifacts after restoring compacted/folded shards.
+  - V3 storage maintenance now has a unified mark-sweep GC for unreachable resident artifacts, stale overlay entries, stale invalidations, abandoned compact temp artifacts, and unrooted cold-evidence sidecars.
+  - `persistFileIndexArtifact()` now runs post-snapshot lightweight maintenance and records `gcMs`, row removal counts, `foldMs`, and `compactMs`.
+  - active overlay fold is connected to the production maintenance path behind bounded internal thresholds, and publishes remapped cold-evidence sidecars for folded active shards.
+  - sealed-shard compact planning/execution is connected to the same maintenance coordinator via the existing compact job/temp-artifact executor, with committed snapshot rewrite after maintenance state changes.
+  - startup benchmarks now include a `maintenance` section with GC/fold/compact timing and removal counters.
+- latest TestVault V3 startup anchor after overlay-heal crash-safety audit:
   - note count: `185`
-  - markdown bytes: `851,255`
-  - snapshot write ms: `1.386`
-  - hydrate ms: `1.625`
-  - ready-to-search ms: `1.625`
-  - fallback rebuild ms: `2,835.162`
-  - rebuild pass1 ms: `952.110`
-  - rebuild pass2 ms: `1,610.002`
-  - rebuild merge ms: `222.695`
-  - diagnostics ms: `141.559`
-  - batch max raw text bytes: `859,435`
-  - resident index bytes: `1,381,041`
-  - persisted V3 bytes: `3,882,176`
+  - markdown bytes: `851,268`
+  - snapshot write ms: `1.023`
+  - hydrate ms: `1.694`
+  - ready-to-search ms: `1.694`
+  - fallback rebuild ms: `2,182.568`
+  - rebuild pass1 ms: `726.259`
+  - rebuild pass2 ms: `1,237.917`
+  - rebuild merge ms: `180.280`
+  - diagnostics ms: `98.626`
+  - maintenance gc ms: `0`
+  - maintenance fold ms: `0`
+  - maintenance compact ms: `0`
+  - batch max raw text bytes: `859,448`
+  - resident index bytes: `1,381,055`
+  - persisted V3 bytes: `3,882,236`
   - `hydrate / rebuild`: `0.001`
   - `readyToSearch / rebuild`: `0.001`
   - resident index bytes / markdown bytes: `1.622`

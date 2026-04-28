@@ -18,6 +18,7 @@ import {
 import {
 	FileSearchEngineFactory,
 	type PersistentFileIndexRecoveryPlan,
+	type PersistentFileIndexRecoveryChanges,
 	type SerializedFileSearchIndex,
 } from "./file-search-engine";
 import {
@@ -112,6 +113,18 @@ export class LexicalEngine {
 
 	async addDocuments(documents: IndexedDocument[]) {
 		await this.fileSearchEngine.addDocuments(documents);
+	}
+
+	async applyPersistentRecoveryChanges(
+		changes: PersistentFileIndexRecoveryChanges,
+	): Promise<boolean> {
+		const applied =
+			(await this.fileSearchEngine.applyPersistentRecoveryChanges?.(changes)) ??
+			false;
+		if (applied) {
+			this._isReady = true;
+		}
+		return applied;
 	}
 
 	async moveDocument(oldPath: string, document: IndexedDocument): Promise<boolean> {

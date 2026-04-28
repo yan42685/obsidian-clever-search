@@ -7,6 +7,7 @@ import {
 import {
 	publishActiveShardAppend,
 	type ActiveShardPublishResult,
+	type ActiveShardColdEvidencePublisher,
 } from "./active-shard-publisher";
 import type { CoverageLexicalV3ResidentShardArtifactStore } from "./artifact-loader";
 import type { V3DocumentTokenizer } from "./query";
@@ -55,6 +56,7 @@ export async function runActiveOverlayFoldMaintenanceJob(params: {
 	sealSourceBytes?: number;
 	now?: number;
 	tokenizeDocumentText?: V3DocumentTokenizer;
+	coldEvidencePublisher?: ActiveShardColdEvidencePublisher;
 }): Promise<ActiveOverlayFoldResult | null> {
 	const entries = await params.overlayJournalStore.loadActiveOverlayEntries({
 		activeShardId: params.activeShard.shardId,
@@ -91,6 +93,7 @@ export async function runActiveOverlayFoldMaintenanceJob(params: {
 			nextCreatedOrder: params.activeShard.createdOrder,
 		},
 		tokenizeDocumentText: params.tokenizeDocumentText,
+		coldEvidencePublisher: params.coldEvidencePublisher,
 	});
 	const latestRegistry = await params.stores.shardRegistry.loadRegistry();
 	const activeStillVisible = latestRegistry.some(

@@ -3,12 +3,17 @@ import {
 	createDexieCoverageLexicalV3ResidentShardArtifactStore,
 	type CoverageLexicalV3ResidentShardArtifactRow,
 } from "src/services/search/coverage-lexical-v3/artifact-loader";
+import { buildActiveOverlayJournalEntryId, MemoryActiveOverlayJournalStore } from "src/services/search/coverage-lexical-v3/active-overlay-journal";
 import { buildResidentHotBaseArtifacts } from "src/services/search/coverage-lexical-v3/build";
 import { bootstrapCoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/bootstrap";
 import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
 import type { ShardInvalidationEntry } from "src/services/search/coverage-lexical-v3/invalidation";
 import type { ResidentShard } from "src/services/search/coverage-lexical-v3/layout/types";
 import type { ResidentShardDescriptor } from "src/services/search/coverage-lexical-v3/shards";
+import {
+	MemoryCoverageLexicalV3SnapshotStore,
+	type CoverageLexicalV3SnapshotManifest,
+} from "src/services/search/coverage-lexical-v3/snapshot";
 import { createMemoryCoverageLexicalV3ProductionStores } from "src/services/search/coverage-lexical-v3/stores";
 
 class FakeArtifactTable<Row extends Record<string, unknown>, Key extends string> {
@@ -200,6 +205,69 @@ describe("coverage lexical v3 bootstrap", () => {
 			loaded: false,
 			reason: "missing_resident_shard",
 			loadedShardIds: ["sealed-1"],
+		});
+	});
+
+	test("does not fall back to registry when committed snapshot references a missing overlay entry", async () => {
+		const active = descriptor("active-1", "active", 1);
+		const stores = createMemoryCoverageLexicalV3ProductionStores({
+			registry: [active],
+			invalidations: [invalidation("active-1", 1)],
+		});
+		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>(
+				(row) => row.id,
+			),
+		);
+		await artifactStore.publishResidentShardArtifact({
+			descriptor: active,
+			shard: residentShard("active-1", 1, [doc("old.md", "old target", 1)]),
+			createdAt: 1,
+		});
+		const manifest: CoverageLexicalV3SnapshotManifest = {
+			snapshotId: "snapshot-with-missing-overlay",
+			schemaVersion: 1,
+			createdAt: 1,
+			registryGeneration: 1,
+			shardDescriptors: [active],
+			activeShardId: "active-1",
+			overlayIncluded: true,
+			artifactRefs: [
+				{
+					shardId: "active-1",
+					generation: 1,
+					artifactOwner: "active-1",
+				},
+			],
+			overlayJournalRefs: [
+				{
+					entryId: buildActiveOverlayJournalEntryId({
+						activeShardId: "active-1",
+						activeShardGeneration: 1,
+						sequence: 1,
+					}),
+					activeShardId: "active-1",
+					activeShardGeneration: 1,
+					sequence: 1,
+				},
+			],
+			invalidationCount: 1,
+			status: "committed",
+		};
+
+		const result = await bootstrapCoverageLexicalV3Engine({
+			engine: new CoverageLexicalV3Engine(),
+			stores,
+			residentShardArtifactLoader: artifactStore,
+			snapshotStore: new MemoryCoverageLexicalV3SnapshotStore([manifest]),
+			overlayJournalStore: new MemoryActiveOverlayJournalStore(),
+		});
+
+		expect(result).toMatchObject({
+			loaded: false,
+			reason: "missing_overlay_entry",
+			loadedShardIds: ["active-1"],
+			snapshotId: "snapshot-with-missing-overlay",
 		});
 	});
 });

@@ -1474,6 +1474,46 @@ export class DataManager {
     };
   }
 
+  private async applyPersistentLexicalRecoveryChanges(
+    deletePaths: readonly string[],
+    files: readonly TAbstractFile[],
+  ): Promise<LexicalAddDocumentsResult | null> {
+    const lexicalRecoveryTarget = (
+      this.lexicalEngine as unknown as {
+        applyPersistentRecoveryChanges?: (changes: {
+          deletePaths: string[];
+          upsertDocuments: IndexedDocument[];
+        }) => Promise<boolean>;
+      }
+    ) ?? null;
+    const applyPersistentRecoveryChanges =
+      lexicalRecoveryTarget?.applyPersistentRecoveryChanges;
+    if (!applyPersistentRecoveryChanges) {
+      return null;
+    }
+    const tFiles = files.filter((file): file is TFile => file instanceof TFile);
+    const generateAllIndexedDocuments =
+      this.dataProvider.generateAllIndexedDocuments?.bind(this.dataProvider);
+    if (!generateAllIndexedDocuments) {
+      return null;
+    }
+    const { documents, indexedFiles, failures } =
+      await generateAllIndexedDocuments(
+        tFiles.filter((file) => this.dataProvider.isIndexable?.(file) ?? true),
+      );
+    const applied = await applyPersistentRecoveryChanges.call(lexicalRecoveryTarget, {
+      deletePaths: [...deletePaths],
+      upsertDocuments: await this.attachLexicalDocRefs(documents),
+    });
+    if (!applied) {
+      return null;
+    }
+    return {
+      indexedFiles,
+      failures,
+    };
+  }
+
   private async deleteDocuments(paths: string[]) {
     if (paths.length > 0) {
       const indexablePaths = paths.filter((p) =>
@@ -2987,7 +3027,6 @@ export class DataManager {
     const deleteList = [...deletePaths];
     if (deleteList.length > 0) {
       logger.trace(`lexical recovery docs to delete: ${deleteList.length}`);
-      await this.deleteDocuments(deleteList);
       await this.fileSnapshotStore.removeFiles(deleteList);
       await this.deleteLexicalIndexedFileRefs(deleteList);
       this.clearLexicalIndexFailures(deleteList);
@@ -3001,7 +3040,12 @@ export class DataManager {
       return file ? [file] : [];
     });
     logger.trace(`lexical recovery docs to upsert: ${upsertFiles.length}`);
-    const addResult = await this.addDocuments(upsertFiles);
+    const overlayAddResult =
+      await this.applyPersistentLexicalRecoveryChanges(deleteList, upsertFiles);
+    if (!overlayAddResult) {
+      await this.deleteDocuments(deleteList);
+    }
+    const addResult = overlayAddResult ?? (await this.addDocuments(upsertFiles));
     await this.commitIndexedLexicalFiles(addResult.indexedFiles);
     const failedPaths = new Set(
       addResult.failures.map((failure) => failure.file.path),

@@ -250,6 +250,69 @@ describe("coverage lexical v3 active shard publisher", () => {
 		expect((await artifacts.loadResidentShard(result.appendTargetShard))?.base.docTable.docCount).toBe(1);
 	});
 
+	test("publishes shard artifacts before invalidating old document versions", async () => {
+		const active = activeShard({ sourceBytes: 10, docCount: 1 });
+		const order: string[] = [];
+		const registry = [active];
+		const stores = {
+			shardRegistry: {
+				async loadRegistry() {
+					return registry;
+				},
+				async saveRegistry() {
+					order.push("registry");
+				},
+				async updateShard() {
+					order.push("registry");
+				},
+				async updateShards() {
+					order.push("registry");
+				},
+				async removeShards() {},
+			},
+			invalidations: {
+				async loadInvalidations() {
+					return [];
+				},
+				async appendInvalidations() {
+					order.push("invalidations");
+				},
+				async removeInvalidationsForShards() {},
+				async clearInvalidations() {},
+			},
+		};
+		const artifacts = {
+			async loadResidentShard() {
+				return undefined;
+			},
+			async publishResidentShardArtifact() {
+				order.push("artifact");
+			},
+			async removeResidentShardArtifact() {},
+		};
+
+		await publishActiveShardAppend({
+			stores,
+			residentShardArtifactStore: artifacts,
+			activeShard: active,
+			currentActiveDocuments: [doc("old.md", "old alpha", 1)],
+			changes: [
+				{
+					document: doc("new.md", "new beta", 2),
+					previousVersion: {
+						shardId: "active-1",
+						shardGeneration: 1,
+						docRef: 1,
+						docGeneration: 1,
+					},
+				},
+			],
+			plannerOptions: { sealSourceBytes: 1024 * 1024, now: 100 },
+		});
+
+		expect(order).toEqual(["artifact", "registry", "invalidations"]);
+	});
+
 	test("splits oversized append batch into bounded sealed shards plus one active shard", async () => {
 		const active = activeShard({ sourceBytes: 900, docCount: 3, createdOrder: 4 });
 		const stores = createMemoryCoverageLexicalV3ProductionStores({ registry: [active] });

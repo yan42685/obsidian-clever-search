@@ -337,6 +337,10 @@ export async function healCoverageLexicalV3SnapshotState(params: {
 	const latestCommitted = latestCommittedManifest(before);
 	let markedOldCommittedGarbage = 0;
 	for (const manifest of before) {
+		if (manifest.status === "building") {
+			await params.snapshotStore.markGarbage(manifest.snapshotId);
+			continue;
+		}
 		if (
 			manifest.status === "committed" &&
 			latestCommitted != null &&

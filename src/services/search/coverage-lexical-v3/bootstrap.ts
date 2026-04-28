@@ -21,7 +21,8 @@ export type CoverageLexicalV3BootstrapResult = Readonly<{
 		| "loaded_snapshot"
 		| "empty_registry"
 		| "startup_safety_failed"
-		| "missing_resident_shard";
+		| "missing_resident_shard"
+		| "missing_overlay_entry";
 	loadedShardIds: readonly string[];
 	fallbackRebuildReason?: string;
 	snapshotId?: string;
@@ -48,6 +49,14 @@ export async function bootstrapCoverageLexicalV3Engine(params: {
 			return {
 				loaded: true,
 				reason: "loaded_snapshot",
+				loadedShardIds: snapshotRestore.loadedShardIds,
+				snapshotId: snapshotRestore.snapshotId,
+			};
+		}
+		if (snapshotRestore.reason === "missing_overlay_entry") {
+			return {
+				loaded: false,
+				reason: "missing_overlay_entry",
 				loadedShardIds: snapshotRestore.loadedShardIds,
 				snapshotId: snapshotRestore.snapshotId,
 			};
