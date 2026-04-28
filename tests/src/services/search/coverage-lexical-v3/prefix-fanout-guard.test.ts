@@ -374,6 +374,28 @@ describe("coverage lexical v3 prefix fanout guard", () => {
 		expect(keptBlockIds).not.toContain(298);
 	});
 
+	test("scoped singleton body support is protected ahead of weak prefix-only blocks", () => {
+		const guarded = applyPrefixFanoutGuard(
+			[
+				createCandidateRecall(1, {
+					bodyBlocks: [
+						...buildWeakPrefixBlocks(TOTAL_BODY_BLOCK_GUARD),
+						createBodyBlockRecall(999, {
+							hasPrefixSupport: true,
+							hasScopedSingletonHanSupport: true,
+						}),
+					],
+				}),
+			],
+			64,
+		);
+
+		const keptBlockIds = guarded.candidateDocs[0]?.shortlistedBodyBlockIds ?? [];
+		expect(guarded.stats.guardApplied).toBe(true);
+		expect(keptBlockIds).toContain(999);
+		expect(keptBlockIds).toHaveLength(TOTAL_BODY_BLOCK_GUARD);
+	});
+
 	test("guard keys body block budgets by shard as well as live doc slot", () => {
 		const firstShardDoc = createCandidateRecall(1, {
 			shardId: "sealed-0",

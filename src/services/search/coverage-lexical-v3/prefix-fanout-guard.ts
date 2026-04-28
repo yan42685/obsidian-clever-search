@@ -189,7 +189,8 @@ function buildGuardedDoc(candidateRecall: V3CandidateDocRecall): GuardedDoc {
 			(block) =>
 				block.hasExactSupport ||
 				block.hasStrongHanSupport ||
-				block.hasSingletonHanSupport,
+				block.hasSingletonHanSupport ||
+				block.hasScopedSingletonHanSupport,
 		).length,
 		coreBlockCount: prioritizedCoreBlocks.length,
 		weakPrefixOnlyBlockCount: prioritizedPrefixOnlyBlocks.length,
@@ -205,6 +206,8 @@ function compareCandidateBodyBlocks(
 		Number(right.hasExactSupport) - Number(left.hasExactSupport) ||
 		Number(right.hasStrongHanSupport) - Number(left.hasStrongHanSupport) ||
 		Number(right.hasSingletonHanSupport) - Number(left.hasSingletonHanSupport) ||
+		Number(right.hasScopedSingletonHanSupport) -
+			Number(left.hasScopedSingletonHanSupport) ||
 		Number(left.hasPrefixSupport) - Number(right.hasPrefixSupport) ||
 		left.blockId - right.blockId
 	);
@@ -309,7 +312,8 @@ function isWeakPrefixOnlyBlock(block: V3CandidateBodyBlockRecall): boolean {
 		block.hasPrefixSupport &&
 		!block.hasExactSupport &&
 		!block.hasStrongHanSupport &&
-		!block.hasSingletonHanSupport
+		!block.hasSingletonHanSupport &&
+		!block.hasScopedSingletonHanSupport
 	);
 }
 
