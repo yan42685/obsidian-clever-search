@@ -44,6 +44,15 @@ describe("coverage lexical v3 compact production stores", () => {
 		await store.saveTempArtifact({
 			jobId: "job-1",
 			outputShardId: "sealed-temp",
+			outputDescriptor: {
+				shardId: "sealed-temp",
+				generation: 1,
+				state: "sealed",
+				sourceBytes: 1,
+				docCount: 1,
+				createdOrder: 1,
+				artifactOwner: "sealed-temp",
+			},
 			shard,
 			createdAt: 1,
 		});

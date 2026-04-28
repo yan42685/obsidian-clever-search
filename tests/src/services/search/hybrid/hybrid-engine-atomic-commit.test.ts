@@ -50,6 +50,7 @@ jest.mock("src/utils/logger", () => ({
 }));
 
 import { HybridEngine } from "src/services/search/hybrid/hybrid-engine";
+import { buildIndexedSnapshotRequestKey } from "src/services/search/shared/file-snapshot-store";
 
 describe("HybridEngine per-file atomic commit", () => {
   let db: Dexie & {
@@ -236,7 +237,10 @@ describe("HybridEngine per-file atomic commit", () => {
       readIndexedTextSnapshots: jest.fn(async () =>
         new Map([
           [
-            filePath,
+            buildIndexedSnapshotRequestKey({
+              path: filePath,
+              generation: 7,
+            }),
             {
               text: "body",
               generation: 7,

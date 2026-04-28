@@ -66,7 +66,10 @@ import {
   recordHybridProfileMetric,
 } from "./hybrid-profiler";
 import { analyzeHybridStoredFileConsistency } from "./hybrid-consistency";
-import { FileSnapshotStore } from "../shared/file-snapshot-store";
+import {
+  buildIndexedSnapshotRequestKey,
+  FileSnapshotStore,
+} from "../shared/file-snapshot-store";
 import { buildLexicalOnlyFreshness } from "./freshness";
 
 const DEFAULT_MAX_FILE_RESULTS = 10;
@@ -900,7 +903,12 @@ export class HybridEngine {
         continue;
       }
       const isStaleDense = docRegistryEntry.liveGeneration !== indexedFileRef.generation;
-      const snapshot = snapshotsByPath.get(docRegistryEntry.path);
+      const snapshot = snapshotsByPath.get(
+        buildIndexedSnapshotRequestKey({
+          path: docRegistryEntry.path,
+          generation: indexedFileRef.generation,
+        }),
+      );
       const staleShadow =
         isStaleDense && docRegistryEntry.denseServeUntil != null &&
         docRegistryEntry.denseServeUntil >= Date.now()

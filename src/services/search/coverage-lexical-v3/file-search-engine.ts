@@ -15,6 +15,7 @@ import { Tokenizer } from "src/services/search/tokenizer";
 import {
 	buildLexicalBlockEvidenceRowId,
 	buildLexicalDocEvidenceRowId,
+	buildIndexedSnapshotRequestKey,
 	FileSnapshotStore,
 	type LexicalBlockEvidenceLocator,
 	type LexicalDocEvidenceLocator,
@@ -1575,7 +1576,11 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 						})),
 					);
 		return views.map((view) => {
-			const snapshotText = snapshotTexts.get(view.path);
+			const snapshotRequestKey = buildIndexedSnapshotRequestKey({
+				path: view.path,
+				generation: view.generation,
+			});
+			const snapshotText = snapshotTexts.get(snapshotRequestKey);
 			if (snapshotText !== undefined) {
 				const pendingContent = this.pendingDocumentContentsByPath.get(view.path);
 				if (
@@ -1590,12 +1595,12 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			const pendingMetadata = this.getPendingMetadataForView(view);
 			const metadata =
 				pendingMetadata ??
-				snapshotMetadata.get(view.path) ?? {
+				snapshotMetadata.get(snapshotRequestKey) ?? {
 					aliasesText: undefined,
 					tagsText: undefined,
 					headingsText: undefined,
 				};
-			if (snapshotMetadata.has(view.path) && pendingMetadata === undefined) {
+			if (snapshotMetadata.has(snapshotRequestKey) && pendingMetadata === undefined) {
 				this.pendingDocumentMetadataByPath.delete(view.path);
 			}
 			return materializeIndexedDocument(

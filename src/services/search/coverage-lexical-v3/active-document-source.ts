@@ -3,6 +3,7 @@ import type {
 	IndexedMetadataSnapshot,
 	IndexedTextSnapshot,
 } from "src/services/search/shared/file-snapshot-store";
+import { buildIndexedSnapshotRequestKey } from "src/services/search/shared/file-snapshot-store";
 import type { CoverageLexicalV3ResidentShardArtifactLoader } from "./artifact-loader";
 import type { ResidentBase } from "./layout/types";
 import { readResidentString } from "./recall/access";
@@ -38,11 +39,12 @@ export async function loadCurrentActiveDocuments(params: {
 		params.indexedSnapshotReader.readIndexedMetadata(requests),
 	]);
 	return refs.flatMap((ref) => {
-		const text = textsByPath.get(ref.path);
+		const requestKey = buildIndexedSnapshotRequestKey(ref);
+		const text = textsByPath.get(requestKey);
 		if (text == null) {
 			return [];
 		}
-		const metadata = metadataByPath.get(ref.path);
+		const metadata = metadataByPath.get(requestKey);
 		return [
 			{
 				docRef: ref.docRef,

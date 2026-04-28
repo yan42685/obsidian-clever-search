@@ -1,4 +1,5 @@
 import type { IndexedDocument } from "src/globals/search-types";
+import Dexie from "dexie";
 import type { ExistingShardDocVersion } from "./append-planner";
 import {
 	buildLexicalBlockEvidenceRowId,
@@ -59,6 +60,20 @@ type AsyncOverlayTable<Row, Key> = Readonly<{
 	delete: (key: Key) => Promise<unknown>;
 	clear: () => Promise<unknown>;
 }>;
+
+type AsyncOverlayRangeTable<Row, Key> = AsyncOverlayTable<Row, Key> &
+	Readonly<{
+		where: (
+			index: "[activeShardId+activeShardGeneration+sequence]",
+		) => {
+			between: (
+				lowerBound: readonly [string, number, typeof Dexie.minKey],
+				upperBound: readonly [string, number, typeof Dexie.maxKey],
+			) => {
+				delete: () => Promise<unknown>;
+			};
+		};
+	}>;
 
 type AsyncInvalidationTable<Row> = Readonly<{
 	bulkPut: (rows: readonly Row[]) => Promise<unknown>;
@@ -178,21 +193,20 @@ export class DexieActiveOverlayJournalStore implements ActiveOverlayJournalStore
 		activeShardId: string;
 		activeShardGeneration: number;
 	}): Promise<void> {
-		const keptEntries = (await this.table.toArray()).filter(
-			(entry) => !isEntryForActiveShard(entry, params),
+		const removedEntries = (await this.table.toArray()).filter((entry) =>
+			isEntryForActiveShard(entry, params),
 		);
-		await this.table.clear();
-		await this.table.bulkPut(keptEntries);
+		await Promise.all(removedEntries.map((entry) => this.table.delete(entry.id)));
 	}
 }
 
 export class AtomicDexieActiveOverlayJournalStore extends DexieActiveOverlayJournalStore {
 	constructor(
-		table: AsyncOverlayTable<ActiveOverlayJournalRow, string>,
+		private readonly rangeTable: AsyncOverlayRangeTable<ActiveOverlayJournalRow, string>,
 		private readonly invalidationTable: AsyncInvalidationTable<ActiveOverlayInvalidationRow>,
 		private readonly transactionScope: AsyncTransactionScope,
 	) {
-		super(table);
+		super(rangeTable);
 	}
 
 	async appendOverlayEntriesWithInvalidations(params: {
@@ -213,6 +227,21 @@ export class AtomicDexieActiveOverlayJournalStore extends DexieActiveOverlayJour
 			},
 		);
 	}
+
+	async clearActiveOverlayEntries(params: {
+		activeShardId: string;
+		activeShardGeneration: number;
+	}): Promise<void> {
+		await this.transactionScope.transaction("rw", this.rangeTable, async () => {
+			await this.rangeTable
+				.where("[activeShardId+activeShardGeneration+sequence]")
+				.between(
+					[params.activeShardId, params.activeShardGeneration, Dexie.minKey],
+					[params.activeShardId, params.activeShardGeneration, Dexie.maxKey],
+				)
+				.delete();
+		});
+	}
 }
 
 export function createDexieActiveOverlayJournalStore(
@@ -222,7 +251,7 @@ export function createDexieActiveOverlayJournalStore(
 }
 
 export function createAtomicDexieActiveOverlayJournalStore(params: {
-	overlayTable: AsyncOverlayTable<ActiveOverlayJournalRow, string>;
+	overlayTable: AsyncOverlayRangeTable<ActiveOverlayJournalRow, string>;
 	invalidationTable: AsyncInvalidationTable<ActiveOverlayInvalidationRow>;
 	transactionScope: AsyncTransactionScope;
 }): ActiveOverlayJournalStore {

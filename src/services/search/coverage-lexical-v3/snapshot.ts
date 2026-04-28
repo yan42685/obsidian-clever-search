@@ -378,6 +378,10 @@ async function loadSnapshotOverlayEntries(params: {
 	if (activeShard == null) {
 		return [];
 	}
+	// A snapshot anchors the resident base, while the active overlay journal is
+	// a durable tail. Requiring manifest refs protects entries observed during
+	// snapshot write; replaying the whole active-shard tail also preserves
+	// entries committed after the snapshot but before a startup crash.
 	const entries = await params.overlayJournalStore.loadActiveOverlayEntries({
 		activeShardId: activeShard.shardId,
 		activeShardGeneration: activeShard.generation,

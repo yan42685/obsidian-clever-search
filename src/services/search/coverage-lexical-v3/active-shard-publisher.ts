@@ -120,14 +120,15 @@ async function publishOversizedAppendBatch(
 		: params.activeShard.createdOrder;
 	const descriptors = chunks.map((documents, index) => {
 		const createdOrder = firstCreatedOrder + index;
+		const isFirst = index === 0;
 		const isLast = index === chunks.length - 1;
 		const shardId =
-			index === 0
+			isFirst
 				? plan.nextActiveShard.shardId
 				: `active-${createdOrder}`;
 		return {
 			shardId,
-			generation: 1,
+			generation: isFirst ? plan.nextActiveShard.generation : 1,
 			state: isLast ? "active" : "sealed",
 			sourceBytes: documents.reduce(
 				(sum, document) => sum + estimateDocumentSourceBytes(document),
@@ -135,7 +136,7 @@ async function publishOversizedAppendBatch(
 			),
 			docCount: documents.length,
 			createdOrder,
-			artifactOwner: shardId,
+			artifactOwner: isFirst ? plan.nextActiveShard.artifactOwner : shardId,
 		} satisfies ResidentShardDescriptor;
 	});
 	for (let index = 0; index < descriptors.length; index += 1) {

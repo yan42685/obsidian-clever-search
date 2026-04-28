@@ -1,4 +1,5 @@
 import type { IndexedDocument } from "src/globals/search-types";
+import { buildIndexedSnapshotRequestKey } from "src/services/search/shared/file-snapshot-store";
 import {
 	createDexieCoverageLexicalV3ResidentShardArtifactStore,
 	type CoverageLexicalV3ResidentShardArtifactRow,
@@ -51,18 +52,23 @@ function doc(path: string, content: string, docRef: number, generation = 1): Ind
 }
 
 function indexedSnapshotReader(documents: readonly IndexedDocument[]) {
-	const documentByPath = new Map(documents.map((document) => [document.path, document]));
+	const documentByRequestKey = new Map(
+		documents.map((document) => [
+			buildIndexedSnapshotRequestKey(document),
+			document,
+		]),
+	);
 	return {
 		async readIndexedTextSnapshots(requests: ReadonlyArray<{ path: string; generation?: number }>) {
 			return new Map(
 				requests.flatMap((request) => {
-					const document = documentByPath.get(request.path);
-					if (document == null || document.generation !== request.generation) {
+					const document = documentByRequestKey.get(buildIndexedSnapshotRequestKey(request));
+					if (document == null) {
 						return [];
 					}
 					return [
 						[
-							request.path,
+							buildIndexedSnapshotRequestKey(request),
 							{
 								path: request.path,
 								text: document.content ?? "",
@@ -77,13 +83,13 @@ function indexedSnapshotReader(documents: readonly IndexedDocument[]) {
 		async readIndexedMetadata(requests: ReadonlyArray<{ path: string; generation?: number }>) {
 			return new Map(
 				requests.flatMap((request) => {
-					const document = documentByPath.get(request.path);
-					if (document == null || document.generation !== request.generation) {
+					const document = documentByRequestKey.get(buildIndexedSnapshotRequestKey(request));
+					if (document == null) {
 						return [];
 					}
 					return [
 						[
-							request.path,
+							buildIndexedSnapshotRequestKey(request),
 							{
 								aliasesText: document.aliases,
 								tagsText: document.tags,
@@ -162,6 +168,39 @@ describe("coverage lexical v3 active shard publisher", () => {
 				tags: "#old",
 				headings: "Old Heading",
 			}),
+		]);
+	});
+
+	test("loads same-path active documents by requested generation", async () => {
+		const active = activeShard({ sourceBytes: 0, docCount: 0 });
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>(
+				(row) => row.id,
+			),
+		);
+		const firstGeneration = doc("folder/same.md", "generation one", 1, 1);
+		const secondGeneration = doc("folder/same.md", "generation two", 1, 2);
+		await publishActiveShardAppend({
+			stores: createMemoryCoverageLexicalV3ProductionStores({ registry: [active] }),
+			residentShardArtifactStore: artifacts,
+			activeShard: active,
+			currentActiveDocuments: [],
+			changes: [{ document: firstGeneration }, { document: secondGeneration }],
+			plannerOptions: { sealSourceBytes: 1024 * 1024, now: 100 },
+		});
+
+		const loadedDocuments = await loadCurrentActiveDocuments({
+			activeShard: { ...active, sourceBytes: 10, docCount: 2 },
+			residentShardArtifactLoader: artifacts,
+			indexedSnapshotReader: indexedSnapshotReader([firstGeneration, secondGeneration]),
+		});
+
+		expect(loadedDocuments.map((document) => ({
+			generation: document.generation,
+			content: document.content,
+		}))).toEqual([
+			{ generation: 1, content: "generation one" },
+			{ generation: 2, content: "generation two" },
 		]);
 	});
 

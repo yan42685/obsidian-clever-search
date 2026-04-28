@@ -1,4 +1,5 @@
 import type { IndexedDocument } from "src/globals/search-types";
+import { buildIndexedSnapshotRequestKey } from "src/services/search/shared/file-snapshot-store";
 import type { ActiveShardIndexedSnapshotReader } from "./active-document-source";
 import { planActiveOverlayFold, runActiveOverlayFoldMaintenanceJob } from "./active-overlay-fold";
 import {
@@ -18,6 +19,7 @@ import {
 import type { ResidentShard } from "./layout/types";
 import type { V3DocumentTokenizer } from "./query";
 import { getDocPath } from "./recall";
+import { buildShardInvalidationKey } from "./invalidation";
 import { isReadableShardState, type ResidentShardDescriptor } from "./shards";
 import type { CoverageLexicalV3ProductionStores } from "./stores";
 
@@ -195,6 +197,7 @@ async function maybeRunOneCompactJob(params: {
 	await params.compactTempArtifactStore.saveTempArtifact({
 		jobId: job.jobId,
 		outputShardId,
+		outputDescriptor,
 		shard: {
 			shardId: outputShardId,
 			generation: outputDescriptor.generation,
@@ -233,15 +236,7 @@ async function buildCompactOutputDescriptorsByJobId(params: {
 		if (tempArtifact == null) {
 			continue;
 		}
-		descriptors.set(job.jobId, {
-			shardId: job.outputShardId,
-			generation: tempArtifact.shard.generation,
-			state: "sealed",
-			sourceBytes: Math.max(0, tempArtifact.shard.base.docTable.docCount),
-			docCount: tempArtifact.shard.base.docTable.docCount,
-			createdOrder: Number(job.outputShardId.replace(/\D/g, "")) || Date.now(),
-			artifactOwner: job.outputShardId,
-		});
+		descriptors.set(job.jobId, tempArtifact.outputDescriptor);
 	}
 	return descriptors;
 }
@@ -270,10 +265,7 @@ async function loadLiveDocumentsForShards(params: {
 }): Promise<readonly IndexedDocument[]> {
 	const documents: IndexedDocument[] = [];
 	const invalidatedKeys = new Set(
-		params.invalidations.map(
-			(entry) =>
-				`${entry.shardId}@${entry.shardGeneration}:${entry.docRef}@${entry.docGeneration}`,
-		),
+		params.invalidations.map((entry) => buildShardInvalidationKey(entry)),
 	);
 	for (const descriptor of params.shards) {
 		const shard = await params.residentShardArtifactStore.loadResidentShard(descriptor);
@@ -286,11 +278,12 @@ async function loadLiveDocumentsForShards(params: {
 			params.indexedSnapshotReader.readIndexedMetadata(refs),
 		]);
 		for (const ref of refs) {
-			const text = textsByPath.get(ref.path);
+			const requestKey = buildIndexedSnapshotRequestKey(ref);
+			const text = textsByPath.get(requestKey);
 			if (text == null) {
 				continue;
 			}
-			const metadata = metadataByPath.get(ref.path);
+			const metadata = metadataByPath.get(requestKey);
 			documents.push({
 				docRef: ref.docRef,
 				path: ref.path,
@@ -318,7 +311,12 @@ function extractLiveDocumentRefs(
 		const generation = shard.base.docTable.generationByDocId[docId] ?? 0;
 		if (
 			invalidatedKeys.has(
-				`${shard.shardId}@${shard.generation}:${docRef}@${generation}`,
+				buildShardInvalidationKey({
+					shardId: shard.shardId,
+					shardGeneration: shard.generation,
+					docRef,
+					docGeneration: generation,
+				}),
 			)
 		) {
 			continue;

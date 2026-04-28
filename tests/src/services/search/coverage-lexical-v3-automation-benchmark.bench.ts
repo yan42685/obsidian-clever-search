@@ -355,7 +355,7 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => {
 				) {
 					continue;
 				}
-				result.set(request.path, {
+				result.set(`${request.path}\0${request.generation ?? ""}`, {
 					aliasesText: row.aliasesText,
 					tagsText: row.tagsText,
 					headingsText: row.headingsText,

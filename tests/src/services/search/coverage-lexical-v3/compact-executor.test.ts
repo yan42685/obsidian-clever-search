@@ -94,6 +94,7 @@ describe("coverage lexical v3 compact executor", () => {
 		await tempStore.saveTempArtifact({
 			jobId: "job-ready_to_commit",
 			outputShardId: "sealed-3",
+			outputDescriptor: descriptor("sealed-3", "sealed"),
 			shard: residentShard("sealed-3", [doc("merged.md", "merged target", 3)]),
 			createdAt: 1,
 		});
@@ -135,6 +136,7 @@ describe("coverage lexical v3 compact executor", () => {
 		await tempStore.saveTempArtifact({
 			jobId: "job-committed",
 			outputShardId: "sealed-3",
+			outputDescriptor: descriptor("sealed-3", "sealed"),
 			shard: residentShard("sealed-3", [doc("merged.md", "merged", 3)]),
 			createdAt: 1,
 		});
@@ -169,6 +171,7 @@ describe("coverage lexical v3 compact executor", () => {
 		await tempStore.saveTempArtifact({
 			jobId: "job-ready_to_commit",
 			outputShardId: "sealed-3",
+			outputDescriptor: descriptor("sealed-3", "sealed"),
 			shard: residentShard("sealed-3", [doc("merged.md", "merged", 3)]),
 			createdAt: 1,
 		});
@@ -229,6 +232,7 @@ describe("coverage lexical v3 compact executor", () => {
 		await tempStore.saveTempArtifact({
 			jobId: "job-building",
 			outputShardId: "sealed-3",
+			outputDescriptor: descriptor("sealed-3", "sealed"),
 			shard: residentShard("sealed-3", [doc("partial.md", "partial", 3)]),
 			createdAt: 1,
 		});
@@ -260,6 +264,7 @@ describe("coverage lexical v3 compact executor", () => {
 		await tempStore.saveTempArtifact({
 			jobId: "job-ready_to_commit",
 			outputShardId: "sealed-3",
+			outputDescriptor: descriptor("sealed-3", "sealed"),
 			shard: residentShard("sealed-3", [doc("merged.md", "merged", 3)]),
 			createdAt: 1,
 		});

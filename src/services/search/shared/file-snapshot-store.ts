@@ -206,10 +206,12 @@ type PersistedFileShadowRow = {
 	generation: number;
 };
 
-type IndexedTextRequest = {
+export type IndexedSnapshotRequest = {
 	path: string;
 	generation?: number;
 };
+
+type IndexedTextRequest = IndexedSnapshotRequest;
 
 export type IndexedTextSnapshotSource = "live" | "indexed" | "shadow";
 
@@ -226,10 +228,7 @@ type IndexedTextPublishRequest = {
 	text?: string;
 };
 
-type IndexedMetadataRequest = {
-	path: string;
-	generation?: number;
-};
+type IndexedMetadataRequest = IndexedSnapshotRequest;
 
 type IndexedMetadataPublishRequest = {
 	path: string;
@@ -259,6 +258,10 @@ export type IndexedMetadataSnapshot = Readonly<{
 	tagsText?: string;
 	headingsText?: string;
 }>;
+
+export function buildIndexedSnapshotRequestKey(request: IndexedSnapshotRequest): string {
+	return `${request.path}\0${request.generation ?? ""}`;
+}
 
 export type LexicalBodyEvidenceSnapshot = Readonly<{
 	exactShardLocalFamilySlots: readonly number[];
@@ -382,22 +385,20 @@ export class FileSnapshotStore {
 		requests: ReadonlyArray<IndexedTextRequest>,
 	): Promise<Map<string, string>> {
 		const snapshots = await this.readIndexedTextSnapshots(requests);
-		return new Map(
-			[...snapshots.entries()].map(([path, snapshot]) => [path, snapshot.text]),
-		);
+		const texts = new Map<string, string>();
+		for (const request of requests) {
+			const snapshot = snapshots.get(buildIndexedSnapshotRequestKey(request));
+			if (snapshot != null) {
+				texts.set(request.path, snapshot.text);
+			}
+		}
+		return texts;
 	}
 
 	async readIndexedTextSnapshots(
 		requests: ReadonlyArray<IndexedTextRequest>,
 	): Promise<Map<string, IndexedTextSnapshot>> {
-		const expectedGenerations = new Map<string, number | undefined>();
-		for (const request of requests) {
-			expectedGenerations.set(request.path, request.generation);
-		}
-		return await this.readGenerationAlignedTextSnapshots(
-			requests.map((request) => request.path),
-			expectedGenerations,
-		);
+		return await this.readGenerationAlignedTextSnapshots(requests);
 	}
 
 	async readIndexedMetadata(
@@ -407,22 +408,23 @@ export class FileSnapshotStore {
 		if (uniquePaths.length === 0) {
 			return new Map<string, IndexedMetadataSnapshot>();
 		}
-		const expectedGenerations = new Map(
-			requests.map((request) => [request.path, request.generation] as const),
-		);
 		const rows = await this.database.db.lexicalIndexedMetadata.bulkGet(uniquePaths);
 		const metadataByPath = new Map<string, IndexedMetadataSnapshot>();
+		const rowByPath = new Map<string, LexicalIndexedMetadataRow>();
 		for (let index = 0; index < uniquePaths.length; index += 1) {
 			const row = rows[index];
 			if (!row) {
 				continue;
 			}
 			const path = uniquePaths[index];
-			const expectedGeneration = expectedGenerations.get(path);
-			if (!this.isGenerationMatch(row.generation, expectedGeneration)) {
+			rowByPath.set(path, row);
+		}
+		for (const request of requests) {
+			const row = rowByPath.get(request.path);
+			if (!row || !this.isGenerationMatch(row.generation, request.generation)) {
 				continue;
 			}
-			metadataByPath.set(path, {
+			metadataByPath.set(buildIndexedSnapshotRequestKey(request), {
 				aliasesText: row.aliasesText,
 				tagsText: row.tagsText,
 				headingsText: row.headingsText,
@@ -1297,50 +1299,49 @@ export class FileSnapshotStore {
 	}
 
 	private async readGenerationAlignedTexts(
-		filePaths: string[],
-		expectedGenerations?: ReadonlyMap<string, number | undefined>,
+		requests: ReadonlyArray<IndexedSnapshotRequest>,
 	): Promise<Map<string, string>> {
-		const snapshots = await this.readGenerationAlignedTextSnapshots(
-			filePaths,
-			expectedGenerations,
-		);
-		return new Map(
-			[...snapshots.entries()].map(([path, snapshot]) => [path, snapshot.text]),
-		);
+		const snapshots = await this.readGenerationAlignedTextSnapshots(requests);
+		const texts = new Map<string, string>();
+		for (const request of requests) {
+			const snapshot = snapshots.get(buildIndexedSnapshotRequestKey(request));
+			if (snapshot != null) {
+				texts.set(request.path, snapshot.text);
+			}
+		}
+		return texts;
 	}
 
 	private async readGenerationAlignedTextSnapshots(
-		filePaths: string[],
-		expectedGenerations?: ReadonlyMap<string, number | undefined>,
+		requests: ReadonlyArray<IndexedSnapshotRequest>,
 	): Promise<Map<string, IndexedTextSnapshot>> {
-		const uniquePaths = Array.from(new Set(filePaths));
 		const snapshots = new Map<string, IndexedTextSnapshot>();
-		const missingPaths: string[] = [];
+		const missingRequests: IndexedSnapshotRequest[] = [];
 
-		for (const filePath of uniquePaths) {
-			const expectedGeneration = expectedGenerations?.get(filePath);
-			const current = this.getCurrentFile(filePath);
-			if (current && this.isGenerationMatch(current.generation, expectedGeneration)) {
-				snapshots.set(filePath, {
-					path: filePath,
+		for (const request of requests) {
+			const current = this.getCurrentFile(request.path);
+			if (current && this.isGenerationMatch(current.generation, request.generation)) {
+				snapshots.set(buildIndexedSnapshotRequestKey(request), {
+					path: request.path,
 					text: current.text,
 					generation: current.generation,
 					source: "live",
 				});
 				continue;
 			}
-			missingPaths.push(filePath);
+			missingRequests.push(request);
 		}
 
-		if (missingPaths.length === 0) {
+		if (missingRequests.length === 0) {
 			return snapshots;
 		}
 
-		const registryRowsByPath = await this.database.getDocRegistryEntries(missingPaths);
-		const persistedKeys = missingPaths.map((filePath) => {
-			const row = registryRowsByPath.get(filePath);
-			const expectedGeneration =
-				expectedGenerations?.get(filePath) ?? row?.liveGeneration;
+		const registryRowsByPath = await this.database.getDocRegistryEntries(
+			missingRequests.map((request) => request.path),
+		);
+		const persistedKeys = missingRequests.map((request) => {
+			const row = registryRowsByPath.get(request.path);
+			const expectedGeneration = request.generation ?? row?.liveGeneration;
 			return row == null || expectedGeneration == null
 				? undefined
 				: buildHybridGenerationKey(row.docRef, expectedGeneration);
@@ -1348,30 +1349,30 @@ export class FileSnapshotStore {
 		const persistedRows = await this.database.db.fileSnapshots.bulkGet(
 			persistedKeys.map((key) => key ?? "__missing__"),
 		);
-		const shadowMissingPaths: string[] = [];
-		for (let index = 0; index < missingPaths.length; index++) {
+		const shadowMissingRequests: IndexedSnapshotRequest[] = [];
+		for (let index = 0; index < missingRequests.length; index++) {
 			const row = persistedRows[index];
-			const filePath = missingPaths[index];
-			const expectedGeneration = expectedGenerations?.get(filePath);
+			const request = missingRequests[index];
+			const expectedGeneration = request.generation;
 			if (row && this.isGenerationMatch(row.generation, expectedGeneration)) {
-				snapshots.set(filePath, {
-					path: filePath,
+				snapshots.set(buildIndexedSnapshotRequestKey(request), {
+					path: request.path,
 					text: row.plainText,
 					generation: row.generation,
 					source: "indexed",
 				});
 				continue;
 			}
-			shadowMissingPaths.push(filePath);
+			shadowMissingRequests.push(request);
 		}
 
-		if (!expectedGenerations || shadowMissingPaths.length === 0) {
+		if (shadowMissingRequests.length === 0) {
 			return snapshots;
 		}
 
-		const shadowKeys = shadowMissingPaths.map((filePath) => {
-			const registryRow = registryRowsByPath.get(filePath);
-			const expectedGeneration = expectedGenerations.get(filePath);
+		const shadowKeys = shadowMissingRequests.map((request) => {
+			const registryRow = registryRowsByPath.get(request.path);
+			const expectedGeneration = request.generation;
 			return registryRow == null || expectedGeneration == null
 				? undefined
 				: buildHybridGenerationKey(registryRow.docRef, expectedGeneration);
@@ -1379,18 +1380,18 @@ export class FileSnapshotStore {
 		const shadowRows = await this.database.db.hybridDirtyShadows.bulkGet(
 			shadowKeys.map((key) => key ?? "__missing__"),
 		);
-		for (let index = 0; index < shadowMissingPaths.length; index++) {
+		for (let index = 0; index < shadowMissingRequests.length; index++) {
 			const row = shadowRows[index];
 			if (!row) {
 				continue;
 			}
-			const expectedGeneration = expectedGenerations.get(shadowMissingPaths[index]);
+			const request = shadowMissingRequests[index];
+			const expectedGeneration = request.generation;
 			if (!this.isGenerationMatch(row.generation, expectedGeneration)) {
 				continue;
 			}
-			const filePath = shadowMissingPaths[index];
-			snapshots.set(filePath, {
-				path: filePath,
+			snapshots.set(buildIndexedSnapshotRequestKey(request), {
+				path: request.path,
 				text: row.plainText,
 				generation: row.generation,
 				source: "shadow",

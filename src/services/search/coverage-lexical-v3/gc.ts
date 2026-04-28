@@ -115,6 +115,8 @@ export async function runCoverageLexicalV3StorageGc(params: {
 		...readableManifestShards.filter((descriptor) => descriptor.state === "active"),
 	];
 	const activeShardKeys = new Set(activeShardDescriptors.map(shardKey));
+	// Snapshot overlay refs are an integrity floor, not the replay upper bound:
+	// restore replays the whole active-shard tail for the committed snapshot.
 	const latestReferencedOverlayEntryIds = new Set(
 		latestCommitted?.overlayJournalRefs.map((ref) => ref.entryId) ?? [],
 	);

@@ -1,4 +1,5 @@
 import type { IndexedDocument } from "src/globals/search-types";
+import { buildIndexedSnapshotRequestKey } from "src/services/search/shared/file-snapshot-store";
 import { MemoryActiveOverlayJournalStore } from "src/services/search/coverage-lexical-v3/active-overlay-journal";
 import { runActiveOverlayFoldMaintenanceJob } from "src/services/search/coverage-lexical-v3/active-overlay-fold";
 import { writeActiveOverlayChanges } from "src/services/search/coverage-lexical-v3/active-overlay-writer";
@@ -61,7 +62,7 @@ function indexedSnapshotReader(documents: readonly IndexedDocument[]) {
 					const document = documentByPath.get(request.path);
 					return document == null
 						? []
-						: [[request.path, { path: request.path, text: document.content ?? "", generation: document.generation, source: "indexed" as const }] as const];
+						: [[buildIndexedSnapshotRequestKey(request), { path: request.path, text: document.content ?? "", generation: document.generation, source: "indexed" as const }] as const];
 				}),
 			);
 		},
@@ -111,6 +112,65 @@ describe("coverage lexical v3 active overlay fold", () => {
 		expect(result?.clearedOverlayEntries).toBe(1);
 		expect(result?.appendTargetShard.state).toBe("active");
 		expect((await artifacts.loadResidentShard(result!.appendTargetShard))?.base.docTable.docCount).toBe(2);
+		expect(
+			await overlayStore.loadActiveOverlayEntries({ activeShardId: "active-1", activeShardGeneration: 1 }),
+		).toHaveLength(0);
+	});
+
+	test("oversized fold preserves replacement active shard generation", async () => {
+		const active = activeDescriptor();
+		const stores = createMemoryCoverageLexicalV3ProductionStores({ registry: [active] });
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>((row) => row.id),
+		);
+		const overlayStore = new MemoryActiveOverlayJournalStore();
+		const baseDoc = doc("base.md", "base alpha oversized body", 1);
+		await publishActiveShardAppend({
+			stores,
+			residentShardArtifactStore: artifacts,
+			activeShard: active,
+			currentActiveDocuments: [],
+			changes: [{ document: baseDoc }],
+			plannerOptions: { sealSourceBytes: 1024 * 1024, now: 1 },
+		});
+		const activeAfterBase = (await stores.shardRegistry.loadRegistry())[0] ?? active;
+		await writeActiveOverlayChanges({
+			stores,
+			overlayJournalStore: overlayStore,
+			activeShard: activeAfterBase,
+			changes: [{ document: doc("overlay.md", "overlay beta oversized body", 2) }],
+			sequenceStart: 1,
+			now: 2,
+		});
+
+		const result = await runActiveOverlayFoldMaintenanceJob({
+			stores,
+			residentShardArtifactStore: artifacts,
+			overlayJournalStore: overlayStore,
+			activeShard: activeAfterBase,
+			indexedSnapshotReader: indexedSnapshotReader([baseDoc]),
+			sealSourceBytes: 24,
+			now: 3,
+		});
+
+		expect(result?.publishedShards[0]).toEqual(
+			expect.objectContaining({
+				shardId: "active-1",
+				generation: 2,
+				artifactOwner: "active-1@fold-2",
+				state: "sealed",
+			}),
+		);
+		expect(result?.appendTargetShard.state).toBe("active");
+		const registry = await stores.shardRegistry.loadRegistry();
+		expect(registry).not.toContainEqual(
+			expect.objectContaining({
+				shardId: "active-1",
+				generation: 1,
+				state: "active",
+				artifactOwner: "active-1",
+			}),
+		);
 		expect(
 			await overlayStore.loadActiveOverlayEntries({ activeShardId: "active-1", activeShardGeneration: 1 }),
 		).toHaveLength(0);

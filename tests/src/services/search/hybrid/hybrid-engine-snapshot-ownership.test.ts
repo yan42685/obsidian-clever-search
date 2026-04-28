@@ -13,6 +13,8 @@ jest.mock("src/services/obsidian/user-data/data-provider", () => ({
 }));
 
 jest.mock("src/services/search/shared/file-snapshot-store", () => ({
+  buildIndexedSnapshotRequestKey: (request: { path: string; generation?: number }) =>
+    `${request.path}\0${request.generation ?? ""}`,
   FileSnapshotStore: class FileSnapshotStore {},
 }));
 

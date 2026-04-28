@@ -73,6 +73,7 @@ describe("coverage lexical v3 storage gc", () => {
 		const activeOverlayJournal = new MemoryTable(
 			[
 				{ id: "active-1@1:1", activeShardId: "active-1", activeShardGeneration: 1, sequence: 1, operation: "append", sourceBytes: 1, createdAt: 1 },
+				{ id: "active-1@1:2", activeShardId: "active-1", activeShardGeneration: 1, sequence: 2, operation: "append", sourceBytes: 1, createdAt: 2 },
 				{ id: "old-active@1:1", activeShardId: "old-active", activeShardGeneration: 1, sequence: 1, operation: "append", sourceBytes: 1, createdAt: 1 },
 			],
 			(row) => row.id!,
@@ -84,10 +85,33 @@ describe("coverage lexical v3 storage gc", () => {
 			],
 			(row) => row.id!,
 		);
-		const compactJobs = new MemoryTable([], (row) => row.jobId!);
+		const compactJobs = new MemoryTable<any>([], (row) => row.jobId!);
 		const compactTempArtifacts = new MemoryTable(
-			[{ jobId: "orphan-job", outputShardId: "sealed-2", shard: {}, createdAt: 1 }],
+			[
+				{
+					jobId: "orphan-job",
+					outputShardId: "sealed-2",
+					outputDescriptor: {
+						shardId: "sealed-2",
+						generation: 1,
+						state: "sealed",
+						sourceBytes: 1,
+						docCount: 1,
+						createdOrder: 1,
+						artifactOwner: "sealed-2",
+					},
+					shard: {},
+					createdAt: 1,
+				},
+			],
 			(row) => row.jobId!,
+		);
+		const lexicalBodyEvidence = new MemoryTable(
+			[
+				{ id: "active-overlay-evidence", shardId: "active-1:overlay", shardGeneration: 1 },
+				{ id: "old-overlay-evidence", shardId: "old-active:overlay", shardGeneration: 1 },
+			],
+			(row) => row.id!,
 		);
 
 		const result = await runCoverageLexicalV3StorageGc({
@@ -99,6 +123,7 @@ describe("coverage lexical v3 storage gc", () => {
 				invalidations: invalidations as any,
 				compactJobs: compactJobs as any,
 				compactTempArtifacts: compactTempArtifacts as any,
+				lexicalBodyEvidence: lexicalBodyEvidence as any,
 			},
 		});
 
@@ -108,8 +133,13 @@ describe("coverage lexical v3 storage gc", () => {
 			overlayEntriesRemoved: 1,
 			invalidationsRemoved: 1,
 			compactTempArtifactsRemoved: 1,
+			coldEvidenceRowsRemoved: 1,
 		});
 		expect([...residentShardArtifacts.rows.keys()]).toEqual(["active-1@1"]);
-		expect([...activeOverlayJournal.rows.keys()]).toEqual(["active-1@1:1"]);
+		expect([...activeOverlayJournal.rows.keys()]).toEqual([
+			"active-1@1:1",
+			"active-1@1:2",
+		]);
+		expect([...lexicalBodyEvidence.rows.keys()]).toEqual(["active-overlay-evidence"]);
 	});
 });

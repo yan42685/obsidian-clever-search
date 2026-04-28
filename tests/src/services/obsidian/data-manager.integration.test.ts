@@ -109,6 +109,8 @@ jest.mock("src/services/search/lexical-engine", () => ({
 }));
 
 jest.mock("src/services/search/shared/file-snapshot-store", () => ({
+  buildIndexedSnapshotRequestKey: (request: { path: string; generation?: number }) =>
+    `${request.path}\0${request.generation ?? ""}`,
   FileSnapshotStore: class FileSnapshotStore {},
 }));
 

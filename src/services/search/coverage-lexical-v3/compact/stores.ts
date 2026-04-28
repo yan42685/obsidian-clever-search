@@ -1,5 +1,6 @@
 import type { ResidentShard } from "../layout/types";
 import type { ResidentHotBaseArtifacts } from "../build";
+import type { ResidentShardDescriptor } from "../shards";
 import type { CompactJobManifest } from "./types";
 
 export type CompactJobManifestStore = Readonly<{
@@ -11,6 +12,7 @@ export type CompactJobManifestStore = Readonly<{
 export type CompactTempArtifact = Readonly<{
 	jobId: string;
 	outputShardId: string;
+	outputDescriptor: ResidentShardDescriptor;
 	shard: ResidentShard;
 	bodyEvidenceRows?: ResidentHotBaseArtifacts["bodyEvidenceRows"];
 	hanDocEvidenceRows?: ResidentHotBaseArtifacts["hanDocEvidenceRows"];

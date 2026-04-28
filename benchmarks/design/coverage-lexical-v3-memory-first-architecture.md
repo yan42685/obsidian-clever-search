@@ -1359,3 +1359,44 @@ Validation completed for this update:
 - single-shard runtime execution remains intentional in this phase: the active
   shard is still `base-0`, and this terminology update does not by itself
   introduce multi-shard fan-out or ranking behavior changes.
+
+### 2026-04-28 Update: Shard Maintenance Audit Hardening
+
+Status: Completed on 2026-04-28
+
+The V3 shard maintenance path now tightens the persisted-owner and
+generation-aligned contracts found during the compact/overlay/snapshot audit:
+
+- compact live-doc extraction uses the same shard invalidation key builder as
+  the query path, so superseded or deleted sealed documents are not resurrected
+  during shard replacement.
+- compact crash recovery commits the exact temp artifact descriptor persisted
+  by the executor instead of reconstructing `sourceBytes` and `createdOrder`
+  from the shard doc table.
+- oversized active-overlay fold preserves the replacement active shard
+  generation and artifact owner for the folded active shard; only additional
+  split shards start at generation `1`.
+- active document and hybrid/local-block snapshot hydration are request-keyed by
+  `path + generation`, so callers can safely request multiple generations for
+  the same path without silently collapsing them to one text snapshot.
+- active overlay journal clearing deletes only the target active shard rows, and
+  the atomic Dexie store performs the clear inside a transaction over the
+  `[activeShardId+activeShardGeneration+sequence]` compound range.
+- storage GC treats snapshot overlay refs as an integrity floor rather than a
+  replay upper bound: it roots the full active-shard journal tail and the
+  overlay cold evidence reachable from that tail.
+- snapshot restore now documents that manifest overlay refs are an integrity
+  floor for the committed resident base, while restore intentionally replays the
+  whole active-shard overlay tail for crash recovery.
+
+Validation completed for this update:
+
+- `npm run typecheck:build` passes on 2026-04-28.
+- `npm test -- tests/src/services/search/coverage-lexical-v3` passes on
+  2026-04-28.
+- `npm test -- tests/src/services/search/hybrid` passes on 2026-04-28.
+- targeted regression coverage was added for compact invalidation, compact
+  ready-to-commit recovery, oversized active fold generation, and same-path
+  active document hydration by requested generation.
+- GC regression coverage now verifies that stale manifest refs do not cause the
+  active overlay tail or its overlay cold evidence to be collected.

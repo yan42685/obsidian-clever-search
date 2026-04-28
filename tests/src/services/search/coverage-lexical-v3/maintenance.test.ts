@@ -1,15 +1,18 @@
 import type { IndexedDocument } from "src/globals/search-types";
+import { buildIndexedSnapshotRequestKey } from "src/services/search/shared/file-snapshot-store";
 import {
 	createDexieCoverageLexicalV3ResidentShardArtifactStore,
 	type CoverageLexicalV3ResidentShardArtifactRow,
 } from "src/services/search/coverage-lexical-v3/artifact-loader";
 import { buildResidentHotBaseArtifacts } from "src/services/search/coverage-lexical-v3/build";
 import {
+	type CompactJobManifest,
 	MemoryCompactJobManifestStore,
 	MemoryCompactTempArtifactStore,
 } from "src/services/search/coverage-lexical-v3/compact";
 import type { ResidentShard } from "src/services/search/coverage-lexical-v3/layout/types";
 import { runCoverageLexicalV3Maintenance } from "src/services/search/coverage-lexical-v3/maintenance";
+import { getDocPath } from "src/services/search/coverage-lexical-v3/recall";
 import type { ResidentShardDescriptor } from "src/services/search/coverage-lexical-v3/shards";
 import { createMemoryCoverageLexicalV3ProductionStores } from "src/services/search/coverage-lexical-v3/stores";
 import { MemoryActiveOverlayJournalStore } from "src/services/search/coverage-lexical-v3/active-overlay-journal";
@@ -77,7 +80,7 @@ function indexedSnapshotReader(documents: readonly IndexedDocument[]) {
 					const document = byPath.get(request.path);
 					return document == null
 						? []
-						: [[request.path, { path: request.path, text: document.content ?? "", generation: document.generation, source: "indexed" as const }] as const];
+						: [[buildIndexedSnapshotRequestKey(request), { path: request.path, text: document.content ?? "", generation: document.generation, source: "indexed" as const }] as const];
 				}),
 			);
 		},
@@ -126,5 +129,115 @@ describe("coverage lexical v3 maintenance coordinator", () => {
 		const registry = await stores.shardRegistry.loadRegistry();
 		expect(registry.map((shard) => shard.shardId)).toContain("sealed-compact-10");
 		expect(registry.find((shard) => shard.shardId === "sealed-1")?.state).toBe("garbage");
+	});
+
+	test("compact drops invalidated sealed documents", async () => {
+		const first = descriptor("sealed-1", 1);
+		const second = descriptor("sealed-2", 2);
+		const stores = createMemoryCoverageLexicalV3ProductionStores({
+			registry: [first, second],
+			invalidations: [
+				{
+					shardId: "sealed-1",
+					shardGeneration: 1,
+					docRef: 1,
+					docGeneration: 1,
+					reason: "superseded",
+					createdAt: 9,
+				},
+			],
+		});
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>(
+				(row) => row.id,
+			),
+		);
+		const docs = [doc("one.md", "one target", 1), doc("two.md", "two target", 2)];
+		await artifacts.publishResidentShardArtifact({
+			descriptor: first,
+			shard: residentShard("sealed-1", [docs[0]]),
+			createdAt: 1,
+		});
+		await artifacts.publishResidentShardArtifact({
+			descriptor: second,
+			shard: residentShard("sealed-2", [docs[1]]),
+			createdAt: 1,
+		});
+
+		await runCoverageLexicalV3Maintenance({
+			stores,
+			residentShardArtifactStore: artifacts,
+			overlayJournalStore: new MemoryActiveOverlayJournalStore(),
+			compactJobStore: new MemoryCompactJobManifestStore(),
+			compactTempArtifactStore: new MemoryCompactTempArtifactStore(),
+			indexedSnapshotReader: indexedSnapshotReader(docs),
+			now: 20,
+		});
+
+		const compactShard = await artifacts.loadResidentShard({
+			shardId: "sealed-compact-20",
+			generation: 1,
+			state: "sealed",
+			sourceBytes: 1024,
+			docCount: 1,
+			createdOrder: 1,
+			artifactOwner: "sealed-compact-20",
+		});
+		expect(compactShard?.base.docTable.docCount).toBe(1);
+		expect(getDocPath(compactShard!.base, 0)).toBe("two.md");
+	});
+
+	test("ready compact recovery commits persisted temp descriptor", async () => {
+		const first = descriptor("sealed-1", 1);
+		const second = descriptor("sealed-2", 2);
+		const outputDescriptor: ResidentShardDescriptor = {
+			shardId: "sealed-3",
+			generation: 1,
+			state: "sealed",
+			sourceBytes: 4096,
+			docCount: 1,
+			createdOrder: 77,
+			artifactOwner: "sealed-3-owner",
+		};
+		const stores = createMemoryCoverageLexicalV3ProductionStores({
+			registry: [first, second],
+		});
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>(
+				(row) => row.id,
+			),
+		);
+		const job: CompactJobManifest = {
+			jobId: "job-ready",
+			kind: "adjacent_small_shard_merge",
+			inputShardIds: ["sealed-1", "sealed-2"],
+			outputShardId: "sealed-3",
+			status: "ready_to_commit",
+			createdAt: 1,
+			updatedAt: 1,
+		};
+		const tempStore = new MemoryCompactTempArtifactStore();
+		await tempStore.saveTempArtifact({
+			jobId: job.jobId,
+			outputShardId: "sealed-3",
+			outputDescriptor,
+			shard: residentShard("sealed-3", [doc("merged.md", "merged target", 3)]),
+			createdAt: 1,
+		});
+
+		await runCoverageLexicalV3Maintenance({
+			stores,
+			residentShardArtifactStore: artifacts,
+			overlayJournalStore: new MemoryActiveOverlayJournalStore(),
+			compactJobStore: new MemoryCompactJobManifestStore([job]),
+			compactTempArtifactStore: tempStore,
+			indexedSnapshotReader: indexedSnapshotReader([]),
+			now: 20,
+		});
+
+		expect(
+			(await stores.shardRegistry.loadRegistry()).find((shard) => shard.shardId === "sealed-3"),
+		).toEqual(outputDescriptor);
+		expect(await artifacts.loadResidentShard(outputDescriptor)).toBeDefined();
 	});
 });

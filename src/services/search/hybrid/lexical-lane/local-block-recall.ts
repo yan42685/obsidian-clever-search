@@ -3,7 +3,10 @@ import {
   type CoverageLexicalV3HybridLexicalSubitemsCandidateSpan,
   type CoverageLexicalV3HybridLexicalSubitemsRenderPayload,
 } from "src/services/search/coverage-lexical-v3/hybrid-lexical-subitems";
-import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
+import {
+  buildIndexedSnapshotRequestKey,
+  FileSnapshotStore,
+} from "src/services/search/shared/file-snapshot-store";
 import { getInstance } from "src/utils/my-lib";
 import {
   buildLineOffsets,
@@ -34,7 +37,12 @@ export async function buildHybridLexicalLaneLocalBlockCandidates(params: {
   );
 
   for (const file of params.files) {
-    const snapshot = snapshotsByPath.get(file.filePath);
+    const snapshot = snapshotsByPath.get(
+      buildIndexedSnapshotRequestKey({
+        path: file.filePath,
+        generation: file.snapshotGeneration,
+      }),
+    );
     if (!snapshot) {
       continue;
     }

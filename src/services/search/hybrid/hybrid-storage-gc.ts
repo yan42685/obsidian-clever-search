@@ -196,6 +196,9 @@ export async function runHybridStorageGc(
     (row) => row.id,
     async (rows) => {
       const staleIds = rows
+        // File snapshots are shared by hybrid display, lexical fallback, and
+        // generation-aligned recovery reads. For live docs, keep every stored
+        // snapshot generation instead of guessing a single upper bound here.
         .filter((row) => !liveDocRefs.has(row.docRef))
         .map((row) => row.id);
       if (staleIds.length === 0) {
@@ -241,6 +244,10 @@ function shouldKeepDirtyShadow(
 ): boolean {
   const live = liveDocRefs.get(row.docRef);
   const ref = indexedRefsByDocRef.get(row.docRef);
+  // Dirty shadows are the hybrid equivalent of a durable tail: a stale ready
+  // dense generation can still be displayed with shadow text while the live
+  // generation is ahead. Do not trim this root merely because it is not the
+  // current docRegistry liveGeneration.
   return (
     live !== undefined &&
     ref !== undefined &&

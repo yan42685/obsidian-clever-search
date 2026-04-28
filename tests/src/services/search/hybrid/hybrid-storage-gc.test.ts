@@ -192,6 +192,62 @@ describe("runHybridStorageGc", () => {
       db.indexArtifactState.get(buildIndexArtifactStateId("hybrid", "hnsw")),
     ).resolves.toBeUndefined();
   });
+
+  test("keeps stale ready dense generation tail for live docs", async () => {
+    await db.docRegistry.put({
+      docRef: 7,
+      path: "docs/stale-ready-tail.md",
+      deleted: false,
+      liveGeneration: 11,
+      denseServeUntil: Date.now() + 60_000,
+      updatedAt: 11,
+    });
+    await db.hybridIndexedFileRefs.put({
+      docRef: 7,
+      generation: 10,
+      state: "ready",
+      chunkCount: 1,
+      vectorPrecision: "int8",
+    });
+    await db.hybridChunks.bulkPut([
+      chunk(10, 7, 10),
+      chunk(9, 7, 9),
+    ]);
+    await db.hybridChunkVectors.bulkPut([
+      vector("7:10", 7, 10),
+      vector("7:9", 7, 9),
+    ]);
+    await db.hybridDirtyShadows.bulkPut([
+      snapshot("7:10", 7, 10),
+      snapshot("7:9", 7, 9),
+    ]);
+    await db.fileSnapshots.bulkPut([
+      snapshot("7:10", 7, 10),
+      snapshot("7:11", 7, 11),
+    ]);
+
+    const metrics = await runHybridStorageGc({ db }, { reason: "tail-gc" });
+
+    expect(metrics).toMatchObject({
+      chunksRemoved: 1,
+      vectorsRemoved: 1,
+      indexedRefsRemoved: 0,
+      snapshotsRemoved: 0,
+      shadowsRemoved: 1,
+      hnswMarkedDirty: true,
+    });
+    await expect(db.hybridChunks.orderBy(":id").keys()).resolves.toEqual([10]);
+    await expect(db.hybridChunkVectors.orderBy(":id").keys()).resolves.toEqual([
+      "7:10",
+    ]);
+    await expect(db.hybridDirtyShadows.orderBy(":id").keys()).resolves.toEqual([
+      "7:10",
+    ]);
+    await expect(db.fileSnapshots.orderBy(":id").keys()).resolves.toEqual([
+      "7:10",
+      "7:11",
+    ]);
+  });
 });
 
 function chunk(id: number, docRef: number, generation: number) {

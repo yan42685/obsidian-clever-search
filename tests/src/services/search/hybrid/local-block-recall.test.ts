@@ -1,6 +1,8 @@
 const mockReadIndexedTextSnapshots = jest.fn();
 
 jest.mock("src/services/search/shared/file-snapshot-store", () => ({
+	buildIndexedSnapshotRequestKey: (request: { path: string; generation?: number }) =>
+		`${request.path}\0${request.generation ?? ""}`,
 	FileSnapshotStore: class FileSnapshotStore {},
 }));
 
@@ -99,7 +101,7 @@ describe("hybrid lexical lane local block recall", () => {
 		mockReadIndexedTextSnapshots.mockResolvedValue(
 			new Map([
 				[
-					file.filePath,
+					`${file.filePath}\0${file.snapshotGeneration ?? ""}`,
 					{
 						path: file.filePath,
 						text: "shadow cache restore evidence",
@@ -136,7 +138,7 @@ describe("hybrid lexical lane local block recall", () => {
 		mockReadIndexedTextSnapshots.mockResolvedValue(
 			new Map([
 				[
-					file.filePath,
+					`${file.filePath}\0${file.snapshotGeneration ?? ""}`,
 					{
 						path: file.filePath,
 						text: "indexed cache restore evidence",
@@ -159,4 +161,3 @@ describe("hybrid lexical lane local block recall", () => {
 		expect(blockCandidates[0].snapshotSource).toBe("indexed");
 	});
 });
-
