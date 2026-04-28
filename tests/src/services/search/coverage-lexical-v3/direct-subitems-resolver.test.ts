@@ -1,5 +1,8 @@
 jest.mock("src/services/search/coverage-lexical-v3/direct-subitems/evidence", () => ({
 	buildV3DirectSubitemCandidates: jest.fn(),
+	prepareV3DirectSubitemSnapshotText: jest.fn((snapshotText: string) => ({
+		text: snapshotText,
+	})),
 }));
 
 jest.mock("src/services/search/coverage-lexical-v3/direct-subitems/renderer", () => ({

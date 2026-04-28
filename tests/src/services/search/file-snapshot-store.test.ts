@@ -68,6 +68,7 @@ const DEFAULT_TEST_SHARD_OWNER = {
 } as const;
 
 type SnapshotRow = {
+  id?: string;
   docRef?: number;
   filePath: string;
   plainText: string;
@@ -166,7 +167,7 @@ type LexicalHanWitnessRow = {
 };
 
 type HybridIndexedFileRefRow = {
-  path: string;
+  path?: string;
   docRef?: number;
   generation?: number;
   state?: string;
@@ -182,61 +183,88 @@ type DocRegistryRow = {
 };
 
 function createFilePathTable(initialRows: SnapshotRow[] = []) {
+  const keyForRow = (row: SnapshotRow) => row.id ?? row.filePath;
   const rows = new Map<string, SnapshotRow>(
-    initialRows.map((row) => [row.filePath, { ...row }]),
+    initialRows.map((row) => [keyForRow(row), { ...row }]),
   );
   const sortedRows = () =>
+    Array.from(rows.entries())
+      .map(([key, row]) => ({ ...row, id: row.id ?? key }))
+      .sort((left, right) => (left.id ?? left.filePath).localeCompare(right.id ?? right.filePath));
+  const sortedDocRefRows = () =>
     Array.from(rows.values())
+      .filter((row) => row.docRef !== undefined)
       .map((row) => ({ ...row }))
-      .sort((left, right) => left.filePath.localeCompare(right.filePath));
+      .sort((left, right) => (left.docRef ?? 0) - (right.docRef ?? 0));
+  const getRow = (key: string) => {
+    const direct = rows.get(key);
+    if (direct) {
+      return direct;
+    }
+    return Array.from(rows.values()).find((row) => row.filePath === key);
+  };
 
   return {
     rows,
     async get(path: string) {
-      const row = rows.get(path);
+      const row = getRow(path);
       return row ? { ...row } : undefined;
     },
     async bulkGet(paths: readonly string[]) {
       return paths.map((path) => {
-        const row = rows.get(path);
+        const row = getRow(path);
         return row ? { ...row } : undefined;
       });
     },
     async bulkPut(nextRows: SnapshotRow[]) {
       for (const row of nextRows) {
-        rows.set(row.filePath, { ...row });
+        rows.set(keyForRow(row), { ...row });
       }
     },
     async bulkDelete(paths: readonly string[]) {
       for (const path of paths) {
-        rows.delete(path);
+        const directDeleted = rows.delete(path);
+        if (!directDeleted) {
+          for (const [key, row] of rows.entries()) {
+            if (row.filePath === path) {
+              rows.delete(key);
+            }
+          }
+        }
       }
     },
     orderBy(field: string) {
-      if (field !== ":id") {
+      if (field !== ":id" && field !== "docRef") {
         throw new Error(`Unsupported orderBy field: ${field}`);
       }
       return {
+        toArray: async () =>
+          field === "docRef" ? sortedDocRefRows() : sortedRows(),
         limit(limit: number) {
           return {
-            toArray: async () => sortedRows().slice(0, limit),
+            toArray: async () =>
+              (field === "docRef" ? sortedDocRefRows() : sortedRows()).slice(0, limit),
           };
         },
       };
     },
     where(field: string) {
-      if (field !== ":id") {
+      if (field !== ":id" && field !== "docRef") {
         throw new Error(`Unsupported where field: ${field}`);
       }
       return {
-        above(lastPath: string) {
+        above(lastValue: string | number) {
           return {
             limit(limit: number) {
               return {
                 toArray: async () =>
-                  sortedRows()
-                    .filter((row) => row.filePath.localeCompare(lastPath) > 0)
-                    .slice(0, limit),
+                  field === "docRef"
+                    ? sortedDocRefRows()
+                        .filter((row) => (row.docRef ?? 0) > Number(lastValue))
+                        .slice(0, limit)
+                    : sortedRows()
+                        .filter((row) => (row.id ?? row.filePath).localeCompare(String(lastValue)) > 0)
+                        .slice(0, limit),
               };
             },
           };
@@ -247,47 +275,60 @@ function createFilePathTable(initialRows: SnapshotRow[] = []) {
 }
 
 function createHybridIndexedRefTable(initialRows: HybridIndexedFileRefRow[] = []) {
-  const rows = new Map<string, HybridIndexedFileRefRow>(
-    initialRows.map((row) => [row.path, { ...row }]),
+  const keyForRow = (row: HybridIndexedFileRefRow) =>
+    row.docRef ?? row.path ?? "__missing__";
+  const rows = new Map<string | number, HybridIndexedFileRefRow>(
+    initialRows.map((row) => [keyForRow(row), { ...row }]),
   );
   const sortedRows = () =>
     Array.from(rows.values())
       .map((row) => ({ ...row }))
-      .sort((left, right) => left.path.localeCompare(right.path));
+      .sort((left, right) => (left.docRef ?? 0) - (right.docRef ?? 0));
+  const getRow = (key: string | number) => {
+    const direct = rows.get(key);
+    if (direct) {
+      return direct;
+    }
+    return Array.from(rows.values()).find((row) => row.path === key);
+  };
 
   return {
     rows,
-    async get(path: string) {
-      const row = rows.get(path);
+    async get(path: string | number) {
+      const row = getRow(path);
       return row ? { ...row } : undefined;
     },
-    async bulkGet(paths: readonly string[]) {
-      return paths.map((path) => {
-        const row = rows.get(path);
+    async bulkGet(keys: readonly (string | number)[]) {
+      return keys.map((key) => {
+        const row = getRow(key);
         return row ? { ...row } : undefined;
       });
     },
     async bulkPut(nextRows: HybridIndexedFileRefRow[]) {
       for (const row of nextRows) {
-        rows.set(row.path, { ...row });
+        rows.set(keyForRow(row), { ...row });
       }
     },
     async put(row: HybridIndexedFileRefRow) {
-      rows.set(row.path, { ...row });
+      rows.set(keyForRow(row), { ...row });
     },
-    async bulkDelete(paths: readonly string[]) {
-      for (const path of paths) {
-        rows.delete(path);
+    async delete(key: string | number) {
+      rows.delete(key);
+    },
+    async bulkDelete(keys: readonly (string | number)[]) {
+      for (const key of keys) {
+        rows.delete(key);
       }
     },
     async clear() {
       rows.clear();
     },
     orderBy(field: string) {
-      if (field !== ":id") {
+      if (field !== ":id" && field !== "docRef") {
         throw new Error(`Unsupported orderBy field: ${field}`);
       }
       return {
+        toArray: async () => sortedRows(),
         limit(limit: number) {
           return {
             toArray: async () => sortedRows().slice(0, limit),
@@ -296,17 +337,21 @@ function createHybridIndexedRefTable(initialRows: HybridIndexedFileRefRow[] = []
       };
     },
     where(field: string) {
-      if (field !== ":id") {
+      if (field !== ":id" && field !== "docRef") {
         throw new Error(`Unsupported where field: ${field}`);
       }
       return {
-        above(lastPath: string) {
+        above(lastValue: string | number) {
           return {
             limit(limit: number) {
               return {
                 toArray: async () =>
                   sortedRows()
-                    .filter((row) => row.path.localeCompare(lastPath) > 0)
+                    .filter((row) =>
+                      field === "docRef"
+                        ? (row.docRef ?? 0) > Number(lastValue)
+                        : (row.path ?? "").localeCompare(String(lastValue)) > 0,
+                    )
                     .slice(0, limit),
               };
             },
@@ -414,6 +459,15 @@ function createDocRegistryStore(initialRows: DocRegistryRow[] = []) {
         updatedAt: Date.now(),
       });
     },
+    table: {
+      async get(docRef: number) {
+        const row = Array.from(rows.values()).find((entry) => entry.docRef === docRef);
+        return row ? { ...row } : undefined;
+      },
+      async put(row: DocRegistryRow) {
+        rows.set(row.path, { ...row });
+      },
+    },
   };
 }
 
@@ -476,7 +530,79 @@ function createStoreHarness(options?: {
   const files = new Map<string, TFile>(
     (options?.files ?? []).map((file) => [file.path, file]),
   );
-  const fileSnapshots = createFilePathTable(options?.fileSnapshots);
+  const inferredDocRegistry = new Map<string, DocRegistryRow>(
+    (options?.docRegistry ?? []).map((row) => [row.path, { ...row }]),
+  );
+  let nextInferredDocRef =
+    (options?.docRegistry ?? []).reduce((max, row) => Math.max(max, row.docRef), 0) + 1;
+  const ensureInferredDocRegistry = (
+    path: string | undefined,
+    generation?: number,
+    docRef?: number,
+    contentFingerprint?: string,
+  ): DocRegistryRow | undefined => {
+    if (!path) {
+      return undefined;
+    }
+    const existing = inferredDocRegistry.get(path);
+    if (existing) {
+      if (generation !== undefined && generation > existing.liveGeneration) {
+        existing.liveGeneration = generation;
+      }
+      if (contentFingerprint !== undefined) {
+        existing.contentFingerprint = contentFingerprint;
+      }
+      return existing;
+    }
+    const fileGeneration = files.get(path)?.stat?.mtime;
+    const nextRow: DocRegistryRow = {
+      docRef: docRef ?? nextInferredDocRef++,
+      path,
+      deleted: false,
+      liveGeneration: generation ?? fileGeneration ?? 0,
+      contentFingerprint,
+      updatedAt: Date.now(),
+    };
+    if (nextRow.docRef >= nextInferredDocRef) {
+      nextInferredDocRef = nextRow.docRef + 1;
+    }
+    inferredDocRegistry.set(path, nextRow);
+    return nextRow;
+  };
+  for (const file of files.values()) {
+    ensureInferredDocRegistry(file.path, file.stat?.mtime);
+  }
+  for (const row of options?.fileSnapshots ?? []) {
+    ensureInferredDocRegistry(row.filePath, row.generation, row.docRef);
+  }
+  for (const row of options?.hybridDirtyShadows ?? []) {
+    ensureInferredDocRegistry(row.filePath, row.generation, row.docRef);
+  }
+  for (const row of options?.hybridIndexedFileRefs ?? []) {
+    ensureInferredDocRegistry(row.path, row.generation, row.docRef);
+  }
+  const withGenerationKey = <T extends SnapshotRow>(row: T): T => {
+    const registryRow = ensureInferredDocRegistry(row.filePath, row.generation, row.docRef);
+    return registryRow == null || row.generation == null
+      ? { ...row }
+      : {
+          ...row,
+          docRef: registryRow.docRef,
+          id: row.id ?? `${registryRow.docRef}:${row.generation}`,
+        };
+  };
+  const withDocRef = (row: HybridIndexedFileRefRow): HybridIndexedFileRefRow => {
+    const registryRow = ensureInferredDocRegistry(row.path, row.generation, row.docRef);
+    return registryRow == null
+      ? { ...row }
+      : {
+          ...row,
+          docRef: row.docRef ?? registryRow.docRef,
+        };
+  };
+  const fileSnapshots = createFilePathTable(
+    options?.fileSnapshots?.map(withGenerationKey),
+  );
   const lexicalIndexedMetadata = createFilePathTable(
     options?.lexicalIndexedMetadata,
   );
@@ -491,11 +617,13 @@ function createStoreHarness(options?: {
   const lexicalHanBodyEvidence = createRowIdTable(options?.lexicalHanBodyEvidence);
   const lexicalExactTapes = createSingletonKeyTable(options?.lexicalExactTapes);
   const lexicalHanWitness = createSingletonKeyTable(options?.lexicalHanWitness);
-  const hybridDirtyShadows = createFilePathTable(options?.hybridDirtyShadows);
-  const hybridIndexedFileRefs = createHybridIndexedRefTable(
-    options?.hybridIndexedFileRefs,
+  const hybridDirtyShadows = createFilePathTable(
+    options?.hybridDirtyShadows?.map(withGenerationKey),
   );
-  const docRegistry = createDocRegistryStore(options?.docRegistry);
+  const hybridIndexedFileRefs = createHybridIndexedRefTable(
+    options?.hybridIndexedFileRefs?.map(withDocRef),
+  );
+  const docRegistry = createDocRegistryStore(Array.from(inferredDocRegistry.values()));
   const reads = options?.reads ?? {};
   const cachedRead = jest.fn(async (file: TFile) => reads[file.path] ?? "");
   const vault = {
@@ -515,10 +643,21 @@ function createStoreHarness(options?: {
       lexicalHanWitness,
       hybridDirtyShadows,
       hybridIndexedFileRefs,
+      docRegistry: docRegistry.table,
     },
     ensureDocRegistryEntry: jest.fn(async (params) => await docRegistry.ensureEntry(params)),
     ensureDocRegistryEntries: jest.fn(async (params) => await docRegistry.ensureEntries(params)),
     getDocRegistryEntry: jest.fn(async (path: string) => await docRegistry.get(path)),
+    getDocRegistryEntries: jest.fn(async (paths: readonly string[]) => {
+      const entries = new Map<string, DocRegistryRow>();
+      for (const path of paths) {
+        const row = await docRegistry.get(path);
+        if (row) {
+          entries.set(path, row);
+        }
+      }
+      return entries;
+    }),
     listDocRegistryEntries: jest.fn(async () => Array.from(docRegistry.rows.values()).map((row) => ({ ...row }))),
     moveDocRegistryPath: jest.fn(async (oldPath: string, newPath: string, options?: { generation?: number; contentFingerprint?: string }) => await docRegistry.movePath(oldPath, newPath, options)),
     markDocRegistryDeleted: jest.fn(async (path: string, generation?: number) => await docRegistry.markDeleted(path, generation)),
@@ -667,11 +806,14 @@ describe("FileSnapshotStore", () => {
 
     await store.retainOnlyFiles(new Set([keepPath]));
 
-    await expect(database.db.hybridIndexedFileRefs.get(keepPath)).resolves.toEqual({
-      path: keepPath,
-      generation: 100,
-      state: "ready",
-    });
+    await expect(database.db.hybridIndexedFileRefs.get(keepPath)).resolves.toEqual(
+      expect.objectContaining({
+        docRef: expect.any(Number),
+        path: keepPath,
+        generation: 100,
+        state: "ready",
+      }),
+    );
     await expect(database.db.hybridIndexedFileRefs.get(stalePath)).resolves.toBeUndefined();
   });
 
@@ -684,10 +826,16 @@ describe("FileSnapshotStore", () => {
       },
     });
 
-    await store.putHybridIndexedFileRef({
+    const registryRow = await store.ensureDocRegistryEntry({
       path: file.path,
       generation: 220,
+    });
+
+    await store.putHybridIndexedFileRef({
+      docRef: registryRow.docRef,
+      generation: 220,
       state: "ready",
+      chunkCount: 0,
     });
     await store.publishIndexedTexts([
       {
@@ -697,8 +845,8 @@ describe("FileSnapshotStore", () => {
       },
     ]);
 
-    const indexedRef = await database.db.hybridIndexedFileRefs.get(file.path);
-    const snapshot = await database.db.fileSnapshots.get(file.path);
+    const indexedRef = await database.db.hybridIndexedFileRefs.get(registryRow.docRef);
+    const snapshot = await database.db.fileSnapshots.get(`${registryRow.docRef}:220`);
 
     expect(indexedRef?.docRef).toBeDefined();
     expect(snapshot?.docRef).toBe(indexedRef?.docRef);
@@ -712,12 +860,13 @@ describe("FileSnapshotStore", () => {
     );
 
     await store.putHybridIndexedFileRef({
-      path: file.path,
+      docRef: registryRow.docRef,
       generation: 221,
       state: "ready",
+      chunkCount: 0,
     });
 
-    const nextIndexedRef = await database.db.hybridIndexedFileRefs.get(file.path);
+    const nextIndexedRef = await database.db.hybridIndexedFileRefs.get(registryRow.docRef);
     expect(nextIndexedRef?.docRef).toBe(indexedRef?.docRef);
   });
 

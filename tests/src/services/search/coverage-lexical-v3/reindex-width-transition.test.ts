@@ -31,8 +31,50 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => ({
 		publishLexicalHanBodyEvidence(): Promise<void> {
 			return Promise.resolve();
 		}
+
+		publishLexicalFuzzyRescue(): Promise<void> {
+			return Promise.resolve();
+		}
 	}
 }));
+
+jest.mock("src/services/database/database", () => {
+	const createTable = () => {
+		const rows = new Map();
+		const keyForRow = (row: any) =>
+			row.id ?? row.shardId ?? row.docRef ?? row.path ?? rows.size;
+		return {
+			async toArray() {
+				return Array.from(rows.values()).map((row) => ({ ...row }));
+			},
+			async bulkPut(nextRows: readonly any[]) {
+				for (const row of nextRows) rows.set(keyForRow(row), { ...row });
+			},
+			async put(row: any) {
+				rows.set(keyForRow(row), { ...row });
+			},
+			async delete(key: unknown) {
+				rows.delete(key);
+			},
+			async clear() {
+				rows.clear();
+			},
+		};
+	};
+	class Database {
+		db = {
+			coverageLexicalV3ShardRegistry: createTable(),
+			coverageLexicalV3Invalidations: createTable(),
+			coverageLexicalV3ResidentShardArtifacts: createTable(),
+			coverageLexicalV3ActiveOverlayJournal: createTable(),
+			transaction: async (_mode: string, ...args: any[]) => {
+				const callback = args[args.length - 1];
+				return await callback();
+			},
+		};
+	}
+	return { Database };
+});
 
 jest.mock(
 	"src/services/search/coverage-lexical-v3/direct-subitems",
@@ -188,6 +230,7 @@ describe("coverage lexical v3 reindex width transitions", () => {
 		const stressDocument = createStressDocument("notes/stress-batch.md");
 
 		await engine.reIndexAll(baselineDocuments);
+		(engine as any).applyOverlayRecoveryChanges = jest.fn(async () => false);
 		await engine.moveDocument("notes/doc-000.md", movedDocument);
 
 		const movedPaths = await searchAlphaPaths(engine, 64);
@@ -201,7 +244,7 @@ describe("coverage lexical v3 reindex width transitions", () => {
 		const preFinishPaths = await searchAlphaPaths(engine, 64);
 		expect(preFinishPaths).toContain("notes/doc-000-renamed.md");
 
-		engine.finishBatchReindex();
+		await engine.finishBatchReindex();
 
 		const postFinishPaths = await searchAlphaPaths(engine, 64);
 		expect(postFinishPaths).not.toContain("notes/doc-000-renamed.md");

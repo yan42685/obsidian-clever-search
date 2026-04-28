@@ -10,6 +10,25 @@ if (!global.TextDecoder) {
 	global.TextDecoder = TextDecoder;
 }
 
+if (!global.alert) {
+	global.alert = jest.fn();
+}
+
+jest.mock(
+	"electron",
+	() => ({
+		app: {
+			getPath: () => "mockedPath",
+		},
+		remote: {
+			app: {
+				getPath: () => "mockedPath",
+			},
+		},
+	}),
+	{ virtual: true },
+);
+
 global.require = (moduleName) => {
 	if (moduleName === "electron") {
 		return {

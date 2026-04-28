@@ -1,5 +1,5 @@
 ﻿import type { IndexedDocument } from "src/globals/search-types";
-import { buildResidentBase } from "src/services/search/coverage-lexical-v3/build";
+import { buildResidentHotBaseArtifacts } from "src/services/search/coverage-lexical-v3/build";
 import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
 import type { V3DocumentTokenizer } from "src/services/search/coverage-lexical-v3/query";
 import { getFamilyText } from "src/services/search/coverage-lexical-v3/recall";
@@ -28,7 +28,7 @@ function createDocumentTokenizer(
 }
 
 describe("coverage lexical v3 witness split", () => {
-	test("witness-only han surfaces stay out of the main family lexicon while completion still works", () => {
+	test("tokenizer-backed Han completion stays out of the main family lexicon", () => {
 		const tokenizer = createDocumentTokenizer({
 			"生命力": ["生命"],
 			"这里记录生命力训练": ["这里", "记录", "生命", "训练"],
@@ -39,7 +39,8 @@ describe("coverage lexical v3 witness split", () => {
 			folder: "zh",
 			content: "这里记录生命力训练",
 		});
-		const residentBase = buildResidentBase([document], tokenizer);
+		const artifacts = buildResidentHotBaseArtifacts([document], tokenizer);
+		const residentBase = artifacts.base;
 		const familyTexts = Array.from(
 			{ length: residentBase.familyLexicon.familyCount },
 			(_, familyId) => getFamilyText(residentBase, familyId),
@@ -47,7 +48,8 @@ describe("coverage lexical v3 witness split", () => {
 		const engine = new CoverageLexicalV3Engine();
 
 		expect(familyTexts).not.toContain("生命力");
-	expect(residentBase.hanRoute.bodyWitnessOccurrenceTextIds.length).toBeGreaterThan(0);
+		expect(artifacts.hanBodyEvidenceRows).toHaveLength(0);
+		expect(residentBase.hanRoute.bodyWitnessOccurrenceTextIds).toHaveLength(0);
 
 		engine.buildResidentIndexView([document], tokenizer);
 		const result = engine.search("生命力", ["生命"]);

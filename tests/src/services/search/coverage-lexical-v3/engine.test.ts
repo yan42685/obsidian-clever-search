@@ -407,7 +407,7 @@ describe("coverage lexical v3 engine", () => {
 		);
 	});
 
-	test("global Han family matches no longer widen recall to rescue-only docs from the same group", () => {
+	test("global Han family ranks exact matches ahead of same-group opaque metadata docs", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const tokenizer = createDocumentTokenizer({
 			"\u8d62\u5b8b": ["\u8d62\u5b8b"],
@@ -435,11 +435,25 @@ describe("coverage lexical v3 engine", () => {
 
 		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual([
 			"zh/exact.md",
+			"zh/fallback.md",
 		]);
 		expect(result.rankedCandidates[0].realizedFamilies[0]).toEqual(
 			expect.objectContaining({
 				queryUnitText: "\u8d62\u5b8b",
 				matchKind: "exact",
+				inIdentity: true,
+			}),
+		);
+		expect(result.rankedCandidates[1]).toEqual(
+			expect.objectContaining({
+				exactUnitCount: 0,
+				strongestHanSurfaceCompletionTier: "identity",
+			}),
+		);
+		expect(result.rankedCandidates[1].realizedFamilies[0]).toEqual(
+			expect.objectContaining({
+				queryUnitText: "\u8d62\u5b8b",
+				matchKind: "opaque_exact",
 				inIdentity: true,
 			}),
 		);

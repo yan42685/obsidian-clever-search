@@ -23,7 +23,8 @@ describe("plugin setting migration", () => {
 		expect(result.data.settingsSchemaVersion).toBe(
 			CURRENT_OUTER_SETTING_SCHEMA_VERSION,
 		);
-		expect(result.data.weakFilePruneMode).toBe("lenient");
+		expect(result.data.hideWeaklyRelatedResults).toBe(true);
+		expect(result.data.weakFilePruneMode).toBeUndefined();
 		expect(result.data.hideWeaklyRelevantFiles).toBeUndefined();
 		expect(result.data.hybrid).toEqual({
 			excludedPaths: ["tmp"],
