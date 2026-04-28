@@ -238,6 +238,130 @@ The cold evidence builder is now runtime-streaming instead of only slice-first:
   `reIndexAll(...)` runtime chunking behavior, including that whole sidecar
   publishers remain unused.
 
+## Production V3 Restore Wiring Update
+
+Status: Completed on 2026-04-28
+
+CoverageLexical V3 now promotes the existing multi-shard snapshot primitives
+into the production `CoverageLexicalV3FileSearchEngine` lifecycle:
+
+- `supportsPersistentFileIndex()` is enabled for V3, so `DataManager` uses the
+  persistent-index startup branch instead of the legacy serialized snapshot path.
+- `restorePersistedFileIndex()` boots from
+  `coverageLexicalV3SnapshotManifests`,
+  `coverageLexicalV3ResidentShardArtifacts`,
+  `coverageLexicalV3ShardRegistry`, and the active overlay journal through
+  `bootstrapCoverageLexicalV3Engine(...)`.
+- successful restore directly loads the resident index view and reconstructs
+  lightweight document views from resident doc tables, avoiding
+  `buildResidentHotBaseArtifactsStreaming(...)` on clean startup.
+- rebuild persistence now publishes resident shard artifacts, saves the shard
+  registry, writes a committed snapshot manifest, and garbage-collects older
+  committed manifests.
+- persistent recovery compares restored resident doc refs/generations with the
+  current vault refs and returns `up_to_date`, `needs_heal`, or
+  `needs_full_rebuild` without changing ranking semantics.
+
+Startup benchmark anchor captured on 2026-04-28 with
+`npm run benchmark:coverage-lexical:startup`:
+
+- corpus: 89 notes, 190 queries
+- snapshot bytes: `48,763`
+- snapshot write ms: `2.506`
+- hydrate ms: `1.321`
+- ready-to-search ms: `1.321`
+- fallback rebuild ms: `136.173`
+- self-heal repair ms: `0`
+- repair changed doc count: `0`
+- schema version: `1`
+- vault fingerprint mode: `docRef-generation`
+- `hydrate / rebuild`: `0.010`
+- `readyToSearch / rebuild`: `0.010`
+- `snapshotBytes / estimatedIndexBytes`: `1.000`
+
+Quality anchor in the same run remained stable:
+
+- `CoverageLexical(V3)`: objective `0.925`, top1 `0.863`, top3 `1.000`,
+  top5 `1.000`, zeroRate `0.000`, mrr `0.923`
+- timing anchor: avg `16.512` ms/query, p50 `13.367` ms, p100 `49.493` ms,
+  estimated index `736.436` KB
+
+Validation completed for this update:
+
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts` passes on 2026-04-28
+- `npx tsc -p tsconfig.build.json --noEmit --pretty false` passes on 2026-04-28
+- `npm run benchmark:coverage-lexical` passes on 2026-04-28
+- `npm run benchmark:coverage-lexical:startup` passes on 2026-04-28
+- `npm run benchmark:coverage-lexical:startup:vault` passes on 2026-04-28
+- startup benchmark is isolated in
+  `tests/src/services/search/coverage-lexical-v3-startup-benchmark.bench.ts`
+  and uses `jest.coverage-lexical-startup-benchmark.config.js`, so query
+  benchmark runs remain quality/ranking-only.
+
+Local TestVault startup/index benchmark anchor captured on 2026-04-28 with
+`npm run benchmark:coverage-lexical:startup:vault`:
+
+- corpus: 185 Markdown notes from `C:\Users\alex\Documents\Test-Vault`
+- total Markdown bytes: `851,243`
+- average Markdown bytes: `4,601.314`
+- p50 Markdown bytes: `959`
+- p95 Markdown bytes: `15,213`
+- max Markdown bytes: `93,451`
+- tokenizer profile: `production-tokenizer-chinese-patch-jieba-wasm`
+- lexical resident runtime:
+  - estimated resident index bytes: `1,380,984`
+  - docs: `185`
+  - families: `24,376`
+  - body blocks: `680`
+  - shards: `1`
+  - top resident groups: hanRoute `560,873`, stringArena `325,552`,
+    familyPosting `185,990`, familyLexicon `170,632`
+- lexical persisted V3 artifact/cold evidence:
+  - total estimated bytes: `3,881,681`
+  - resident shard artifact bytes: `1,385,897`
+  - snapshot manifest bytes: `418`
+  - shard registry bytes: `145`
+  - invalidation bytes: `0`
+  - cold evidence bytes: `2,478,046`
+  - fuzzy rescue bytes: `17,175`
+  - body / Han-doc / Han-body evidence rows: `680` / `185` / `680`
+- hybrid persisted/runtime state: not included; this benchmark is lexical-only
+- snapshot write ms: `3.535`
+- hydrate ms: `5.603`
+- ready-to-search ms: `5.603`
+- fallback rebuild ms: `2,484.709`
+- self-heal repair ms: `0`
+- repair changed doc count: `0`
+- schema version: `1`
+- vault fingerprint mode: `docRef-generation`
+- `hydrate / rebuild`: `0.002`
+- `readyToSearch / rebuild`: `0.002`
+- `snapshotWrite / rebuild`: `0.001`
+- `residentIndexBytes / markdownBytes`: `1.622`
+- `persistedV3Bytes / markdownBytes`: `4.560`
+
+This local vault benchmark is intentionally separate from the fixture startup
+anchor. The fixture benchmark remains the stable smoke/regression gate, while
+the TestVault benchmark is the local product-performance anchor for restore and
+index rebuild speed. It reads local Markdown source text only, excludes plugin
+implementation directories and transient worktree/cache directories, and does
+not run query quality/ranking assertions. The benchmark now reports lexical
+resident runtime, lexical persisted V3 artifact/cold evidence, and hybrid
+state as separate sections; hybrid is explicitly marked as not included rather
+than folded into the lexical resident estimate. Both startup benchmarks use the
+production `Tokenizer` with `ChinesePatch` enabled and the real `jieba-wasm`
+node runtime through benchmark-only Jest wiring.
+
+Runtime dev diagnostics now mirrors the same separation for startup logs:
+
+- lexical resident runtime remains the in-memory Coverage V3 resident estimate.
+- lexical persisted V3 artifact/cold evidence is reported separately from the
+  legacy serialized snapshot field.
+- hybrid persisted/runtime state is reported as its own group, with persisted
+  table slices and runtime vector/graph estimates when hybrid is enabled.
+- the three startup diagnostics groups are emitted even when a persisted group
+  is `0 B`, so missing artifacts are visible instead of being silently hidden.
+
 Validation completed for this update:
 
 - `npm run typecheck:build -- --pretty false` passes on 2026-04-25.

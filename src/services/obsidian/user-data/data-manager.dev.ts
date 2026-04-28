@@ -153,6 +153,7 @@ type LexicalRuntimeReport = {
   lexicalRuntimeBreakdown: LexicalRuntimeBreakdown;
   fileSnapshotRuntimeEstimate: FileSnapshotRuntimeMemoryEstimate;
   coverageLexicalV3PersistedStorageBreakdown: CoverageLexicalV3PersistedStorageBreakdown;
+  hybridPersistedRuntimeState: HybridPersistedRuntimeStateBreakdown;
 };
 
 type CoverageLexicalV3PersistedStorageBreakdown = {
@@ -169,6 +170,21 @@ type CoverageLexicalV3PersistedStorageBreakdown = {
   evidenceBytes: number;
   fuzzyRescueBytes: number;
   coldEvidenceBreakdown?: LexicalColdEvidenceStorageBreakdown;
+};
+
+type HybridPersistedRuntimeStateBreakdown = {
+  enabled: boolean;
+  persistedTotalBytes: number;
+  chunkBytes: number;
+  fileSnapshotBytes: number;
+  dirtyShadowBytes: number;
+  vectorBytes: number;
+  hnswBytes: number;
+  indexedRefBytes: number;
+  recoveryArtifactStateBytes: number;
+  runtimeTotalBytes: number;
+  runtimeVectorBytes: number;
+  runtimeGraphBytes: number;
 };
 
 const COVERAGE_LEXICAL_V3_PERSISTED_ARTIFACT_TABLES = [
@@ -197,6 +213,17 @@ const COVERAGE_LEXICAL_V3_PERSISTED_EVIDENCE_TABLES = [
   "lexicalBodyEvidence",
   "lexicalHanDocEvidence",
   "lexicalHanBodyEvidence",
+] as const;
+
+const HYBRID_PERSISTED_STATE_TABLES = [
+  "hybridChunks",
+  "fileSnapshots",
+  "hybridDirtyShadows",
+  "hybridChunkVectors",
+  "hybridHnswSmall",
+  "hybridIndexedFileRefs",
+  "indexRecoveryState",
+  "indexArtifactState",
 ] as const;
 
 type DevHeapContextRow = {
@@ -274,15 +301,25 @@ class DataManagerDevDiagnostics {
       persistedLexicalSnapshotBytes,
       runtimeLexicalIndexBytes,
       lexicalRuntimeBreakdown,
+      coverageLexicalV3PersistedStorageBreakdown,
+      hybridPersistedRuntimeState,
     } = await this.collectLexicalRuntimeReport();
     const localOnlyHint =
       "Local-only: no embedding API, no rerank API, no token usage.";
+    const persistedRuntimeStateLines =
+      this.buildPersistedRuntimeStateNoticeLines(
+        coverageLexicalV3PersistedStorageBreakdown,
+        hybridPersistedRuntimeState,
+        indexableBytes,
+      );
 
     new MyNotice(
       `${[
         "Lexical memory report",
+        `Lexical resident runtime: ${this.formatBytes(runtimeLexicalIndexBytes)}`,
         `Persisted lexical snapshot: ${this.formatBytes(persistedLexicalSnapshotBytes)}`,
         ...lexicalRuntimeBreakdown.noticeLines,
+        ...persistedRuntimeStateLines,
         localOnlyHint,
       ].join("\n")}`,
       15000,
@@ -291,11 +328,14 @@ class DataManagerDevDiagnostics {
     console.groupCollapsed("[clever-search] lexical memory report");
     console.log(`Indexable vault size: ${this.formatBytes(indexableBytes)}`);
     console.log(
-      `Resident lexical estimate: ${this.formatBytes(runtimeLexicalIndexBytes)}`,
+      `Lexical resident runtime: ${this.formatBytes(runtimeLexicalIndexBytes)}`,
     );
     console.log(
       `Persisted lexical snapshot: ${this.formatBytes(persistedLexicalSnapshotBytes)}`,
     );
+    for (const line of persistedRuntimeStateLines) {
+      console.log(`[clever-search] ${line}`);
+    }
     if (lexicalRuntimeBreakdown.summaryLine) {
       console.log(`[clever-search] ${lexicalRuntimeBreakdown.summaryLine}`);
     }
@@ -404,6 +444,72 @@ class DataManagerDevDiagnostics {
       .join("\n");
   }
 
+  private buildPersistedRuntimeStateNoticeLines(
+    lexicalPersistedV3: CoverageLexicalV3PersistedStorageBreakdown,
+    hybridState: HybridPersistedRuntimeStateBreakdown,
+    indexableBytes: number,
+  ): string[] {
+    const lines: string[] = [];
+    lines.push(
+      "Lexical persisted V3 artifact/cold evidence: total " +
+        this.formatBytes(lexicalPersistedV3.totalBytes) +
+        " (" +
+        this.formatPercent(lexicalPersistedV3.totalBytes, indexableBytes) +
+        " of vault) | resident artifacts " +
+        this.formatBytes(lexicalPersistedV3.shardArtifactBytes) +
+        " | cold evidence " +
+        this.formatBytes(lexicalPersistedV3.evidenceBytes) +
+        " | fuzzy rescue " +
+        this.formatBytes(lexicalPersistedV3.fuzzyRescueBytes) +
+        " | registry/meta " +
+        this.formatBytes(lexicalPersistedV3.registryBytes),
+    );
+
+    const hybridParts = [
+      hybridState.chunkBytes > 0
+        ? "chunks " + this.formatBytes(hybridState.chunkBytes)
+        : null,
+      hybridState.fileSnapshotBytes > 0
+        ? "fileSnapshots " + this.formatBytes(hybridState.fileSnapshotBytes)
+        : null,
+      hybridState.vectorBytes > 0
+        ? "vectors " + this.formatBytes(hybridState.vectorBytes)
+        : null,
+      hybridState.hnswBytes > 0
+        ? "hnsw " + this.formatBytes(hybridState.hnswBytes)
+        : null,
+      hybridState.dirtyShadowBytes > 0
+        ? "dirtyShadows " + this.formatBytes(hybridState.dirtyShadowBytes)
+        : null,
+      hybridState.indexedRefBytes > 0
+        ? "indexedRefs " + this.formatBytes(hybridState.indexedRefBytes)
+        : null,
+      hybridState.recoveryArtifactStateBytes > 0
+        ? "recovery/artifact-state " +
+          this.formatBytes(hybridState.recoveryArtifactStateBytes)
+        : null,
+    ].filter((part): part is string => part !== null);
+    lines.push(
+      "Hybrid persisted/runtime state: " +
+        (hybridState.enabled ? "enabled" : "disabled") +
+        " | persisted " +
+        this.formatBytes(hybridState.persistedTotalBytes) +
+        " (" +
+        this.formatPercent(hybridState.persistedTotalBytes, indexableBytes) +
+        " of vault)" +
+        " | runtime " +
+        this.formatBytes(hybridState.runtimeTotalBytes) +
+        " | runtime vectors " +
+        this.formatBytes(hybridState.runtimeVectorBytes) +
+        " | runtime graph " +
+        this.formatBytes(hybridState.runtimeGraphBytes),
+    );
+    if (hybridParts.length > 0) {
+      lines.push("Hybrid persisted slices: " + hybridParts.join(" | "));
+    }
+    return lines;
+  }
+
   private async collectLexicalRuntimeReport(): Promise<LexicalRuntimeReport> {
     const indexableFiles = this.dataManager.dataProvider.allFilesToBeIndexed();
     const indexableBytes = indexableFiles.reduce(
@@ -432,6 +538,8 @@ class DataManagerDevDiagnostics {
         bytesByName,
         storageUsage.lexicalColdEvidenceBreakdown,
       );
+    const hybridPersistedRuntimeState =
+      this.buildHybridPersistedRuntimeStateBreakdown(bytesByName);
     const fileSnapshotRuntimeEstimate =
       this.dataManager.fileSnapshotStore.getRuntimeMemoryEstimate();
     return {
@@ -442,7 +550,54 @@ class DataManagerDevDiagnostics {
       lexicalRuntimeBreakdown,
       fileSnapshotRuntimeEstimate,
       coverageLexicalV3PersistedStorageBreakdown,
+      hybridPersistedRuntimeState,
     };
+  }
+
+  private buildHybridPersistedRuntimeStateBreakdown(
+    bytesByName: ReadonlyMap<string, number>,
+  ): HybridPersistedRuntimeStateBreakdown {
+    const runtimeEstimate = this.readHybridRuntimeMemoryEstimate();
+    return {
+      enabled: Boolean(this.dataManager.hybridEngine?.isEnabled?.()),
+      persistedTotalBytes: HYBRID_PERSISTED_STATE_TABLES.reduce(
+        (sum, tableName) => sum + (bytesByName.get(tableName) ?? 0),
+        0,
+      ),
+      chunkBytes: bytesByName.get("hybridChunks") ?? 0,
+      fileSnapshotBytes: bytesByName.get("fileSnapshots") ?? 0,
+      dirtyShadowBytes: bytesByName.get("hybridDirtyShadows") ?? 0,
+      vectorBytes: bytesByName.get("hybridChunkVectors") ?? 0,
+      hnswBytes: bytesByName.get("hybridHnswSmall") ?? 0,
+      indexedRefBytes: bytesByName.get("hybridIndexedFileRefs") ?? 0,
+      recoveryArtifactStateBytes:
+        (bytesByName.get("indexRecoveryState") ?? 0) +
+        (bytesByName.get("indexArtifactState") ?? 0),
+      runtimeTotalBytes: runtimeEstimate.totalBytes,
+      runtimeVectorBytes: runtimeEstimate.vectorsBytes,
+      runtimeGraphBytes: runtimeEstimate.graphBytes,
+    };
+  }
+
+  private readHybridRuntimeMemoryEstimate(): {
+    vectorsBytes: number;
+    graphBytes: number;
+    totalBytes: number;
+  } {
+    const fallback = { vectorsBytes: 0, graphBytes: 0, totalBytes: 0 };
+    try {
+      const estimate = this.dataManager.hybridEngine?.getRuntimeMemoryEstimate?.();
+      if (estimate == null) {
+        return fallback;
+      }
+      return {
+        vectorsBytes: this.readNumber(estimate.vectorsBytes) ?? 0,
+        graphBytes: this.readNumber(estimate.graphBytes) ?? 0,
+        totalBytes: this.readNumber(estimate.totalBytes) ?? 0,
+      };
+    } catch (_error) {
+      return fallback;
+    }
   }
 
   private buildCoverageLexicalV3PersistedStorageBreakdown(
@@ -504,6 +659,13 @@ class DataManagerDevDiagnostics {
           " live file(s))",
       );
     }
+    lines.push(
+      ...this.buildPersistedRuntimeStateNoticeLines(
+        report.coverageLexicalV3PersistedStorageBreakdown,
+        report.hybridPersistedRuntimeState,
+        report.indexableBytes,
+      ),
+    );
 
     if (report.lexicalIndexBreakdown?.__backend === "coverage-lexical-v3") {
       const breakdown =

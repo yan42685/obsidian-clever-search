@@ -193,6 +193,85 @@ describe("Database Dexie upgrade recovery", () => {
     database.db.close();
   });
 
+  test("upgrades 29.6 databases with lexical operation persistence tables", async () => {
+    const appId = `db-lexical-operation-stores-${Date.now()}`;
+    const dbName = `clever-search/${appId}`;
+    createdDbNames.push(dbName);
+
+    const legacyDb = new Dexie(dbName);
+    legacyDb.version(29.6).stores({
+      pluginSetting: "++id",
+      lexicalSearchSnapshots: "++id",
+      lexicalIndexedFileRefs: "path",
+      lexicalIndexedMetadata: "filePath",
+      lexicalFuzzyRescue: "id",
+      lexicalBodyEvidence:
+        "id, shardId, shardGeneration, docRef, generation, blockOrdinal, [shardId+shardGeneration+docRef+generation+blockOrdinal]",
+      lexicalHanDocEvidence:
+        "id, shardId, shardGeneration, docRef, generation, [shardId+shardGeneration+docRef+generation]",
+      lexicalHanBodyEvidence:
+        "id, shardId, shardGeneration, docRef, generation, blockOrdinal, [shardId+shardGeneration+docRef+generation+blockOrdinal]",
+      docRegistry:
+        "docRef, path, deleted, liveGeneration, denseReadyGeneration, denseTargetGeneration, denseState, denseServeUntil, updatedAt",
+      coverageLexicalV3ShardRegistry: "shardId, state, createdOrder",
+      coverageLexicalV3Invalidations:
+        "id, shardId, docRef, docGeneration, [shardId+shardGeneration+docRef+docGeneration]",
+      coverageLexicalV3ResidentShardArtifacts:
+        "id, shardId, generation, artifactOwner, [artifactOwner+generation]",
+      coverageLexicalV3ActiveOverlayJournal:
+        "id, sequence, activeShardId, activeShardGeneration, [activeShardId+activeShardGeneration+sequence]",
+      coverageLexicalV3CompactJobs: "jobId, status, createdAt, updatedAt",
+      coverageLexicalV3CompactTempArtifacts: "jobId, outputShardId, createdAt",
+      coverageLexicalV3SnapshotManifests: "snapshotId, status, createdAt",
+      docRegistryMeta: "key",
+      hybridChunks:
+        "++id, docRef, generation, [docRef+generation], [docRef+generation+chunkIndex]",
+      fileSnapshots: "id, docRef, generation, [docRef+generation]",
+      hybridDirtyShadows: "id, docRef, generation, [docRef+generation]",
+      hybridChunkVectors: "id, docRef, generation, [docRef+generation]",
+      hybridHnswSmall: "id",
+      hybridIndexedFileRefs: "docRef, generation, state",
+      indexRecoveryState: "id, engine, path, state, nextRetryAt, [engine+path]",
+      indexArtifactState: "id, engine, artifact, dirtyAt, [engine+artifact]",
+      hybridTokenStats: "++id, filePath, dateKey, [filePath+dateKey]",
+      hybridTokenSavings: "++id, scope, periodKey, [scope+periodKey]",
+      hybridTokenBudgetResets: "++id, periodKey",
+    });
+    await legacyDb.open();
+    legacyDb.close();
+
+    const database = createDatabaseHarness(appId);
+
+    const report = await database.openAndConsumeSchemaUpgradeReport();
+
+    expect(report.schemaUpgradeDetected).toBe(true);
+    await database.putLexicalMutationJournalEntry({
+      id: "journal-1",
+      engine: "lexical",
+      kind: "replace",
+      path: "notes/alpha.md",
+      createdAt: 1,
+    });
+    await database.putPendingDocOperation({
+      id: "pending-1",
+      engine: "lexical",
+      type: "upsert",
+      path: "notes/alpha.md",
+      createdAt: 1,
+    });
+    await expect(
+      database.getLexicalMutationJournalEntries("lexical"),
+    ).resolves.toHaveLength(1);
+    await expect(database.getPendingDocOperations("lexical")).resolves.toHaveLength(1);
+    await expect(database.estimatePluginStorageUsage()).resolves.toEqual(
+      expect.objectContaining({
+        totalBytes: expect.any(Number),
+      }),
+    );
+
+    database.db.close();
+  });
+
   test("targeted index reset clears lexical and hybrid index state while preserving settings and token stats", async () => {
     const appId = `db-targeted-${Date.now()}`;
     const dbName = `clever-search/${appId}`;

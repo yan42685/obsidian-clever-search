@@ -11,6 +11,10 @@ import { EMPTY_RESIDENT_FUZZY_RESCUE_INDEX } from "src/services/search/coverage-
 import type { ResidentBase } from "src/services/search/coverage-lexical-v3/layout/types";
 import { buildBlockPositionLane } from "src/services/search/coverage-lexical-v3/layout/position-lanes";
 import { buildStableWitnessMatchKey } from "src/services/search/coverage-lexical-v3/build";
+import { createDexieCoverageLexicalV3ResidentShardArtifactStore } from "src/services/search/coverage-lexical-v3/artifact-loader";
+import { MemoryActiveOverlayJournalStore } from "src/services/search/coverage-lexical-v3/active-overlay-journal";
+import { MemoryCoverageLexicalV3SnapshotStore } from "src/services/search/coverage-lexical-v3/snapshot";
+import { createMemoryCoverageLexicalV3ProductionStores } from "src/services/search/coverage-lexical-v3/stores";
 import { hydrateCandidateEvidenceBatch } from "src/services/search/coverage-lexical-v3/ranking";
 import type {
 	BodyWindowContainer,
@@ -37,6 +41,24 @@ const { Tokenizer } = jest.requireMock("src/services/search/tokenizer") as {
 };
 
 const UNUSED_LEGACY_EVIDENCE_PAYLOAD = {} as never;
+
+class FakeArtifactTable {
+	rows = new Map<string, unknown>();
+
+	constructor(private readonly keyOf: (row: any) => string) {}
+
+	async get(key: string) {
+		return this.rows.get(key);
+	}
+
+	async put(row: any) {
+		this.rows.set(this.keyOf(row), row);
+	}
+
+	async delete(key: string) {
+		this.rows.delete(key);
+	}
+}
 
 function createDocument(
 	overrides: Partial<IndexedDocument> &
@@ -1195,6 +1217,63 @@ describe("coverage lexical v3 file search engine", () => {
 			"access",
 		]);
 		expect(matchedFiles[0]?.matchedTerms).toContain("projected");
+	});
+
+	test("persists resident artifact and restores it without rebuilding documents", async () => {
+		const productionStores = createMemoryCoverageLexicalV3ProductionStores();
+		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable((row) => row.id),
+		);
+		const overlayJournalStore = new MemoryActiveOverlayJournalStore();
+		const snapshotStore = new MemoryCoverageLexicalV3SnapshotStore();
+		const persistentStores = {
+			productionStores,
+			artifactStore,
+			overlayJournalStore,
+			snapshotStore,
+		};
+		const sourceEngine = new CoverageLexicalV3FileSearchEngine();
+		(sourceEngine as any).getPersistentStores = () => persistentStores;
+		await sourceEngine.reIndexAll([
+			createDocument({
+				docRef: 7,
+				path: "notes/restored.md",
+				basename: "restored",
+				folder: "notes",
+				content: "snapshot restore target",
+				generation: 11,
+			}),
+		]);
+
+		await sourceEngine.persistFileIndexArtifact();
+
+		const restoredEngine = new CoverageLexicalV3FileSearchEngine();
+		(restoredEngine as any).getPersistentStores = () => persistentStores;
+		const restored = await restoredEngine.restorePersistedFileIndex();
+
+		expect(restored).toBe(true);
+		expect(restoredEngine.getIndexedDocumentCount()).toBe(1);
+		const results = await restoredEngine.searchFiles({
+			queryText: "snapshot restore target",
+			isPrefixMatch: true,
+			isFuzzy: true,
+			maxItemResults: 5,
+		});
+		expect(results[0]?.path).toBe("notes/restored.md");
+		expect(results[0]?.snapshotGeneration).toBe(11);
+		await expect(
+			restoredEngine.planPersistentRecovery([
+				{ docRef: 7, path: "notes/restored.md", generation: 11 },
+			]),
+		).resolves.toMatchObject({ status: "up_to_date" });
+		await expect(
+			restoredEngine.planPersistentRecovery([
+				{ docRef: 7, path: "notes/restored.md", generation: 12 },
+			]),
+		).resolves.toMatchObject({
+			status: "needs_heal",
+			docsToUpdate: ["notes/restored.md"],
+		});
 	});
 
 	test("releases pending content after indexed snapshot commit and can rebuild from snapshots", async () => {

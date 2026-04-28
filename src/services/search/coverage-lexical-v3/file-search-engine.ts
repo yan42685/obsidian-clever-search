@@ -1,4 +1,5 @@
 import type {
+	BaseIndexedFileRef,
 	FileSubItem,
 	IndexedDocument,
 	MatchedFile,
@@ -18,6 +19,7 @@ import {
 	type LexicalBlockEvidenceLocator,
 	type LexicalDocEvidenceLocator,
 } from "src/services/search/shared/file-snapshot-store";
+import { Database } from "src/services/database/database";
 import { buildResidentHotBaseArtifactsStreaming } from "./build";
 import {
 	DEFAULT_RESIDENT_SHARD_GENERATION,
@@ -28,8 +30,15 @@ import { container, singleton } from "tsyringe";
 import type {
 	FileSearchEngine,
 	FileSearchRequest,
+	PersistentFileIndexRecoveryPlan,
 	SerializedFileSearchIndex,
 } from "../file-search-engine";
+import {
+	createDexieCoverageLexicalV3ResidentShardArtifactStore,
+	type CoverageLexicalV3ResidentShardArtifactStore,
+} from "./artifact-loader";
+import { bootstrapCoverageLexicalV3Engine } from "./bootstrap";
+import { createDexieActiveOverlayJournalStore, type ActiveOverlayJournalStore } from "./active-overlay-journal";
 import { buildV3MetadataFieldHighlightRanges } from "./metadata-highlights";
 import {
 	CoverageLexicalV3Engine,
@@ -46,6 +55,7 @@ import type {
 } from "./layout/types";
 import {
 	getLiveDocGeneration,
+	getDocPath,
 	getLiveDocPath,
 	getLiveDocRef,
 	getLiveDocSlot,
@@ -71,6 +81,20 @@ import {
 import { analyzeQuery } from "./query";
 import type { ResidentFuzzyRescueIndex } from "./layout/types";
 import { describeResidentBase } from "./metrics";
+import {
+	createDexieCoverageLexicalV3ProductionStores,
+	type CoverageLexicalV3ProductionStores,
+} from "./stores";
+import {
+	createDexieCoverageLexicalV3SnapshotStore,
+	healCoverageLexicalV3SnapshotState,
+	type CoverageLexicalV3SnapshotStore,
+	writeCoverageLexicalV3Snapshot,
+} from "./snapshot";
+import {
+	buildDefaultShardDescriptor,
+	type ResidentShardDescriptor,
+} from "./shards";
 
 export type CoverageLexicalV3RuntimeMemoryBreakdown = Readonly<{
 	__backend: "coverage-lexical-v3";
@@ -111,6 +135,13 @@ type PendingDocumentMetadata = Readonly<{
 	aliasesText: string;
 	tagsText: string;
 	headingsText: string;
+}>;
+
+type CoverageLexicalV3PersistentStores = Readonly<{
+	productionStores: CoverageLexicalV3ProductionStores;
+	artifactStore: CoverageLexicalV3ResidentShardArtifactStore;
+	overlayJournalStore: ActiveOverlayJournalStore;
+	snapshotStore: CoverageLexicalV3SnapshotStore;
 }>;
 
 type HydratedRankingEvidence = Readonly<{
@@ -735,7 +766,136 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	}
 
 	supportsPersistentFileIndex(): boolean {
-		return false;
+		return true;
+	}
+
+	async restorePersistedFileIndex(): Promise<boolean> {
+		const persistentStores = this.getPersistentStores();
+		const restoredEngine = new CoverageLexicalV3Engine();
+		if (this.benchmarkPhaseTimingState != null) {
+			restoredEngine.setBenchmarkPhaseTrackingEnabled(true);
+		}
+		const result = await bootstrapCoverageLexicalV3Engine({
+			engine: restoredEngine,
+			stores: persistentStores.productionStores,
+			residentShardArtifactLoader: persistentStores.artifactStore,
+			snapshotStore: persistentStores.snapshotStore,
+			overlayJournalStore: persistentStores.overlayJournalStore,
+			tokenizeDocumentText: (text) => this.getDocumentTerms(text),
+		});
+		if (!result.loaded) {
+			return false;
+		}
+		this.engine = restoredEngine;
+		this.documentViewsByPath.clear();
+		this.pendingDocumentContentsByPath.clear();
+		this.pendingDocumentMetadataByPath.clear();
+		this.loadDocumentViewsFromResidentIndex();
+		return this.documentViewsByPath.size > 0;
+	}
+
+	async planPersistentRecovery(
+		currentIndexedRefs: readonly BaseIndexedFileRef[],
+	): Promise<PersistentFileIndexRecoveryPlan> {
+		if (this.engine.getResidentIndexView() == null) {
+			return emptyPersistentRecoveryPlan("needs_full_rebuild", "missing_snapshot");
+		}
+		const restoredByPath = new Map(this.documentViewsByPath);
+		const restoredByDocRef = new Map<number, IndexedDocumentView>();
+		for (const view of restoredByPath.values()) {
+			if (view.docRef !== undefined) {
+				restoredByDocRef.set(view.docRef, view);
+			}
+		}
+		const currentByPath = new Map(currentIndexedRefs.map((ref) => [ref.path, ref]));
+		const currentPathSet = new Set(currentByPath.keys());
+		const docsToAdd: string[] = [];
+		const docsToUpdate: string[] = [];
+		const docsToMove: Array<{ oldPath: string; newPath: string }> = [];
+		const movedOldPaths = new Set<string>();
+
+		for (const current of currentIndexedRefs) {
+			const restored = restoredByPath.get(current.path);
+			if (restored != null) {
+				if (
+					restored.generation !== current.generation ||
+					(restored.docRef !== undefined &&
+						current.docRef !== undefined &&
+						restored.docRef !== current.docRef)
+				) {
+					docsToUpdate.push(current.path);
+				}
+				continue;
+			}
+			const movedFrom =
+				current.docRef === undefined ? undefined : restoredByDocRef.get(current.docRef);
+			if (movedFrom != null && movedFrom.path !== current.path) {
+				docsToMove.push({ oldPath: movedFrom.path, newPath: current.path });
+				movedOldPaths.add(movedFrom.path);
+				continue;
+			}
+			docsToAdd.push(current.path);
+		}
+
+		const docsToDelete = [...restoredByPath.keys()].filter(
+			(path) => !currentPathSet.has(path) && !movedOldPaths.has(path),
+		);
+		const hasChanges =
+			docsToAdd.length > 0 ||
+			docsToUpdate.length > 0 ||
+			docsToMove.length > 0 ||
+			docsToDelete.length > 0;
+		return {
+			status: hasChanges ? "needs_heal" : "up_to_date",
+			reason: hasChanges ? "vault_drift" : "up_to_date",
+			docsToDelete,
+			docsToAdd,
+			docsToUpdate,
+			docsToMove,
+		};
+	}
+
+	async persistFileIndexArtifact(): Promise<void> {
+		const indexView = this.engine.getResidentIndexView();
+		if (indexView == null || indexView.shards.length === 0) {
+			await this.clearPersistedFileIndexArtifact();
+			return;
+		}
+		const persistentStores = this.getPersistentStores();
+		const descriptors = buildShardDescriptorsForIndexView(indexView.shards);
+		for (const shard of indexView.shards.filter((item) => !item.shardId.endsWith(":overlay"))) {
+			const descriptor = descriptors.find(
+				(item) => item.shardId === shard.shardId && item.generation === shard.generation,
+			);
+			if (descriptor == null) {
+				continue;
+			}
+			await persistentStores.artifactStore.publishResidentShardArtifact({
+				descriptor,
+				shard,
+				createdAt: Date.now(),
+			});
+		}
+		await persistentStores.productionStores.shardRegistry.saveRegistry(descriptors);
+		await writeCoverageLexicalV3Snapshot({
+			snapshotStore: persistentStores.snapshotStore,
+			stores: persistentStores.productionStores,
+			overlayJournalStore: persistentStores.overlayJournalStore,
+		});
+		await healCoverageLexicalV3SnapshotState({
+			snapshotStore: persistentStores.snapshotStore,
+		});
+	}
+
+	async clearPersistedFileIndexArtifact(): Promise<void> {
+		const database = this.getDatabase();
+		await Promise.all([
+			database.db.coverageLexicalV3ShardRegistry.clear(),
+			database.db.coverageLexicalV3Invalidations.clear(),
+			database.db.coverageLexicalV3ResidentShardArtifacts.clear(),
+			database.db.coverageLexicalV3ActiveOverlayJournal.clear(),
+			database.db.coverageLexicalV3SnapshotManifests.clear(),
+		]);
 	}
 
 	beginBatchReindex(): void {
@@ -1098,6 +1258,54 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		return container.resolve(FileSnapshotStore);
 	}
 
+	private getDatabase(): Database {
+		return container.resolve(Database);
+	}
+
+	private getPersistentStores(): CoverageLexicalV3PersistentStores {
+		const database = this.getDatabase();
+		return {
+			productionStores: createDexieCoverageLexicalV3ProductionStores({
+				shardRegistry: database.db.coverageLexicalV3ShardRegistry,
+				invalidations: database.db.coverageLexicalV3Invalidations,
+			}),
+			artifactStore: createDexieCoverageLexicalV3ResidentShardArtifactStore(
+				database.db.coverageLexicalV3ResidentShardArtifacts,
+			),
+			overlayJournalStore: createDexieActiveOverlayJournalStore(
+				database.db.coverageLexicalV3ActiveOverlayJournal,
+			),
+			snapshotStore: createDexieCoverageLexicalV3SnapshotStore(
+				database.db.coverageLexicalV3SnapshotManifests,
+			),
+		};
+	}
+
+	private loadDocumentViewsFromResidentIndex(): void {
+		const indexView = this.engine.getResidentIndexView();
+		if (indexView == null) {
+			return;
+		}
+		for (const shard of indexView.shards) {
+			const base = shard.base;
+			for (let docId = 0; docId < base.docTable.docCount; docId += 1) {
+				const path = getDocPath(base, docId);
+				if (path.length === 0) {
+					continue;
+				}
+				const docRef = base.docTable.docRefsByDocId[docId];
+				const generation = base.docTable.generationByDocId[docId];
+				this.documentViewsByPath.set(path, {
+					docRef: Number.isFinite(docRef) && docRef > 0 ? docRef : undefined,
+					path,
+					generation: Number.isFinite(generation) && generation > 0 ? generation : undefined,
+					basename: basenameOfPath(path),
+					folder: folderOfPath(path),
+				});
+			}
+		}
+	}
+
 	private getQueryTerms(queryText: string): string[] {
 		return getInstance(Tokenizer).tokenizeSequence(queryText, "search");
 	}
@@ -1242,6 +1450,56 @@ function toIndexedDocumentView(document: IndexedDocument): IndexedDocumentView {
 		basename: document.basename,
 		folder: document.folder,
 	};
+}
+
+function basenameOfPath(path: string): string {
+	const fileName = path.split("/").pop() ?? path;
+	return fileName.replace(/\.md$/iu, "");
+}
+
+function folderOfPath(path: string): string {
+	const lastSlash = path.lastIndexOf("/");
+	return lastSlash <= 0 ? "" : path.slice(0, lastSlash);
+}
+
+function emptyPersistentRecoveryPlan(
+	status: PersistentFileIndexRecoveryPlan["status"],
+	reason: PersistentFileIndexRecoveryPlan["reason"],
+): PersistentFileIndexRecoveryPlan {
+	return {
+		status,
+		reason,
+		docsToDelete: [],
+		docsToAdd: [],
+		docsToUpdate: [],
+		docsToMove: [],
+	};
+}
+
+function buildShardDescriptorsForIndexView(
+	shards: readonly ResidentShard[],
+): ResidentShardDescriptor[] {
+	const baseShards = shards.filter((shard) => !shard.shardId.endsWith(":overlay"));
+	return baseShards.map((shard, index) =>
+		buildDefaultShardDescriptor({
+			shardId: shard.shardId,
+			generation: shard.generation,
+			state: index === baseShards.length - 1 ? "active" : "sealed",
+			sourceBytes: estimateResidentShardSourceBytes(shard.base),
+			docCount: shard.base.docTable.docCount,
+			createdOrder: index,
+			artifactOwner: shard.shardId,
+		}),
+	);
+}
+
+function estimateResidentShardSourceBytes(base: ResidentBase): number {
+	let total = 0;
+	for (let docId = 0; docId < base.docTable.docCount; docId += 1) {
+		const path = getDocPath(base, docId);
+		total += path.length;
+	}
+	return total;
 }
 
 function materializeIndexedDocument(
