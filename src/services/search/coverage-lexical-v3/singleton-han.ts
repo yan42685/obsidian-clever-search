@@ -111,7 +111,12 @@ export function collectCandidateResidualSingletonHanTarget(
 		}
 	}
 	for (const bigram of matchedHanBigrams) {
-		markGlobalHanCoverage(coveredMask, mapper, bigram.bigramText, null);
+		markGlobalHanCoverage(
+			coveredMask,
+			mapper,
+			bigram.bigramText,
+			bigram.surfaceGroupIndex,
+		);
 	}
 	const uncoveredIndices: number[] = [];
 	for (let index = 0; index < coveredMask.length; index += 1) {

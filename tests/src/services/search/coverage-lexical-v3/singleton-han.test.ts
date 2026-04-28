@@ -88,4 +88,74 @@ describe("singleton Han targets", () => {
 			},
 		]);
 	});
+
+	test("residual bigram anchors do not cover other Han surface groups", () => {
+		const queryAnalysis = createQueryAnalysis({
+			queryText: "\u5b87\u5b99\u529b \u5b87\u5b99",
+			surfaceGroups: [
+				{
+					index: 0,
+					text: "\u5b87\u5b99\u529b",
+					kind: "han",
+					hanBigramTexts: ["\u5b87\u5b99", "\u5b99\u529b"],
+					coveredCharMask: [false, false, false],
+					queryResidualUniqueBigrams: ["\u5b87\u5b99", "\u5b99\u529b"],
+					hasQueryResidualHanCoverage: true,
+				},
+				{
+					index: 1,
+					text: "\u5b87\u5b99",
+					kind: "han",
+					hanBigramTexts: ["\u5b87\u5b99"],
+					coveredCharMask: [false, false],
+					queryResidualUniqueBigrams: ["\u5b87\u5b99"],
+					hasQueryResidualHanCoverage: true,
+				},
+			],
+			primaryUnits: [],
+		});
+
+		const targets = collectCandidateSingletonHanTargets(queryAnalysis, [], [
+			{
+				bigramText: "\u5b87\u5b99",
+				surfaceGroupIndex: 1,
+			},
+		]);
+
+		expect(targets).toEqual([]);
+	});
+
+	test("residual bigram anchors cover their own Han surface group", () => {
+		const queryAnalysis = createQueryAnalysis({
+			queryText: "\u5b87\u5b99\u529b",
+			surfaceGroups: [
+				{
+					index: 0,
+					text: "\u5b87\u5b99\u529b",
+					kind: "han",
+					hanBigramTexts: ["\u5b87\u5b99", "\u5b99\u529b"],
+					coveredCharMask: [false, false, false],
+					queryResidualUniqueBigrams: ["\u5b87\u5b99", "\u5b99\u529b"],
+					hasQueryResidualHanCoverage: true,
+				},
+			],
+			primaryUnits: [],
+		});
+
+		const targets = collectCandidateSingletonHanTargets(queryAnalysis, [], [
+			{
+				bigramText: "\u5b87\u5b99",
+				surfaceGroupIndex: 0,
+			},
+		]);
+
+		expect(targets).toEqual([
+			{
+				char: "\u529b",
+				singletonHanCharIndex: 2,
+				surfaceGroupIndex: 0,
+				kind: "residual_singleton",
+			},
+		]);
+	});
 });

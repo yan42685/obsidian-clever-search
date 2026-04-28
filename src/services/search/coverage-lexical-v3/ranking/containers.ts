@@ -2885,7 +2885,8 @@ function summarizeSingletonHanCompletion(params: Readonly<{
 		params.candidateRecall.liveDocSlot,
 		params.candidateRecall.shortlistedBodyBlockIds,
 	);
-	const queryBigramTexts = collectAllQueryHanBigramTexts(params.queryAnalysis);
+	const queryBigramSpecs = collectAllQueryHanBigramSpecs(params.queryAnalysis);
+	const queryBigramTexts = collectQueryHanBigramTexts(queryBigramSpecs);
 	const bodyRescueBigramOccurrencesByBlockId = collectAllBodyRescueBigramOccurrencesByBlockId(
 		params.bodyRescueEvaluationBySurfaceGroupIndex,
 	);
@@ -2893,6 +2894,7 @@ function summarizeSingletonHanCompletion(params: Readonly<{
 		docEvidence: params.docEvidence,
 		bodyBlockEvidenceByBlockId: params.bodyBlockEvidenceByBlockId,
 		candidateBlockIds,
+		queryBigramSpecs,
 		queryBigramTexts,
 		bodyRescueBigramOccurrencesByBlockId,
 	});
@@ -2930,16 +2932,50 @@ function summarizeSingletonHanCompletion(params: Readonly<{
 	return completion;
 }
 
-function collectAllQueryHanBigramTexts(
+type QueryHanBigramSpec = Readonly<{
+	bigramText: string;
+	surfaceGroupIndex: number;
+}>;
+
+function collectAllQueryHanBigramSpecs(
 	queryAnalysis: V3QueryAnalysis,
+): readonly QueryHanBigramSpec[] {
+	const out = new Map<string, QueryHanBigramSpec>();
+	for (const group of queryAnalysis.surfaceGroups) {
+		if (group.kind !== "han") {
+			continue;
+		}
+		for (const bigramText of group.hanBigramTexts) {
+			if (bigramText.length === 0) {
+				continue;
+			}
+			const spec = { bigramText, surfaceGroupIndex: group.index };
+			out.set(getQueryHanBigramSpecKey(spec), spec);
+		}
+	}
+	return [...out.values()].sort(compareQueryHanBigramSpecs);
+}
+
+function collectQueryHanBigramTexts(
+	specs: readonly QueryHanBigramSpec[],
 ): readonly string[] {
-	return [
-		...new Set(
-			queryAnalysis.surfaceGroups.flatMap((group) =>
-				group.kind === "han" ? group.hanBigramTexts : [],
-			),
-		),
-	].sort((left, right) => left.localeCompare(right));
+	return [...new Set(specs.map((spec) => spec.bigramText))].sort((left, right) =>
+		left.localeCompare(right),
+	);
+}
+
+function compareQueryHanBigramSpecs(
+	left: QueryHanBigramSpec,
+	right: QueryHanBigramSpec,
+): number {
+	return (
+		left.bigramText.localeCompare(right.bigramText) ||
+		left.surfaceGroupIndex - right.surfaceGroupIndex
+	);
+}
+
+function getQueryHanBigramSpecKey(spec: QueryHanBigramSpec): string {
+	return `${spec.surfaceGroupIndex}:${spec.bigramText}`;
 }
 
 function collectAllBodyRescueBigramOccurrencesByBlockId(
@@ -2966,20 +3002,27 @@ function collectMatchedHanBigramAnchorsForSingletonScope(params: Readonly<{
 	docEvidence: CandidateDocEvidence;
 	bodyBlockEvidenceByBlockId: ReadonlyMap<number, CandidateBodyBlockEvidence>;
 	candidateBlockIds: readonly number[];
+	queryBigramSpecs: readonly QueryHanBigramSpec[];
 	queryBigramTexts: readonly string[];
 	bodyRescueBigramOccurrencesByBlockId: ReadonlyMap<
 		number,
 		readonly HanSyntheticBodyOccurrence[]
 	>;
 }>): readonly MatchedHanBigramLike[] {
-	const matched = new Set<string>();
+	const specsByText = collectQueryHanBigramSpecsByText(params.queryBigramSpecs);
+	const matched = new Map<string, QueryHanBigramSpec>();
+	const addMatchedBigramText = (bigramText: string): void => {
+		for (const spec of specsByText.get(bigramText) ?? []) {
+			matched.set(getQueryHanBigramSpecKey(spec), spec);
+		}
+	};
 	for (const witnessText of [
 		...params.docEvidence.identityWitnessTexts,
 		...params.docEvidence.routeWitnessTexts,
 	]) {
 		for (const bigramText of params.queryBigramTexts) {
 			if (collectTextOffsets(witnessText, bigramText).length > 0) {
-				matched.add(bigramText);
+				addMatchedBigramText(bigramText);
 			}
 		}
 	}
@@ -2993,15 +3036,30 @@ function collectMatchedHanBigramAnchorsForSingletonScope(params: Readonly<{
 			queryBigramTexts: params.queryBigramTexts,
 			rescueOccurrences: params.bodyRescueBigramOccurrencesByBlockId.get(blockId) ?? null,
 		})) {
-			matched.add(occurrence.bigramText);
+			addMatchedBigramText(occurrence.bigramText);
 		}
 	}
-	return [...matched]
-		.sort((left, right) => left.localeCompare(right))
-		.map<MatchedHanBigramLike>((bigramText) => ({
-			bigramText,
-			surfaceGroupIndex: null,
+	return [...matched.values()]
+		.sort(compareQueryHanBigramSpecs)
+		.map<MatchedHanBigramLike>((spec) => ({
+			bigramText: spec.bigramText,
+			surfaceGroupIndex: spec.surfaceGroupIndex,
 		}));
+}
+
+function collectQueryHanBigramSpecsByText(
+	specs: readonly QueryHanBigramSpec[],
+): ReadonlyMap<string, readonly QueryHanBigramSpec[]> {
+	const out = new Map<string, QueryHanBigramSpec[]>();
+	for (const spec of specs) {
+		const existing = out.get(spec.bigramText);
+		if (existing != null) {
+			existing.push(spec);
+			continue;
+		}
+		out.set(spec.bigramText, [spec]);
+	}
+	return out;
 }
 
 function buildMetadataSingletonHanCompletionCandidate(params: Readonly<{

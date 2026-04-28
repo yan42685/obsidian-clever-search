@@ -199,9 +199,14 @@ type RecallHanSurfaceGroupBucket = {
 
 type MatchedHanPositionsByKeyAndGroup = Map<number, Map<number, Set<number>>>;
 
+type QueryHanBigramSpec = Readonly<{
+	bigramText: string;
+	surfaceGroupIndex: number;
+}>;
+
 type GlobalSingletonRecallScope = {
 	matchedFamilyUnitIndices: Set<number>;
-	matchedHanBigramTexts: Set<string>;
+	matchedHanBigrams: Map<string, QueryHanBigramSpec>;
 	hasMetadataFamilyAnchor: boolean;
 	hasMetadataBigramAnchor: boolean;
 	bodyFamilyAnchorBlockIds: Set<number>;
@@ -474,10 +479,12 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 	if (recallByLiveDocSlot.size === 0) {
 		return;
 	}
-	const queryBigramTexts = collectAllQueryHanBigramTexts(queryAnalysis);
-	if (queryBigramTexts.length === 0) {
+	const queryBigramSpecs = collectAllQueryHanBigramSpecs(queryAnalysis);
+	if (queryBigramSpecs.length === 0) {
 		return;
 	}
+	const queryBigramTexts = collectQueryHanBigramTexts(queryBigramSpecs);
+	const queryBigramSpecsByText = collectQueryHanBigramSpecsByText(queryBigramSpecs);
 	const singletonScopesByLiveDocSlot = new Map<number, GlobalSingletonRecallScope>();
 	for (const liveDocSlot of recallByLiveDocSlot.keys()) {
 		singletonScopesByLiveDocSlot.set(liveDocSlot, createGlobalSingletonRecallScope());
@@ -535,7 +542,7 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 			if (scope == null) {
 				continue;
 			}
-			scope.matchedHanBigramTexts.add(bigramText);
+			addMatchedHanBigramSpecs(scope, bigramText, queryBigramSpecsByText);
 			scope.hasMetadataBigramAnchor = true;
 		}
 		for (const blockId of collectHanBodyBlockIds(base, bigramId)) {
@@ -545,7 +552,7 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 			if (scope == null) {
 				continue;
 			}
-			scope.matchedHanBigramTexts.add(bigramText);
+			addMatchedHanBigramSpecs(scope, bigramText, queryBigramSpecsByText);
 			scope.bodyBigramAnchorBlockIds.add(blockId);
 		}
 	}
@@ -556,7 +563,7 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 	for (const [liveDocSlot, scope] of singletonScopesByLiveDocSlot.entries()) {
 		if (
 			scope.matchedFamilyUnitIndices.size === 0 &&
-			scope.matchedHanBigramTexts.size === 0
+			scope.matchedHanBigrams.size === 0
 		) {
 			continue;
 		}
@@ -571,11 +578,11 @@ function routeGlobalResidualSingletonRescueToRecallBuckets(
 					familyText: unit.text,
 					matchKind: "exact",
 				})),
-			[...scope.matchedHanBigramTexts]
-				.sort((left, right) => left.localeCompare(right))
-				.map((bigramText) => ({
-					bigramText,
-					surfaceGroupIndex: null,
+			[...scope.matchedHanBigrams.values()]
+				.sort(compareQueryHanBigramSpecs)
+				.map((spec) => ({
+					bigramText: spec.bigramText,
+					surfaceGroupIndex: spec.surfaceGroupIndex,
 				})),
 		);
 		if (
@@ -648,7 +655,7 @@ function collectExistingBodyBlockIdsInOrder(
 function createGlobalSingletonRecallScope(): GlobalSingletonRecallScope {
 	return {
 		matchedFamilyUnitIndices: new Set<number>(),
-		matchedHanBigramTexts: new Set<string>(),
+		matchedHanBigrams: new Map<string, QueryHanBigramSpec>(),
 		hasMetadataFamilyAnchor: false,
 		hasMetadataBigramAnchor: false,
 		bodyFamilyAnchorBlockIds: new Set<number>(),
@@ -656,16 +663,70 @@ function createGlobalSingletonRecallScope(): GlobalSingletonRecallScope {
 	};
 }
 
-function collectAllQueryHanBigramTexts(
+function collectAllQueryHanBigramSpecs(
 	queryAnalysis: V3QueryAnalysis,
+): readonly QueryHanBigramSpec[] {
+	const out = new Map<string, QueryHanBigramSpec>();
+	for (const group of queryAnalysis.surfaceGroups) {
+		if (group.kind !== "han") {
+			continue;
+		}
+		for (const bigramText of group.hanBigramTexts) {
+			if (bigramText.length === 0) {
+				continue;
+			}
+			const spec = { bigramText, surfaceGroupIndex: group.index };
+			out.set(getQueryHanBigramSpecKey(spec), spec);
+		}
+	}
+	return [...out.values()].sort(compareQueryHanBigramSpecs);
+}
+
+function collectQueryHanBigramTexts(
+	specs: readonly QueryHanBigramSpec[],
 ): readonly string[] {
-	return [
-		...new Set(
-			queryAnalysis.surfaceGroups.flatMap((group) =>
-				group.kind === "han" ? group.hanBigramTexts : [],
-			),
-		),
-	].sort((left, right) => left.localeCompare(right));
+	return [...new Set(specs.map((spec) => spec.bigramText))].sort((left, right) =>
+		left.localeCompare(right),
+	);
+}
+
+function collectQueryHanBigramSpecsByText(
+	specs: readonly QueryHanBigramSpec[],
+): ReadonlyMap<string, readonly QueryHanBigramSpec[]> {
+	const out = new Map<string, QueryHanBigramSpec[]>();
+	for (const spec of specs) {
+		const existing = out.get(spec.bigramText);
+		if (existing != null) {
+			existing.push(spec);
+			continue;
+		}
+		out.set(spec.bigramText, [spec]);
+	}
+	return out;
+}
+
+function addMatchedHanBigramSpecs(
+	scope: GlobalSingletonRecallScope,
+	bigramText: string,
+	specsByText: ReadonlyMap<string, readonly QueryHanBigramSpec[]>,
+): void {
+	for (const spec of specsByText.get(bigramText) ?? []) {
+		scope.matchedHanBigrams.set(getQueryHanBigramSpecKey(spec), spec);
+	}
+}
+
+function compareQueryHanBigramSpecs(
+	left: QueryHanBigramSpec,
+	right: QueryHanBigramSpec,
+): number {
+	return (
+		left.bigramText.localeCompare(right.bigramText) ||
+		left.surfaceGroupIndex - right.surfaceGroupIndex
+	);
+}
+
+function getQueryHanBigramSpecKey(spec: QueryHanBigramSpec): string {
+	return `${spec.surfaceGroupIndex}:${spec.bigramText}`;
 }
 
 function collectScopedSingletonAnchorNeighborhoodBlockIds(
