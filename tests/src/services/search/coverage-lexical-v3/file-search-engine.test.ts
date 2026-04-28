@@ -1491,6 +1491,82 @@ describe("coverage lexical v3 file search engine", () => {
 		).resolves.toMatchObject({ status: "up_to_date" });
 	});
 
+	test("restored overlay deletes do not reappear in persistent recovery", async () => {
+		const productionStores = createMemoryCoverageLexicalV3ProductionStores();
+		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable((row) => row.id),
+		);
+		const overlayJournalStore = new MemoryActiveOverlayJournalStore();
+		const snapshotStore = new MemoryCoverageLexicalV3SnapshotStore();
+		const persistentStores = {
+			productionStores,
+			artifactStore,
+			overlayJournalStore,
+			snapshotStore,
+		};
+		const evidenceSnapshotStore = {
+			readIndexedTexts: jest.fn(async () => new Map<string, string>()),
+			readIndexedMetadata: jest.fn(async () => new Map()),
+			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
+			publishLexicalBodyEvidence: jest.fn(async () => undefined),
+			readLexicalBodyEvidenceForBlocks: jest.fn(async () => new Map()),
+			publishLexicalHanDocEvidence: jest.fn(async () => undefined),
+			readLexicalHanDocEvidenceForDocs: jest.fn(async () => new Map()),
+			publishLexicalHanBodyEvidence: jest.fn(async () => undefined),
+			readLexicalHanBodyEvidenceForBlocks: jest.fn(async () => new Map()),
+			publishLexicalFuzzyRescue: jest.fn(async () => undefined),
+			readLexicalFuzzyRescue: jest.fn(async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX),
+			readLexicalFuzzyRescueForLookupKeys: jest.fn(
+				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
+			),
+		};
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		(engine as any).getPersistentStores = () => persistentStores;
+		(engine as any).getFileSnapshotStore = () => evidenceSnapshotStore;
+		await engine.reIndexAll([
+			createDocument({
+				docRef: 31,
+				path: "notes/keep.md",
+				basename: "keep",
+				folder: "notes",
+				content: "keep target",
+				generation: 1,
+			}),
+			createDocument({
+				docRef: 32,
+				path: "notes/deleted.md",
+				basename: "deleted",
+				folder: "notes",
+				content: "deleted target",
+				generation: 1,
+			}),
+		]);
+
+		await expect(
+			engine.applyPersistentRecoveryChanges({
+				deletePaths: ["notes/deleted.md"],
+				upsertDocuments: [],
+			}),
+		).resolves.toBe(true);
+		expect(engine.getIndexedDocumentCount()).toBe(1);
+		await engine.persistFileIndexArtifact();
+
+		const restoredEngine = new CoverageLexicalV3FileSearchEngine();
+		(restoredEngine as any).getPersistentStores = () => persistentStores;
+		(restoredEngine as any).getFileSnapshotStore = () => evidenceSnapshotStore;
+		await expect(restoredEngine.restorePersistedFileIndex()).resolves.toBe(true);
+
+		expect(restoredEngine.getIndexedDocumentCount()).toBe(1);
+		await expect(
+			restoredEngine.planPersistentRecovery([
+				{ docRef: 31, path: "notes/keep.md", generation: 1 },
+			]),
+		).resolves.toMatchObject({
+			status: "up_to_date",
+			docsToDelete: [],
+		});
+	});
+
 	test("reloads runtime after maintenance fold so the next persist cannot roll registry back", async () => {
 		const productionStores = createMemoryCoverageLexicalV3ProductionStores();
 		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(

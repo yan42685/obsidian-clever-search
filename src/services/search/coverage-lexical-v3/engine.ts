@@ -19,6 +19,7 @@ import type {
 	ResidentFuzzyRescueIndex,
 } from "./layout/types";
 import {
+	buildShardInvalidationKey,
 	buildShardInvalidationSet,
 	filterInvalidatedCandidates,
 	type ShardInvalidationEntry,
@@ -168,6 +169,26 @@ export class CoverageLexicalV3Engine {
 
 	getFuzzyRescueIndex(): ResidentFuzzyRescueIndex {
 		return this.fuzzyRescueIndex;
+	}
+
+	isResidentDocumentInvalidated(params: {
+		shardId: string;
+		shardGeneration: number;
+		base: ResidentBase;
+		docId: number;
+	}): boolean {
+		const docRef = params.base.docTable.docRefsByDocId[params.docId];
+		if (!Number.isFinite(docRef) || docRef <= 0) {
+			return false;
+		}
+		return this.invalidatedCandidateKeys.has(
+			buildShardInvalidationKey({
+				shardId: params.shardId,
+				shardGeneration: params.shardGeneration,
+				docRef,
+				docGeneration: params.base.docTable.generationByDocId[params.docId] ?? 0,
+			}),
+		);
 	}
 
 	setFuzzyRescueIndex(index: ResidentFuzzyRescueIndex): void {
@@ -1246,7 +1267,7 @@ function collectShardFamilyMatches(
 			shard.base,
 			queryAnalysis,
 			options,
-			selectFuzzyRescueIndexForShard(shard, shards.length, fuzzyRescueIndex),
+			selectFuzzyRescueIndexForShard(shard, shards, fuzzyRescueIndex),
 		);
 		for (const unitMatches of shardMatches) {
 			const shardOwnedUnitMatches: V3QueryUnitFamilyMatches = {
@@ -1275,7 +1296,7 @@ function collectShardFamilyMatches(
 
 function selectFuzzyRescueIndexForShard(
 	shard: ResidentIndexView["shards"][number],
-	shardCount: number,
+	shards: ResidentIndexView["shards"],
 	fuzzyRescueIndex: ResidentFuzzyRescueIndex,
 ): ResidentFuzzyRescueIndex {
 	if (
@@ -1283,7 +1304,18 @@ function selectFuzzyRescueIndexForShard(
 	) {
 		return shard.base.fuzzyRescue;
 	}
-	return shardCount === 1 ? fuzzyRescueIndex : EMPTY_RESIDENT_FUZZY_RESCUE_INDEX;
+	if (fuzzyRescueIndex.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.size === 0) {
+		return EMPTY_RESIDENT_FUZZY_RESCUE_INDEX;
+	}
+	const externalFuzzyTargetShards = shards.filter(
+		(candidateShard) =>
+			!candidateShard.shardId.endsWith(":overlay") &&
+			candidateShard.base.fuzzyRescue.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.size === 0,
+	);
+	return externalFuzzyTargetShards.length === 1 &&
+		externalFuzzyTargetShards[0] === shard
+		? fuzzyRescueIndex
+		: EMPTY_RESIDENT_FUZZY_RESCUE_INDEX;
 }
 
 function collectShardCandidateDocs(

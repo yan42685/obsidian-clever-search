@@ -1108,6 +1108,15 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 				shardGeneration: shard.generation,
 			};
 			for (let docId = 0; docId < shard.base.docTable.docCount; docId += 1) {
+				if (
+					this.engine.isResidentDocumentInvalidated({
+						...shardKey,
+						base: shard.base,
+						docId,
+					})
+				) {
+					continue;
+				}
 				const path = getDocPath(shard.base, docId);
 				if (path.length === 0) {
 					continue;
@@ -1713,6 +1722,16 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		for (const shard of indexView.shards) {
 			const base = shard.base;
 			for (let docId = 0; docId < base.docTable.docCount; docId += 1) {
+				if (
+					this.engine.isResidentDocumentInvalidated({
+						shardId: shard.shardId,
+						shardGeneration: shard.generation,
+						base,
+						docId,
+					})
+				) {
+					continue;
+				}
 				const path = getDocPath(base, docId);
 				if (path.length === 0) {
 					continue;

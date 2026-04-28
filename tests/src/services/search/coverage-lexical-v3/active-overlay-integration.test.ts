@@ -6,6 +6,7 @@ import {
 import { writeActiveOverlayChanges } from "src/services/search/coverage-lexical-v3/active-overlay-writer";
 import { buildResidentHotBaseArtifacts } from "src/services/search/coverage-lexical-v3/build";
 import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
+import { EMPTY_RESIDENT_FUZZY_RESCUE_INDEX } from "src/services/search/coverage-lexical-v3/layout/fuzzy-rescue";
 import type { ResidentIndexView } from "src/services/search/coverage-lexical-v3/layout/types";
 import type { ResidentShardDescriptor } from "src/services/search/coverage-lexical-v3/shards";
 import { createMemoryCoverageLexicalV3ProductionStores } from "src/services/search/coverage-lexical-v3/stores";
@@ -131,5 +132,59 @@ describe("coverage lexical v3 active overlay integration", () => {
 		const paths = engine.search("project new target").rankedCandidates.map((candidate) => candidate.path);
 		expect(paths).toContain("new.md");
 		expect(paths).not.toContain("old.md");
+	});
+
+	test("external fuzzy rescue still applies to the base shard while overlay is loaded", async () => {
+		const baseArtifacts = buildResidentHotBaseArtifacts([
+			doc("obsidian.md", "base document", 11, 1),
+		]);
+		const engine = new CoverageLexicalV3Engine();
+		engine.loadResidentIndexView({
+			version: 1,
+			shards: [
+				{
+					shardId: "active-1",
+					generation: 1,
+					base: {
+						...baseArtifacts.base,
+						fuzzyRescue: EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
+					},
+				},
+			],
+		});
+		engine.loadOverlayResidentShard(
+			buildOverlayResidentShard({
+				activeShardId: "active-1",
+				activeShardGeneration: 1,
+				entries: [
+					{
+						id: "active-1@1:1",
+						activeShardId: "active-1",
+						activeShardGeneration: 1,
+						sequence: 1,
+						operation: "append",
+						document: doc("overlay.md", "overlay target", 12, 1),
+						sourceBytes: 14,
+						createdAt: 1,
+					},
+				],
+			}),
+		);
+
+		const prepared = engine.prepareSearch(
+			"obsidan",
+			["obsidan"],
+			{ allowFuzzyMatch: true },
+			baseArtifacts.fuzzyRescueIndex,
+		);
+
+		expect(prepared.guardedCandidateDocs.map((candidate) => candidate.shardId)).toContain(
+			"active-1",
+		);
+		expect(
+			prepared.unitFamilyMatches[0]?.matches.some(
+				(match) => match.matchKind === "fuzzy" && match.shardId === "active-1",
+			),
+		).toBe(true);
 	});
 });

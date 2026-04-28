@@ -21,7 +21,10 @@ import type { V3DocumentTokenizer } from "./query";
 import { getDocPath } from "./recall";
 import { buildShardInvalidationKey } from "./invalidation";
 import { isReadableShardState, type ResidentShardDescriptor } from "./shards";
-import type { CoverageLexicalV3ProductionStores } from "./stores";
+import {
+	reconcileShardInvalidationStaleStats,
+	type CoverageLexicalV3ProductionStores,
+} from "./stores";
 
 export const DEFAULT_ACTIVE_OVERLAY_FOLD_ENTRY_THRESHOLD = 64;
 export const DEFAULT_ACTIVE_OVERLAY_FOLD_SOURCE_BYTES_THRESHOLD = 4 * 1024 * 1024;
@@ -151,6 +154,11 @@ async function maybeRunOneCompactJob(params: {
 	tokenizeDocumentText?: V3DocumentTokenizer;
 	now: number;
 }): Promise<boolean> {
+	const invalidations = await params.stores.invalidations.loadInvalidations();
+	await reconcileShardInvalidationStaleStats({
+		stores: params.stores,
+		invalidations,
+	});
 	const registry = await params.stores.shardRegistry.loadRegistry();
 	const plan = chooseNextCompactPlan(registry);
 	if (plan == null) {
@@ -162,7 +170,6 @@ async function maybeRunOneCompactJob(params: {
 	if (inputShards.length !== plan.inputShardIds.length) {
 		return false;
 	}
-	const invalidations = await params.stores.invalidations.loadInvalidations();
 	const documents = await loadLiveDocumentsForShards({
 		shards: inputShards,
 		invalidations,

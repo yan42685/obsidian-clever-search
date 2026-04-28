@@ -1,4 +1,4 @@
-import type { ShardInvalidationEntry } from "./invalidation";
+import { buildShardInvalidationKey, type ShardInvalidationEntry } from "./invalidation";
 import { isReadableShardState, type ResidentShardDescriptor } from "./shards";
 
 type AsyncTable<Row, Key> = Readonly<{
@@ -79,6 +79,57 @@ export async function recordShardInvalidationStaleStats(params: {
 		});
 	}
 	await params.stores.shardRegistry.updateShards(updatedDescriptors);
+}
+
+export async function reconcileShardInvalidationStaleStats(params: {
+	stores: CoverageLexicalV3ProductionStores;
+	invalidations?: readonly ShardInvalidationEntry[];
+}): Promise<boolean> {
+	const invalidations =
+		params.invalidations ?? (await params.stores.invalidations.loadInvalidations());
+	const seenInvalidationKeys = new Set<string>();
+	const invalidationCountByShardKey = new Map<string, number>();
+	for (const entry of invalidations) {
+		const invalidationKey = buildShardInvalidationKey(entry);
+		if (seenInvalidationKeys.has(invalidationKey)) {
+			continue;
+		}
+		seenInvalidationKeys.add(invalidationKey);
+		const key = shardGenerationKey(entry.shardId, entry.shardGeneration);
+		invalidationCountByShardKey.set(key, (invalidationCountByShardKey.get(key) ?? 0) + 1);
+	}
+	const registry = await params.stores.shardRegistry.loadRegistry();
+	const updatedDescriptors: ResidentShardDescriptor[] = [];
+	for (const descriptor of registry) {
+		if (!isReadableShardState(descriptor.state) || descriptor.docCount <= 0) {
+			continue;
+		}
+		const invalidationCount =
+			invalidationCountByShardKey.get(
+				shardGenerationKey(descriptor.shardId, descriptor.generation),
+			) ?? 0;
+		const staleDocCount = Math.min(descriptor.docCount, invalidationCount);
+		const staleSourceBytes = Math.min(
+			descriptor.sourceBytes,
+			Math.ceil((descriptor.sourceBytes / descriptor.docCount) * staleDocCount),
+		);
+		if (
+			(descriptor.staleDocCount ?? 0) === staleDocCount &&
+			(descriptor.staleSourceBytes ?? 0) === staleSourceBytes
+		) {
+			continue;
+		}
+		updatedDescriptors.push({
+			...descriptor,
+			staleDocCount,
+			staleSourceBytes,
+		});
+	}
+	if (updatedDescriptors.length === 0) {
+		return false;
+	}
+	await params.stores.shardRegistry.updateShards(updatedDescriptors);
+	return true;
 }
 
 export class MemoryCoverageLexicalV3ShardRegistryStore
