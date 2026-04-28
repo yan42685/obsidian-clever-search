@@ -29,12 +29,14 @@ import {
   getHybridProfileMetric,
   profileHybridStage,
 } from "src/services/search/hybrid/hybrid-profiler";
-import type {
-  ChunkRow,
-  ChunkVectorShardRow,
-  HybridFileSnapshotRow,
-  HybridIndexedFileRef,
+import {
+  buildHybridGenerationKey,
+  type ChunkRow,
+  type ChunkVectorShardRow,
+  type HybridFileSnapshotRow,
+  type HybridIndexedFileRef,
 } from "src/services/search/hybrid/hybrid-store";
+import { runHybridStorageGc } from "src/services/search/hybrid/hybrid-storage-gc";
 import {
   analyzeHybridStoredFileConsistency,
   normalizeHybridIndexedFileState,
@@ -2503,18 +2505,21 @@ export class DataManager {
   }
 
   private async canReuseMovedHybridState(path: string): Promise<boolean> {
-    const [indexedFileRef, snapshotRow, shadowRow] = await Promise.all([
-      this.fileSnapshotStore.getHybridIndexedFileRef(path),
-      this.database.db.fileSnapshots.get(path),
-      this.database.db.hybridDirtyShadows.get(path),
+    const indexedFileRef = await this.fileSnapshotStore.getHybridIndexedFileRef(path);
+    if (!indexedFileRef || indexedFileRef.generation === undefined) {
+      return false;
+    }
+
+    const generationKey = buildHybridGenerationKey(
+      indexedFileRef.docRef,
+      indexedFileRef.generation,
+    );
+    const [snapshotRow, shadowRow] = await Promise.all([
+      this.database.db.fileSnapshots.get(generationKey),
+      this.database.db.hybridDirtyShadows.get(generationKey),
     ]);
 
-    if (
-      !indexedFileRef ||
-      indexedFileRef.generation === undefined ||
-      snapshotRow?.generation === undefined ||
-      shadowRow !== undefined
-    ) {
+    if (snapshotRow?.generation === undefined || shadowRow !== undefined) {
       return false;
     }
 
@@ -4714,80 +4719,20 @@ export class DataManager {
     }
 
   private async purgeHybridArtifactsWithoutDocRegistry(): Promise<void> {
-    const registryRows = await this.database.listDocRegistryEntries();
-    const liveDocRefs = new Set(
-      registryRows.filter((row) => !row.deleted).map((row) => row.docRef),
-    );
-    const [
-      chunkRows,
-      vectorRows,
-      indexedRefs,
-      snapshotRows,
-      shadowRows,
-    ] = await Promise.all([
-      this.database.db.hybridChunks.toArray(),
-      this.database.db.hybridChunkVectors.toArray(),
-      this.database.db.hybridIndexedFileRefs.toArray(),
-      this.database.db.fileSnapshots.toArray(),
-      this.database.db.hybridDirtyShadows.toArray(),
-    ]);
-    const chunkIds = chunkRows
-      .filter((row) => !liveDocRefs.has(row.docRef))
-      .map((row) => row.id)
-      .filter((id): id is number => id !== undefined);
-    const vectorIds = vectorRows
-      .filter((row) => !liveDocRefs.has(row.docRef))
-      .map((row) => row.id);
-    const refDocRefs = indexedRefs
-      .filter((row) => !liveDocRefs.has(row.docRef))
-      .map((row) => row.docRef);
-    const snapshotIds = snapshotRows
-      .filter((row) => !liveDocRefs.has(row.docRef))
-      .map((row) => row.id);
-    const shadowIds = shadowRows
-      .filter((row) => !liveDocRefs.has(row.docRef))
-      .map((row) => row.id);
-    const removedDenseArtifacts = chunkIds.length > 0 || vectorIds.length > 0;
+    const metrics = await runHybridStorageGc(this.database, {
+      reason: "startup-hybrid-storage-gc",
+    });
     if (
-      chunkIds.length === 0 &&
-      vectorIds.length === 0 &&
-      refDocRefs.length === 0 &&
-      snapshotIds.length === 0 &&
-      shadowIds.length === 0
+      metrics.chunksRemoved === 0 &&
+      metrics.vectorsRemoved === 0 &&
+      metrics.indexedRefsRemoved === 0 &&
+      metrics.snapshotsRemoved === 0 &&
+      metrics.shadowsRemoved === 0
     ) {
       return;
     }
-    await this.database.db.transaction(
-      "rw",
-      [
-        this.database.db.hybridChunks,
-        this.database.db.hybridChunkVectors,
-        this.database.db.hybridIndexedFileRefs,
-        this.database.db.fileSnapshots,
-        this.database.db.hybridDirtyShadows,
-        this.database.db.indexArtifactState,
-      ],
-      async () => {
-        await Promise.all([
-          this.database.db.hybridChunks.bulkDelete(chunkIds),
-          this.database.db.hybridChunkVectors.bulkDelete(vectorIds),
-          this.database.db.hybridIndexedFileRefs.bulkDelete(refDocRefs),
-          this.database.db.fileSnapshots.bulkDelete(snapshotIds),
-          this.database.db.hybridDirtyShadows.bulkDelete(shadowIds),
-          removedDenseArtifacts
-            ? this.database.db.indexArtifactState.put({
-                id: buildIndexArtifactStateId("hybrid", "hnsw"),
-                engine: "hybrid",
-                artifact: "hnsw",
-                dirtyAt: Date.now(),
-                reason: "startup-orphan-hybrid-artifact-purge",
-              })
-            : Promise.resolve(),
-        ]);
-      },
-    );
     logger.debug(
-      `purged orphan Hybrid artifacts: chunks=${chunkIds.length}, vectors=${vectorIds.length}, refs=${refDocRefs.length}, snapshots=${snapshotIds.length}, shadows=${shadowIds.length}`,
+      `purged stale Hybrid artifacts: chunks=${metrics.chunksRemoved}, vectors=${metrics.vectorsRemoved}, refs=${metrics.indexedRefsRemoved}, snapshots=${metrics.snapshotsRemoved}, shadows=${metrics.shadowsRemoved}, hnswDirty=${metrics.hnswMarkedDirty}`,
     );
   }
 

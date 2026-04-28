@@ -875,6 +875,32 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
             fileSnapshots.find((item) => item.filePath === filePath);
           return row ? { ...row } : undefined;
         }),
+        orderBy: jest.fn((_field: string) => ({
+          limit: (batchSize: number) => ({
+            toArray: async () => {
+              ensureDocRegistryFromStoredRows();
+              return toPagedRows(
+                fileSnapshots,
+                (row) => generationKeyForRow(row),
+                null,
+                batchSize,
+              );
+            },
+          }),
+        })),
+        where: jest.fn((_field: string) => ({
+          above: (lastPath: string) => ({
+            limit: (batchSize: number) => ({
+              toArray: async () =>
+                toPagedRows(
+                  fileSnapshots,
+                  (row) => generationKeyForRow(row),
+                  lastPath,
+                  batchSize,
+                ),
+            }),
+          }),
+        })),
         bulkGet: jest.fn(async (paths: readonly string[]) =>
           paths.map((path) => {
             const row =
@@ -3534,6 +3560,58 @@ describe("DataManager integration", () => {
 
     manager.onunload();
   });
+
+  test("hybrid runtime move reuse reads snapshots by docRef generation key", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const file = createFile("docs/moved.md", "moved body", 170);
+    const database = createMockDatabase();
+    database.__docRegistryRows.push({
+      docRef: 42,
+      path: file.path,
+      deleted: false,
+      liveGeneration: file.stat.mtime,
+      updatedAt: file.stat.mtime,
+    });
+    database.__fileSnapshots.push({
+      id: "42:170",
+      docRef: 42,
+      plainText: "moved body",
+      generation: file.stat.mtime,
+    } as any);
+    database.__hybridIndexedFileRefs.push({
+      path: file.path,
+      docRef: 42,
+      generation: file.stat.mtime,
+      state: "ready",
+      chunkCount: 1,
+      vectorPrecision: "int8",
+    });
+    const fileSnapshotStore = createMockFileSnapshotStore();
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider: createMockDataProvider({
+        files: new Map([[file.path, file]]),
+        texts: new Map([[file.path, "moved body"]]),
+      }),
+      lexicalEngine: createMockLexicalEngine(),
+      fileSnapshotStore,
+      hybridEngine: createMockHybridEngine(),
+    });
+
+    const manager = resolveDataManager();
+
+    await expect(
+      (manager as any).canReuseMovedHybridState(file.path),
+    ).resolves.toBe(true);
+
+    manager.onunload();
+  });
+
   test("real delete path still removes shared snapshots before dropping hybrid state", async () => {
     const setting = cloneSetting();
     setting.hybrid.enabled = true;
