@@ -494,14 +494,10 @@ function collectMatchedBigramOccurrencesForScope(
 	) {
 		return [];
 	}
-	const queryBigramTexts = [
-		...new Set(
-			context.queryAnalysis.surfaceGroups.flatMap((group) =>
-				group.kind === "han" ? group.hanBigramTexts : [],
-			),
-		),
-	];
-	if (queryBigramTexts.length === 0) {
+	const hanSurfaceGroups = context.queryAnalysis.surfaceGroups.filter(
+		(group) => group.kind === "han" && group.hanBigramTexts.length > 0,
+	);
+	if (hanSurfaceGroups.length === 0) {
 		return [];
 	}
 	const singletonChars = context.singletonHanTargets.map((target) => target.char);
@@ -520,14 +516,11 @@ function collectMatchedBigramOccurrencesForScope(
 			return [];
 		}
 		const out: V3DirectSubitemAtom[] = [];
-		for (const surfaceGroup of context.queryAnalysis.surfaceGroups) {
-			if (surfaceGroup.kind !== "han") {
-				continue;
-			}
+		for (const surfaceGroup of hanSurfaceGroups) {
 			for (const occurrence of collectOpaqueBigramOccurrencesInText({
 				text: block.text,
 				surfaceGroupIndex: surfaceGroup.index,
-				rescueBigrams: queryBigramTexts,
+				rescueBigrams: surfaceGroup.hanBigramTexts,
 			})) {
 				out.push({
 					kind: "matched_bigram_atom",

@@ -34,6 +34,7 @@ const runCompactCompute = (input) => {
       batchIndex: 0,
       rows: [{
         inputShardIds: input.inputShards.map((shard) => shard.shardId),
+        inputSourceBytes,
         outputSourceBytes,
         liveDocCount,
         droppedDocCount,

@@ -190,6 +190,73 @@ describe("coverage lexical v3 direct subitems", () => {
 		expect(extractHighlightTexts(result)).toContain("\u8d62\u5b8b");
 	});
 
+	test("does not attribute singleton bigram anchors across Han surface groups", () => {
+		const queryAnalysis = createQueryAnalysis({
+			queryText: "\u751f\u547d\u529b \u5b87\u5b99",
+			surfaceGroups: [
+				{
+					index: 0,
+					text: "\u751f\u547d\u529b",
+					kind: "han",
+					hanBigramTexts: ["\u751f\u547d", "\u547d\u529b"],
+					coveredCharMask: [true, true, false],
+					queryResidualUniqueBigrams: ["\u547d\u529b"],
+					hasQueryResidualHanCoverage: true,
+				},
+				{
+					index: 1,
+					text: "\u5b87\u5b99",
+					kind: "han",
+					hanBigramTexts: ["\u5b87\u5b99"],
+					coveredCharMask: [true, true],
+					queryResidualUniqueBigrams: [],
+					hasQueryResidualHanCoverage: false,
+				},
+			],
+			primaryUnits: [],
+			surfaceCoverageShapeKey: "hh",
+		});
+
+		const result = buildV3DirectSubitems({
+			snapshotText: "\u5b87\u5b99\u7684\u529b\u91cf",
+			queryAnalysis,
+			candidate: createCandidate({
+				path: "cross-group.md",
+				realizedFamilies: [],
+				singletonHanCompletion: {
+					singletonHanChar: "\u529b",
+					singletonHanCharIndex: 2,
+					singletonHanSurfaceGroupIndex: 0,
+					matched: true,
+					matchSource: "body_adjacent_block",
+					bestAnchorKind: "bigram",
+					bestAnchorDistance: 1,
+					sameBlockAsAnchor: true,
+					sameBlockAsBestBodyWindow: true,
+					tier: "tight",
+				},
+			}),
+			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
+			residentBase: createResidentBaseForBlockCounts([1]),
+		});
+
+		const matchedBigramAtoms = result.candidates.flatMap((candidate) =>
+			candidate.atoms.filter((atom) => atom.kind === "matched_bigram_atom"),
+		);
+		expect(matchedBigramAtoms).toContainEqual(
+			expect.objectContaining({
+				surfaceGroupIndex: 1,
+				bigramText: "\u5b87\u5b99",
+			}),
+		);
+		expect(matchedBigramAtoms).not.toContainEqual(
+			expect.objectContaining({
+				surfaceGroupIndex: 0,
+				bigramText: "\u5b87\u5b99",
+			}),
+		);
+	});
+
 	test("keeps higher real coverage ahead of a full Han surface snippet", () => {
 		const queryAnalysis = createQueryAnalysis({
 			queryText: "abc \u751f\u547d\u529b",

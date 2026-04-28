@@ -80,6 +80,13 @@ describe("coverage lexical v3 compact blob worker harness", () => {
 			"done",
 		]);
 		const done = responses.find((response) => response.type === "done");
+		const batch = responses.find((response) => response.type === "batch");
+		expect(batch?.type === "batch" ? batch.rows[0] : null).toEqual(
+			expect.objectContaining({
+				inputSourceBytes: 100,
+				outputSourceBytes: 75,
+			}),
+		);
 		expect(done?.type === "done" ? done.stats.outputSourceBytes : 0).toBe(75);
 	});
 
