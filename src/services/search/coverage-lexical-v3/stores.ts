@@ -224,8 +224,12 @@ export class DexieCoverageLexicalV3ShardRegistryStore
 	}
 
 	async saveRegistry(registry: readonly ResidentShardDescriptor[]): Promise<void> {
-		await this.table.clear();
+		const nextShardIds = new Set(registry.map((descriptor) => descriptor.shardId));
+		const obsoleteShardIds = (await this.table.toArray())
+			.map((descriptor) => descriptor.shardId)
+			.filter((shardId) => !nextShardIds.has(shardId));
 		await this.table.bulkPut([...registry]);
+		await Promise.all(obsoleteShardIds.map((shardId) => this.table.delete(shardId)));
 	}
 
 	async updateShard(descriptor: ResidentShardDescriptor): Promise<void> {
@@ -261,11 +265,12 @@ export class DexieCoverageLexicalV3InvalidationStore
 
 	async removeInvalidationsForShards(shardIds: readonly string[]): Promise<void> {
 		const removedShardIds = new Set(shardIds);
-		const keptRows = (await this.table.toArray()).filter(
-			(row) => !removedShardIds.has(row.shardId),
+		const removedRowIds = (await this.table.toArray())
+			.filter((row) => removedShardIds.has(row.shardId))
+			.map((row) => row.id);
+		await Promise.all(
+			removedRowIds.map((rowId) => this.table.delete(rowId)),
 		);
-		await this.table.clear();
-		await this.table.bulkPut(keptRows);
 	}
 
 	async clearInvalidations(): Promise<void> {

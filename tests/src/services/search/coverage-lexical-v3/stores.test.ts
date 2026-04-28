@@ -20,6 +20,7 @@ import {
 
 class FakeAsyncTable<Row extends Record<string, unknown>, Key extends string | number> {
 	private rows = new Map<Key, Row>();
+	public clearCallCount = 0;
 
 	constructor(private readonly keyOf: (row: Row) => Key) {}
 
@@ -46,6 +47,7 @@ class FakeAsyncTable<Row extends Record<string, unknown>, Key extends string | n
 	}
 
 	async clear(): Promise<void> {
+		this.clearCallCount += 1;
 		this.rows.clear();
 	}
 }
@@ -236,17 +238,22 @@ describe("coverage lexical v3 production stores", () => {
 			"sealed-1",
 			"sealed-2",
 		]);
+		expect(table.clearCallCount).toBe(0);
+
+		await stores.shardRegistry.saveRegistry([shard("sealed-3", 3)]);
+		expect((await stores.shardRegistry.loadRegistry()).map((entry) => entry.shardId)).toEqual([
+			"sealed-3",
+		]);
+		expect(table.clearCallCount).toBe(0);
 
 		await stores.shardRegistry.updateShard({
-			...shard("sealed-2", 2),
+			...shard("sealed-3", 3),
 			state: "garbage",
 		});
-		expect((await stores.shardRegistry.loadRegistry())[1]?.state).toBe("garbage");
+		expect((await stores.shardRegistry.loadRegistry())[0]?.state).toBe("garbage");
 
-		await stores.shardRegistry.removeShards(["sealed-1"]);
-		expect((await stores.shardRegistry.loadRegistry()).map((entry) => entry.shardId)).toEqual([
-			"sealed-2",
-		]);
+		await stores.shardRegistry.removeShards(["sealed-3"]);
+		expect((await stores.shardRegistry.loadRegistry()).map((entry) => entry.shardId)).toEqual([]);
 	});
 
 	test("dexie invalidation adapter dedupes stable keys and removes by shard", async () => {
@@ -271,9 +278,11 @@ describe("coverage lexical v3 production stores", () => {
 		expect((await stores.invalidations.loadInvalidations()).map((entry) => entry.docRef)).toEqual([
 			2,
 		]);
+		expect(table.clearCallCount).toBe(0);
 
 		await stores.invalidations.clearInvalidations();
 		expect(await stores.invalidations.loadInvalidations()).toHaveLength(0);
+		expect(table.clearCallCount).toBe(1);
 	});
 
 	test("dexie resident shard artifact store publishes, loads, and removes artifacts", async () => {

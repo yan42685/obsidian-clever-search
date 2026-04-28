@@ -6,6 +6,7 @@ import {
 } from "src/services/search/coverage-lexical-v3/artifact-loader";
 import { loadCurrentActiveDocuments } from "src/services/search/coverage-lexical-v3/active-document-source";
 import { publishActiveShardAppend } from "src/services/search/coverage-lexical-v3/active-shard-publisher";
+import { getDocPath } from "src/services/search/coverage-lexical-v3/recall";
 import type { ResidentShardDescriptor } from "src/services/search/coverage-lexical-v3/shards";
 import { createMemoryCoverageLexicalV3ProductionStores } from "src/services/search/coverage-lexical-v3/stores";
 
@@ -127,6 +128,56 @@ describe("coverage lexical v3 active shard publisher", () => {
 		expect(result.appendTargetShard.docCount).toBe(2);
 		expect((await stores.shardRegistry.loadRegistry())[0]?.docCount).toBe(2);
 		expect((await artifacts.loadResidentShard(result.appendTargetShard))?.base.docTable.docCount).toBe(2);
+	});
+
+	test("applies same-active updates and deletes before publishing artifact", async () => {
+		const active = activeShard({ sourceBytes: 30, docCount: 2 });
+		const stores = createMemoryCoverageLexicalV3ProductionStores({ registry: [active] });
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>(
+				(row) => row.id,
+			),
+		);
+
+		const result = await publishActiveShardAppend({
+			stores,
+			residentShardArtifactStore: artifacts,
+			activeShard: active,
+			currentActiveDocuments: [
+				doc("old.md", "old alpha", 1, 1),
+				doc("delete.md", "delete beta", 2, 1),
+			],
+			changes: [
+				{
+					document: doc("old.md", "new alpha", 1, 2),
+					previousVersion: {
+						shardId: "active-1",
+						shardGeneration: 1,
+						docRef: 1,
+						docGeneration: 1,
+					},
+				},
+				{
+					document: doc("delete.md", "", 2, 1),
+					deleted: true,
+					previousVersion: {
+						shardId: "active-1",
+						shardGeneration: 1,
+						docRef: 2,
+						docGeneration: 1,
+					},
+				},
+			],
+			plannerOptions: { sealSourceBytes: 1024 * 1024, now: 100 },
+		});
+
+		const residentShard = await artifacts.loadResidentShard(result.appendTargetShard);
+		expect(result.appendTargetShard.docCount).toBe(1);
+		expect(residentShard?.base.docTable.docCount).toBe(1);
+		expect(residentShard == null ? [] : [getDocPath(residentShard.base, 0)]).toEqual([
+			"old.md",
+		]);
+		expect(await stores.invalidations.loadInvalidations()).toHaveLength(2);
 	});
 
 	test("loads current active documents from artifact and indexed snapshots", async () => {

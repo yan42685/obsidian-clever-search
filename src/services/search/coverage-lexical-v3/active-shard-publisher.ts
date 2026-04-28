@@ -81,31 +81,41 @@ export async function publishActiveShardAppend(params: {
 		: await resolveCurrentActiveDocuments(params);
 	const targetDocuments = plan.shouldSealBeforeAppend
 		? plan.appendDocuments
-		: [...currentActiveDocuments, ...plan.appendDocuments];
+		: applyChangesToCurrentDocuments(currentActiveDocuments, params.changes);
+	const nextActiveShard = plan.shouldSealBeforeAppend
+		? plan.nextActiveShard
+		: {
+				...plan.nextActiveShard,
+				sourceBytes: targetDocuments.reduce(
+					(sum, document) => sum + estimateDocumentSourceBytes(document),
+					0,
+				),
+				docCount: targetDocuments.length,
+		  };
 	const targetArtifacts = buildResidentShardArtifacts(
-		plan.nextActiveShard,
+		nextActiveShard,
 		targetDocuments,
 		params.tokenizeDocumentText,
 	);
 	await publishColdEvidence(
 		params.coldEvidencePublisher,
-		buildShardColdEvidenceRows(targetArtifacts.artifacts, plan.nextActiveShard),
+		buildShardColdEvidenceRows(targetArtifacts.artifacts, nextActiveShard),
 	);
 	await params.residentShardArtifactStore.publishResidentShardArtifact({
-		descriptor: plan.nextActiveShard,
+		descriptor: nextActiveShard,
 		shard: targetArtifacts.shard,
 		createdAt: params.plannerOptions?.now ?? Date.now(),
 	});
 	await params.stores.shardRegistry.updateShards(
-		[plan.sealedActiveShard, plan.nextActiveShard].filter(
+		[plan.sealedActiveShard, nextActiveShard].filter(
 			(descriptor): descriptor is ResidentShardDescriptor => descriptor != null,
 		),
 	);
 	await appendInvalidations(params, plan);
 	return {
-		appendTargetShard: plan.nextActiveShard,
+		appendTargetShard: nextActiveShard,
 		sealedActiveShard: plan.sealedActiveShard,
-		publishedShards: [plan.nextActiveShard],
+		publishedShards: [nextActiveShard],
 		appendedDocCount: plan.appendDocuments.length,
 		invalidationCount: plan.invalidationEntries.length,
 	};
@@ -216,6 +226,43 @@ function splitDocumentsBySourceBytes(
 		chunks.push(currentChunk);
 	}
 	return chunks;
+}
+
+function applyChangesToCurrentDocuments(
+	currentDocuments: readonly IndexedDocument[],
+	changes: readonly ActiveShardAppendChange[],
+): readonly IndexedDocument[] {
+	let documents = [...currentDocuments];
+	for (const change of changes) {
+		const previousKey = buildPreviousVersionLiveKey(change.previousVersion);
+		if (previousKey != null) {
+			documents = documents.filter(
+				(document) => buildLiveDocumentKey(document) !== previousKey,
+			);
+		} else if (change.deleted === true) {
+			const deletedKey = buildLiveDocumentKey(change.document);
+			documents = documents.filter(
+				(document) => buildLiveDocumentKey(document) !== deletedKey,
+			);
+		}
+		if (change.deleted === true) {
+			continue;
+		}
+		documents.push(change.document);
+	}
+	return documents;
+}
+
+function buildLiveDocumentKey(document: IndexedDocument): string {
+	return typeof document.docRef === "number" && document.docRef > 0
+		? `docref:${document.docRef}`
+		: `path:${document.path}`;
+}
+
+function buildPreviousVersionLiveKey(
+	previousVersion: ActiveShardAppendChange["previousVersion"],
+): string | null {
+	return previousVersion == null ? null : `docref:${previousVersion.docRef}`;
 }
 
 async function resolveCurrentActiveDocuments(params: {
