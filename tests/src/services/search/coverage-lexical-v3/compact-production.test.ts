@@ -149,6 +149,17 @@ describe("coverage lexical v3 compact production contracts", () => {
 			type: "complete_commit",
 			jobId: "job-ready_to_commit",
 		});
+		expect(
+			planCompactMaintenanceHeal(job("ready_to_commit"), [
+				shard("sealed-1", "garbage"),
+				shard("sealed-2", "garbage"),
+				shard("sealed-3", "sealed"),
+				shard("active-4", "active"),
+			]),
+		).toEqual({
+			type: "complete_commit",
+			jobId: "job-ready_to_commit",
+		});
 		expect(planCompactMaintenanceHeal(job("committed"), registry)).toEqual({
 			type: "resume_gc",
 			jobId: "job-committed",

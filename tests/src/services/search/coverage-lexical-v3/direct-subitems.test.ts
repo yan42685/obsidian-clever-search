@@ -407,6 +407,51 @@ describe("coverage lexical v3 direct subitems", () => {
 		expect(extractHighlightTexts(result)).not.toContain("\u751f\u547d\u529b");
 	});
 
+	test("uses only the nearest residual singleton highlight in a local block", () => {
+		const queryAnalysis = createQueryAnalysis({
+			queryText: "\u751f\u547d\u529b",
+			surfaceGroups: [
+				{
+					index: 0,
+					text: "\u751f\u547d\u529b",
+					kind: "han",
+					hanBigramTexts: ["\u751f\u547d", "\u547d\u529b"],
+					coveredCharMask: [true, true, false],
+					queryResidualUniqueBigrams: ["\u547d\u529b"],
+					hasQueryResidualHanCoverage: true,
+				},
+			],
+			primaryUnits: [
+				{ index: 0, text: "\u751f\u547d", source: "han_tokenizer_real", surfaceGroupIndex: 0 },
+			],
+		});
+
+		const result = buildV3DirectSubitems({
+			snapshotText: "\u529b \u751f\u547d\u529b",
+			queryAnalysis,
+			candidate: createCandidate({
+				path: "nearest-singleton.md",
+				realizedFamilies: [createRealizedFamily(0, "\u751f\u547d", "\u751f\u547d", "exact", 0)],
+				singletonHanCompletion: {
+					singletonHanChar: "\u529b",
+					singletonHanCharIndex: 2,
+					singletonHanSurfaceGroupIndex: 0,
+					matched: true,
+					matchSource: "body_same_block",
+					bestAnchorKind: "exact",
+					bestAnchorDistance: 0,
+					sameBlockAsAnchor: true,
+					sameBlockAsBestBodyWindow: true,
+					tier: "tight",
+				},
+			}),
+			candidateRecall: createCandidateRecall({ shortlistedBodyBlockIds: [0] }),
+			residentBase: createResidentBaseForBlockCounts([1]),
+		});
+
+		expect(extractHighlightTexts(result)).toEqual(["\u751f\u547d\u529b"]);
+	});
+
 	test("splits distant latin evidence when the weighted gap exceeds the local budget", () => {
 		const queryAnalysis = createQueryAnalysis({
 			queryText: "alpha beta",

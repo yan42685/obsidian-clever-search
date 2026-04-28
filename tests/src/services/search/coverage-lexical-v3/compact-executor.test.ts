@@ -289,6 +289,84 @@ describe("coverage lexical v3 compact executor", () => {
 		);
 	});
 
+	test("crash after registry flip but before job commit resumes instead of aborting output", async () => {
+		const stores = createMemoryCoverageLexicalV3ProductionStores({
+			registry: [
+				descriptor("sealed-1", "garbage"),
+				descriptor("sealed-2", "garbage"),
+				descriptor("sealed-3", "sealed"),
+			],
+		});
+		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>((row) => row.id),
+		);
+		const jobStore = new MemoryCompactJobManifestStore([job("ready_to_commit")]);
+		const tempStore = new MemoryCompactTempArtifactStore();
+		await tempStore.saveTempArtifact({
+			jobId: "job-ready_to_commit",
+			outputShardId: "sealed-3",
+			outputDescriptor: descriptor("sealed-3", "sealed"),
+			shard: residentShard("sealed-3", [doc("merged.md", "merged", 3)]),
+			createdAt: 1,
+		});
+
+		const results = await runCompactMaintenanceHeal({
+			stores,
+			residentShardArtifactStore: artifactStore,
+			jobStore,
+			tempArtifactStore: tempStore,
+			outputDescriptorsByJobId: new Map([
+				["job-ready_to_commit", descriptor("sealed-3", "sealed")],
+			]),
+			now: 2,
+		});
+
+		expect(results).toEqual([{ action: "committed", jobId: "job-ready_to_commit" }]);
+		expect((await jobStore.loadJobs())[0].status).toBe("committed");
+		expect(await tempStore.loadTempArtifact("job-ready_to_commit")).toBeDefined();
+		expect((await stores.shardRegistry.loadRegistry()).find((shard) => shard.shardId === "sealed-3")?.state).toBe(
+			"sealed",
+		);
+	});
+
+	test("crash during partial registry flip marks all inputs garbage before resuming", async () => {
+		const stores = createMemoryCoverageLexicalV3ProductionStores({
+			registry: [
+				descriptor("sealed-1", "sealed"),
+				descriptor("sealed-2", "garbage"),
+				descriptor("sealed-3", "sealed"),
+			],
+		});
+		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>((row) => row.id),
+		);
+		const jobStore = new MemoryCompactJobManifestStore([job("ready_to_commit")]);
+		const tempStore = new MemoryCompactTempArtifactStore();
+		await tempStore.saveTempArtifact({
+			jobId: "job-ready_to_commit",
+			outputShardId: "sealed-3",
+			outputDescriptor: descriptor("sealed-3", "sealed"),
+			shard: residentShard("sealed-3", [doc("merged.md", "merged", 3)]),
+			createdAt: 1,
+		});
+
+		await runCompactMaintenanceHeal({
+			stores,
+			residentShardArtifactStore: artifactStore,
+			jobStore,
+			tempArtifactStore: tempStore,
+			outputDescriptorsByJobId: new Map([
+				["job-ready_to_commit", descriptor("sealed-3", "sealed")],
+			]),
+			now: 2,
+		});
+
+		const registry = await stores.shardRegistry.loadRegistry();
+		expect(registry.find((shard) => shard.shardId === "sealed-1")?.state).toBe("garbage");
+		expect(registry.find((shard) => shard.shardId === "sealed-2")?.state).toBe("garbage");
+		expect(registry.find((shard) => shard.shardId === "sealed-3")?.state).toBe("sealed");
+	});
+
 	test("crash after commit before GC resumes garbage cleanup", async () => {
 		const stores = createMemoryCoverageLexicalV3ProductionStores({
 			registry: [descriptor("sealed-1", "garbage"), descriptor("sealed-2", "garbage"), descriptor("sealed-3", "sealed")],

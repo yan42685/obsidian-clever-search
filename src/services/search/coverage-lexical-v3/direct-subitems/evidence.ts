@@ -837,21 +837,21 @@ function collectSingletonHanAtomsForScope(
 			}
 			let bestOffset: number | null = null;
 			let bestGap = Number.POSITIVE_INFINITY;
-		for (const charOffset of charOffsets) {
-			const start = block.start + charOffset;
-			const end = start + target.char.length;
-			if (
-				baseAtoms.some(
-					(anchor) =>
-						anchor.blockId === block.blockId &&
-						Math.min(anchor.end, end) > Math.max(anchor.start, start),
-				)
-			) {
-				continue;
-			}
-			for (const anchor of baseAtoms) {
-				const gap = computeScopeAtomBoundaryGap(
-					context,
+			for (const charOffset of charOffsets) {
+				const start = block.start + charOffset;
+				const end = start + target.char.length;
+				if (
+					baseAtoms.some(
+						(anchor) =>
+							anchor.blockId === block.blockId &&
+							Math.min(anchor.end, end) > Math.max(anchor.start, start),
+					)
+				) {
+					continue;
+				}
+				for (const anchor of baseAtoms) {
+					const gap = computeScopeAtomBoundaryGap(
+						context,
 						{ blockId: block.blockId, start, end },
 						anchor,
 					);
@@ -866,7 +866,7 @@ function collectSingletonHanAtomsForScope(
 			}
 			if (
 				bestOffset == null ||
-		bestGap > BODY_LOCALITY_MAX_ADJACENT_GAP
+				bestGap > BODY_LOCALITY_MAX_ADJACENT_GAP
 			) {
 				continue;
 			}

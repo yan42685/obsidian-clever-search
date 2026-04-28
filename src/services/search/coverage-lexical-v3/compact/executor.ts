@@ -99,6 +99,12 @@ export async function runCompactMaintenanceHeal(params: {
 		} else if (action.type === "complete_commit") {
 			const outputDescriptor = params.outputDescriptorsByJobId.get(job.jobId);
 			if (outputDescriptor == null) {
+				if (compactOutputAlreadyVisible(job, registry)) {
+					await markCompactInputsGarbage(params.stores, job);
+					await params.jobStore.saveJob(updateJob(job, "committed", params.now));
+					results.push({ action: "committed", jobId: job.jobId });
+					continue;
+				}
 				await params.jobStore.saveJob(updateJob(job, "failed", params.now));
 				results.push({ action: "retry_later", jobId: job.jobId });
 				continue;
@@ -113,6 +119,30 @@ export async function runCompactMaintenanceHeal(params: {
 		}
 	}
 	return results;
+}
+
+async function markCompactInputsGarbage(
+	stores: CoverageLexicalV3ProductionStores,
+	job: CompactJobManifest,
+): Promise<void> {
+	const registry = await stores.shardRegistry.loadRegistry();
+	const inputShardIds = new Set(job.inputShardIds);
+	await stores.shardRegistry.updateShards(
+		registry
+			.filter((shard) => inputShardIds.has(shard.shardId))
+			.map((shard) => ({ ...shard, state: "garbage" as const })),
+	);
+}
+
+function compactOutputAlreadyVisible(
+	job: CompactJobManifest,
+	registry: readonly ResidentShardDescriptor[],
+): boolean {
+	return registry.some(
+		(shard) =>
+			shard.shardId === job.outputShardId &&
+			(shard.state === "active" || shard.state === "sealing" || shard.state === "sealed"),
+	);
 }
 
 async function publishTempArtifactColdEvidence(

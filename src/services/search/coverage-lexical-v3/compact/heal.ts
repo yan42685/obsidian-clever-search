@@ -1,4 +1,4 @@
-import type { ResidentShardDescriptor } from "../shards";
+import { isReadableShardState, type ResidentShardDescriptor } from "../shards";
 import type { CompactJobManifest } from "./types";
 
 export type CompactStartupSafetyAction =
@@ -35,7 +35,8 @@ export function planCompactMaintenanceHeal(
 		return { type: "abort_temp_output", jobId: job.jobId };
 	}
 	if (job.status === "ready_to_commit") {
-		return compactInputsStillCommitted(job, committedRegistry)
+		return compactOutputAlreadyCommitted(job, committedRegistry) ||
+			compactInputsStillCommitted(job, committedRegistry)
 			? { type: "complete_commit", jobId: job.jobId }
 			: { type: "abort_temp_output", jobId: job.jobId };
 	}
@@ -43,6 +44,17 @@ export function planCompactMaintenanceHeal(
 		return { type: "resume_gc", jobId: job.jobId };
 	}
 	return { type: "retry_later", jobId: job.jobId };
+}
+
+function compactOutputAlreadyCommitted(
+	job: CompactJobManifest,
+	committedRegistry: readonly ResidentShardDescriptor[],
+): boolean {
+	return committedRegistry.some(
+		(shard) =>
+			shard.shardId === job.outputShardId &&
+			isReadableShardState(shard.state),
+	);
 }
 
 function compactInputsStillCommitted(
