@@ -779,18 +779,31 @@ function getHanGroupEndpointCoverage(
 	coversEndAnchor: boolean;
 	coversEndpoints: boolean;
 }> {
+	const endpointBigrams = getCodepointEndpointBigrams(surfaceText);
 	const coversStartAnchor =
 		matchedRealAnchorTexts.some((text) => surfaceText.startsWith(text)) ||
-		matchedBigramTexts.includes(Array.from(surfaceText).length >= 2 ? surfaceText.slice(0, 2) : "");
+		(endpointBigrams.start != null && matchedBigramTexts.includes(endpointBigrams.start));
 	const coversEndAnchor =
 		matchedRealAnchorTexts.some((text) => surfaceText.endsWith(text)) ||
-		matchedBigramTexts.includes(
-			Array.from(surfaceText).length >= 2 ? surfaceText.slice(-2) : "",
-		);
+		(endpointBigrams.end != null && matchedBigramTexts.includes(endpointBigrams.end));
 	return {
 		coversStartAnchor,
 		coversEndAnchor,
 		coversEndpoints: coversStartAnchor && coversEndAnchor,
+	};
+}
+
+function getCodepointEndpointBigrams(surfaceText: string): Readonly<{
+	start: string | null;
+	end: string | null;
+}> {
+	const chars = Array.from(surfaceText);
+	if (chars.length < 2) {
+		return { start: null, end: null };
+	}
+	return {
+		start: `${chars[0] ?? ""}${chars[1] ?? ""}`,
+		end: `${chars[chars.length - 2] ?? ""}${chars[chars.length - 1] ?? ""}`,
 	};
 }
 

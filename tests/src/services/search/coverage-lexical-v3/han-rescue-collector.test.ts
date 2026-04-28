@@ -4,6 +4,106 @@ import type { V3CandidateDocRecall } from "src/services/search/coverage-lexical-
 import type { V3QueryAnalysis } from "src/services/search/coverage-lexical-v3/query";
 
 describe("coverage lexical v3 Han rescue collector", () => {
+	test("evaluates non-BMP Han endpoint bigrams by codepoint", () => {
+		const left = "\u{20000}";
+		const middle = "\u{20001}";
+		const right = "\u{20002}";
+		const surface = `${left}${middle}${right}`;
+		const startBigram = `${left}${middle}`;
+		const base = createMinimalResidentBaseForBlockCounts([0]);
+		const candidateRecall: V3CandidateDocRecall = {
+			shardId: "sealed-0",
+			shardGeneration: 1,
+			docId: 0,
+			liveDocSlot: 0,
+			matchedIdentityUnitIndices: [],
+			matchedRouteUnitIndices: [],
+			matchedHeadingUnitIndices: [],
+			hasQuerySingletonHanMetadataSupport: false,
+			hasScopedSingletonHanMetadataSupport: false,
+			shortlistedBodyBlocks: [],
+			shortlistedBodyBlockIds: [],
+			hanMetadataGateStats: {
+				matchedBigramCount: 1,
+				longestContiguousBigramChain: 1,
+				bigramCoverageRatio: 0.5,
+			},
+			hanBodyBlockGateStats: [],
+			hanSurfaceGroupRecalls: [
+				{
+					surfaceGroupIndex: 0,
+					metadataGateStats: {
+						matchedBigramCount: 1,
+						longestContiguousBigramChain: 1,
+						bigramCoverageRatio: 0.5,
+					},
+					bodySeedBlockIds: [],
+					bodySeedBlockGates: [],
+				},
+			],
+		};
+		const queryAnalysis: V3QueryAnalysis = {
+			queryText: surface,
+			normalizedQueryText: surface,
+			querySingletonHanChar: null,
+			querySingletonHanCodePoint: null,
+			querySingletonHanRecallEligible: false,
+			surfaceGroups: [
+				{
+					index: 0,
+					text: surface,
+					kind: "han",
+					hanBigramTexts: [startBigram, `${middle}${right}`],
+					coveredCharMask: [],
+					queryResidualUniqueBigrams: [startBigram],
+					hasQueryResidualHanCoverage: true,
+				},
+			],
+			primaryUnits: [],
+			hanBackstopGroups: [],
+			surfaceCoverageShapeKey: "h",
+		};
+
+		const artifacts = collectHanRescueArtifacts({
+			base,
+			queryAnalysis,
+			candidateRecall,
+			docEvidence: {
+				identityWitnessTexts: [startBigram],
+				identityWitnessSourceMasks: [1],
+				routeWitnessTexts: [],
+				routeWitnessSourceMasks: [],
+				headingWitnessTexts: [],
+			},
+			bodyBlockEvidenceByBlockId: new Map(),
+			resolvedHanSurfaceGroups: [
+				{
+					surfaceGroupIndex: 0,
+					surfaceText: surface,
+					realUnitIndices: [],
+					matchedRealUnitIndices: [],
+					matchedCharMask: [],
+					rescueMode: "whole_group_when_real_miss",
+					rescueBigrams: [startBigram],
+				},
+			],
+			bodyApproxSpanByBlockId: new Map(),
+			bodyOrdinalSpanByBlockId: new Map(),
+			excludedSurfaceGroupIndices: null,
+			chooseBestBodyWindow: () => null,
+		});
+
+		expect(
+			artifacts.metadataWitnessBySurfaceGroupIndex.get(0)?.assessment,
+		).toEqual(
+			expect.objectContaining({
+				coversStartAnchor: true,
+				coversEndAnchor: false,
+				coversEndpoints: false,
+			}),
+		);
+	});
+
 	test("uses candidate liveDocSlot when collecting same-doc body rescue blocks", () => {
 		const fullSurface = "\u7f13\u5b58\u6062\u590d\u6b65\u9aa4";
 		const base = createMinimalResidentBaseForBlockCounts([1, 1]);

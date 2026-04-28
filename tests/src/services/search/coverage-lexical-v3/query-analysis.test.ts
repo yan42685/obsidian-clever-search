@@ -1,4 +1,5 @@
 import { analyzeQuery } from "src/services/search/coverage-lexical-v3/query";
+import { markCoveredHanChars as markRecallCoveredHanChars } from "src/services/search/coverage-lexical-v3/recall/han-surface-groups";
 
 describe("coverage lexical v3 query analysis", () => {
 	test("selects a stable non-overlapping Han cover over overlapping tokenizer terms", () => {
@@ -57,6 +58,24 @@ describe("coverage lexical v3 query analysis", () => {
 				triggerKind: "bridge_bigram",
 			}),
 		]);
+	});
+
+	test("tracks Han cover by codepoint index for non-BMP Han", () => {
+		const left = "\u{20000}";
+		const middle = "\u{20001}";
+		const right = "\u{20002}";
+		const analysis = analyzeQuery(`${left}${middle}${right}`, [`${middle}${right}`]);
+
+		expect(analysis.surfaceGroups[0]).toEqual(
+			expect.objectContaining({
+				coveredCharMask: [false, true, true],
+				queryResidualUniqueBigrams: [`${left}${middle}`],
+				hasQueryResidualHanCoverage: true,
+			}),
+		);
+		expect(
+			markRecallCoveredHanChars(`${left}${middle}${right}`, 3, [`${middle}${right}`]),
+		).toEqual([false, true, true]);
 	});
 
 	test("enables singleton Han recall only when the normalized query has exactly one Han codepoint", () => {

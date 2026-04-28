@@ -198,19 +198,33 @@ export function markCoveredHanChars(
 	terms: readonly string[],
 ): boolean[] {
 	const covered = Array.from({ length: charLength }, () => false);
+	const chars = Array.from(surfaceText);
 	for (const term of terms) {
-		let searchStart = 0;
-		while (searchStart < surfaceText.length) {
-			const matchIndex = surfaceText.indexOf(term, searchStart);
-			if (matchIndex < 0) {
-				break;
+		const termChars = Array.from(term);
+		if (termChars.length === 0 || termChars.length > chars.length) {
+			continue;
+		}
+		for (let start = 0; start <= chars.length - termChars.length; start += 1) {
+			if (!matchesCharsAt(chars, termChars, start)) {
+				continue;
 			}
-			const termCharLength = Array.from(term).length;
-			for (let index = matchIndex; index < matchIndex + termCharLength; index += 1) {
+			for (let index = start; index < start + termChars.length; index += 1) {
 				covered[index] = true;
 			}
-			searchStart = matchIndex + 1;
 		}
 	}
 	return covered;
+}
+
+function matchesCharsAt(
+	chars: readonly string[],
+	needle: readonly string[],
+	start: number,
+): boolean {
+	for (let offset = 0; offset < needle.length; offset += 1) {
+		if (chars[start + offset] !== needle[offset]) {
+			return false;
+		}
+	}
+	return true;
 }
