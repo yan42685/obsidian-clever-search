@@ -562,6 +562,35 @@ describe("DataManager lexical startup reconcile", () => {
     ).resolves.toBe(false);
   });
 
+  test("keeps the V3 lexical ready marker when marking a runtime snapshot dirty", async () => {
+    const harness = createHarness({
+      files: [],
+      texts: new Map(),
+      previousIndexedFileRefs: [],
+      previousLexicalQueryEvidenceReady: true,
+    });
+
+    harness.manager.lexicalEngine = {
+      supportsPersistentFileIndex: jest.fn(() => true),
+    };
+    harness.manager.lexicalSnapshotCoordinator = {
+      markDirty: jest.fn(async () => {}),
+    };
+    delete harness.manager.markLexicalSnapshotDirty;
+
+    await harness.manager.markLexicalSnapshotDirty(["changed.md"]);
+
+    expect(
+      harness.database.clearLexicalQueryEvidenceReadyMarker,
+    ).not.toHaveBeenCalled();
+    expect(
+      harness.manager.lexicalSnapshotCoordinator.markDirty,
+    ).toHaveBeenCalledWith(["changed.md"]);
+    await expect(
+      harness.database.hasLexicalQueryEvidenceReadyMarker(),
+    ).resolves.toBe(true);
+  });
+
   test("invalidates the lexical ready marker when persisted lexical recovery requires a full rebuild", async () => {
     const harness = createHarness({
       files: [],
@@ -841,6 +870,20 @@ describe("DataManager lexical startup reconcile", () => {
             docLocalUniqueBytes: 8,
           },
         },
+      },
+      hybridPersistedRuntimeState: {
+        enabled: false,
+        persistedTotalBytes: 0,
+        chunkBytes: 0,
+        fileSnapshotBytes: 0,
+        dirtyShadowBytes: 0,
+        vectorBytes: 0,
+        hnswBytes: 0,
+        indexedRefBytes: 0,
+        recoveryArtifactStateBytes: 0,
+        runtimeTotalBytes: 0,
+        runtimeVectorBytes: 0,
+        runtimeGraphBytes: 0,
       },
     } as any);
 

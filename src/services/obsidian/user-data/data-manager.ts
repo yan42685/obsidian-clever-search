@@ -417,7 +417,9 @@ export class DataManager {
     reason: "runtime-lexical-dirty",
     markerId: buildIndexArtifactStateId("lexical", "snapshot"),
     stateTable: this.database.db.indexArtifactState,
-    supportsDirtyTracking: () => this.lexicalEngine.supportsSerializedFileIndex(),
+    supportsDirtyTracking: () =>
+      this.lexicalEngine.supportsSerializedFileIndex() ||
+      this.lexicalEngine.supportsPersistentFileIndex(),
     estimatePathBytes: (path) =>
       Math.max(0, this.dataProvider.getFileByPath(path)?.stat.size ?? 0),
     persistArtifact: async () => await this.writeLexicalSearchSnapshotArtifact(),
@@ -1016,7 +1018,9 @@ export class DataManager {
   private async markLexicalSnapshotDirty(
     paths: readonly string[] = [],
   ): Promise<void> {
-    await this.database.clearLexicalQueryEvidenceReadyMarker();
+    if (!this.lexicalEngine.supportsPersistentFileIndex()) {
+      await this.database.clearLexicalQueryEvidenceReadyMarker();
+    }
     await this.lexicalSnapshotCoordinator.markDirty(paths);
   }
 
