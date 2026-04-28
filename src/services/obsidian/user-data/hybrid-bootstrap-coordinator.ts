@@ -13,20 +13,19 @@ import { logger } from "src/utils/logger";
 import { MyNotice } from "../transformed-api";
 import { t, type LocaleKey } from "../translations/locale-helper";
 import type { DataProvider } from "./data-provider";
-import type { HybridRepairMode } from "./index-recovery-state";
+import type {
+  HybridRepairTask,
+  HybridStorageRepairReport,
+} from "./hybrid-bootstrap-types";
+import { planIndexedFileSetChanges } from "./hybrid-file-set-planner";
+
+export type { HybridRepairTask, HybridStorageRepairReport } from "./hybrid-bootstrap-types";
 
 export type HybridIndexFailure = {
   path: string;
   reason: string;
   attempts: number;
   fallbackIndexed: boolean;
-};
-
-type HybridStorageRepairReport = {
-  repairedPaths: string[];
-  reindexedPaths: string[];
-  previousIndexedFileRefs: Map<string, HybridIndexedFileRef>;
-  previousDocRegistryEntries: Map<string, DocRegistryRow>;
 };
 
 export type HybridBootstrapMove = {
@@ -68,15 +67,6 @@ export type HybridProgressReporter = {
   hide(): void;
 };
 
-export type HybridBootstrapRepairTask = {
-  path: string;
-  mode: HybridRepairMode;
-  reason: string;
-  eligibleAt: number;
-  enqueuedAt: number;
-  sourceGeneration?: number;
-};
-
 type HybridBootstrapEngine = {
   isEnabled(): boolean;
   shouldIndexPath(path: string): boolean;
@@ -114,7 +104,7 @@ type HybridBootstrapCoordinatorOptions = {
     repairedPaths: number,
   ) => HybridProgressReporter | null;
   runRepairTasks: (
-    tasks: HybridBootstrapRepairTask[],
+    tasks: HybridRepairTask[],
     progressNotice: HybridProgressReporter | null,
     repairedPaths: number,
     failures: HybridIndexFailure[],
@@ -235,7 +225,7 @@ export class HybridBootstrapCoordinator {
       }
     }
 
-    const repairTasks: HybridBootstrapRepairTask[] = pendingAdds.map((file) => ({
+    const repairTasks: HybridRepairTask[] = pendingAdds.map((file) => ({
       path: file.path,
       mode: "incremental",
       reason: "startup-self-heal",
@@ -336,32 +326,12 @@ export class HybridBootstrapCoordinator {
     docsToDelete: string[];
     docsToMove: HybridBootstrapMove[];
   }> {
-    const docsToAdd: TFile[] = [];
-    const docsToDelete: string[] = [];
     const docsToMove: HybridBootstrapMove[] = [];
-
-    for (const [path, file] of currFiles) {
-      const previousIndexedFileRef = previousIndexedFileRefs.get(path);
-      if (!previousIndexedFileRef) {
-        docsToAdd.push(file);
-      } else if (file.stat.mtime > previousIndexedFileRef.generation) {
-        docsToDelete.push(path);
-        docsToAdd.push(file);
-      }
-    }
-
-    for (const prevPath of previousIndexedFileRefs.keys()) {
-      if (!currFiles.has(prevPath)) {
-        docsToDelete.push(prevPath);
-      }
-    }
-
-    for (const reindexPath of reindexedPaths) {
-      const file = currFiles.get(reindexPath);
-      if (file && !docsToAdd.some((item) => item.path === reindexPath)) {
-        docsToAdd.push(file);
-      }
-    }
+    const { docsToAdd, docsToDelete } = planIndexedFileSetChanges({
+      currFiles,
+      previousIndexedFileRefs,
+      reindexedPaths,
+    });
 
     const deleteCandidates = docsToDelete
       .map((path) => ({

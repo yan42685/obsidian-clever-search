@@ -31,24 +31,24 @@ import {
 } from "src/services/search/hybrid/hybrid-profiler";
 import {
   buildHybridGenerationKey,
-  type ChunkRow,
-  type ChunkVectorShardRow,
-  type HybridFileSnapshotRow,
   type HybridIndexedFileRef,
 } from "src/services/search/hybrid/hybrid-store";
 import { runHybridStorageGc } from "src/services/search/hybrid/hybrid-storage-gc";
 import {
-  analyzeHybridStoredFileConsistency,
   normalizeHybridIndexedFileState,
-  type HybridStoredVectorInfo,
 } from "src/services/search/hybrid/hybrid-consistency";
+import {
+  buildHybridStoredPathInspection,
+  collectHybridStoredPathSummaries,
+  inspectHybridStoredPaths,
+  type HybridStoredPathSummary,
+} from "src/services/search/hybrid/hybrid-storage-inspector";
 import { hashStableText } from "src/services/search/hybrid/incremental-reuse";
 import {
   retryAsync,
   runWeightedTasks,
 } from "src/services/search/hybrid/runtime-control";
 import type { FileSearchEngine } from "src/services/search/file-search-engine";
-import type { VectorPrecision } from "src/services/search/hybrid/hybrid-types";
 import { LexicalEngine } from "src/services/search/lexical-engine";
 import type {
   PersistentFileIndexRecoveryPlan,
@@ -98,13 +98,15 @@ import { DirtyArtifactCoordinator } from "./dirty-artifact-coordinator";
 import {
   HybridBootstrapCoordinator,
   type HybridBootstrapPlan,
-  type HybridBootstrapRepairTask as HybridRepairTask,
   type HybridIndexFailure,
   type HybridIndexProgress,
   type HybridProgressReporter,
   type HybridBootstrapSummary,
+  type HybridRepairTask,
+  type HybridStorageRepairReport,
 } from "./hybrid-bootstrap-coordinator";
 import { HybridRecoveryCoordinator } from "./hybrid-recovery-coordinator";
+import { planIndexedFileSetChanges } from "./hybrid-file-set-planner";
 import type { HybridFailedEmbeddingSummary } from "./hybrid-embedding-recovery-manager";
 import {
   buildHybridAvailabilityState,
@@ -140,27 +142,6 @@ type HybridPreflightReport = {
   estimatedHybridBytes: number;
   currentHybridBytes: number;
   projectedUsageRatio: number | null;
-};
-
-
-type HybridStorageRepairReport = {
-  repairedPaths: string[];
-  reindexedPaths: string[];
-  previousIndexedFileRefs: Map<string, HybridIndexedFileRef>;
-  previousDocRegistryEntries: Map<string, DocRegistryRow>;
-};
-
-type HybridStoredPathSummary = {
-  chunkCount: number;
-  currentSnapshotGeneration?: number;
-  shadowSnapshotGeneration?: number;
-  vectorInfo?: HybridStoredVectorInfo;
-  indexedFileRef?: HybridIndexedFileRef;
-};
-
-type HybridStoredPathInspection = {
-  summary: HybridStoredPathSummary;
-  consistency: ReturnType<typeof analyzeHybridStoredFileConsistency>;
 };
 
 type HybridRuntimeQueryGateState = "blocked" | "open";
@@ -869,7 +850,10 @@ export class DataManager {
   }
 
   async getHybridHealthSummary(): Promise<HybridHealthSummary> {
-    const summaries = await this.collectHybridStoredPathSummaries();
+    const summaries = await collectHybridStoredPathSummaries({
+      database: this.database,
+      batchSize: DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE,
+    });
     const freshnessSummary = await this.getHybridFreshnessSummary();
     const failedEmbeddingSummary = this.getHybridFailedEmbeddingSummary();
     const deferredEmbeddingSummary = await this.getHybridDeferredEmbeddingSummary();
@@ -889,20 +873,9 @@ export class DataManager {
     const shadowMismatchSamplePaths: string[] = [];
 
     for (const [path, summary] of summaries) {
-      const consistency = analyzeHybridStoredFileConsistency({
+      const { consistency } = buildHybridStoredPathInspection({
+        summary,
         existsInVault: trackedPaths.has(path),
-        hasChunks: summary.chunkCount > 0,
-        chunkCount: summary.chunkCount,
-        snapshot:
-          summary.currentSnapshotGeneration !== undefined
-            ? { generation: summary.currentSnapshotGeneration }
-            : undefined,
-        shadowSnapshot:
-          summary.shadowSnapshotGeneration !== undefined
-            ? { generation: summary.shadowSnapshotGeneration }
-            : undefined,
-        vectorInfo: summary.vectorInfo,
-        indexedFileRef: summary.indexedFileRef,
         currentPrecision,
       });
       const healthBlockingReasons = consistency.reuseBlockedReasons.filter(
@@ -1345,23 +1318,10 @@ export class DataManager {
           })
           .filter((entry): entry is readonly [string, HybridIndexedFileRef] => entry != null),
       );
-      const docsToAdd: TFile[] = [];
-      const docsToDelete: string[] = [];
-
-      for (const [path, file] of currFiles) {
-        const previousIndexedFileRef = previousIndexedFileRefs.get(path);
-        if (!previousIndexedFileRef) {
-          docsToAdd.push(file);
-        } else if (file.stat.mtime > previousIndexedFileRef.generation) {
-          docsToDelete.push(path);
-          docsToAdd.push(file);
-        }
-      }
-      for (const prevPath of previousIndexedFileRefs.keys()) {
-        if (!currFiles.has(prevPath)) {
-          docsToDelete.push(prevPath);
-        }
-      }
+      const { docsToAdd, docsToDelete } = planIndexedFileSetChanges({
+        currFiles,
+        previousIndexedFileRefs,
+      });
 
       hadWork = docsToAdd.length > 0 || docsToDelete.length > 0;
       logger.trace(
@@ -1410,6 +1370,7 @@ export class DataManager {
     return (
       plan.docsToAdd.length > 0 ||
       plan.docsToDelete.length > 0 ||
+      plan.docsToMove.length > 0 ||
       plan.repairReport.repairedPaths.length > 0
     );
   }
@@ -1529,7 +1490,9 @@ export class DataManager {
     file: TFile,
     generation = file.stat.mtime,
   ): Promise<boolean> {
-    const result = await this.addDocuments([file]);
+    const result =
+      (await this.applyPersistentLexicalRecoveryChanges([], [file])) ??
+      (await this.addDocuments([file]));
     if (result.failures.length > 0) {
       this.addLexicalIndexFailures(result.failures);
       return false;
@@ -3516,10 +3479,14 @@ export class DataManager {
         (item): item is { task: HybridRepairTask; file: TFile } =>
           item !== null,
       );
-    const taskInspections = await this.inspectHybridStoredPaths(
-      files.map((item) => item.task.path),
-      new Set(files.map((item) => item.task.path)),
-    );
+    const taskInspections = await inspectHybridStoredPaths({
+      database: this.database,
+      paths: files.map((item) => item.task.path),
+      existingPaths: new Set(files.map((item) => item.task.path)),
+      currentPrecision:
+        this.setting.hybrid.vectorCompression === "float16" ? "float16" : "int8",
+      batchSize: DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE,
+    });
     for (const item of files) {
       const inspection = taskInspections.get(item.task.path);
       if (!inspection || inspection.consistency.repairReasons.length === 0) {
@@ -4301,342 +4268,27 @@ export class DataManager {
     return progressNotice;
   }
 
-  private async scanRowsInBatches<Row, Key extends string | number>(
-    loadBatch: (lastKey: Key | null, batchSize: number) => Promise<Row[]>,
-    getLastKey: (row: Row) => Key,
-    handleBatch: (rows: Row[]) => void | Promise<void>,
-  ): Promise<void> {
-    let lastKey: Key | null = null;
-    while (true) {
-      const rows = await loadBatch(
-        lastKey,
-        DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE,
-      );
-      if (rows.length === 0) {
-        return;
-      }
-      await handleBatch(rows);
-      lastKey = getLastKey(rows[rows.length - 1]);
-    }
-  }
-
-  private getOrCreateHybridStoredPathSummary(
-    summaries: Map<string, HybridStoredPathSummary>,
-    path: string,
-  ): HybridStoredPathSummary {
-    const existing = summaries.get(path);
-    if (existing) {
-      return existing;
-    }
-    const created: HybridStoredPathSummary = { chunkCount: 0 };
-    summaries.set(path, created);
-    return created;
-  }
-
-  private buildHybridStoredPathInspection(
-    summary: HybridStoredPathSummary,
-    existsInVault: boolean,
-  ): HybridStoredPathInspection {
-    return {
-      summary,
-      consistency: analyzeHybridStoredFileConsistency({
-        existsInVault,
-        hasChunks: summary.chunkCount > 0,
-        chunkCount: summary.chunkCount,
-        snapshot:
-          summary.currentSnapshotGeneration !== undefined
-            ? { generation: summary.currentSnapshotGeneration }
-            : undefined,
-        shadowSnapshot:
-          summary.shadowSnapshotGeneration !== undefined
-            ? { generation: summary.shadowSnapshotGeneration }
-            : undefined,
-        vectorInfo: summary.vectorInfo,
-        indexedFileRef: summary.indexedFileRef,
-        currentPrecision:
-          this.setting.hybrid.vectorCompression === "float16"
-            ? "float16"
-            : "int8",
-      }),
-    };
-  }
-
-  private async collectHybridStoredPathSummariesForPaths(
-    paths: readonly string[],
-  ): Promise<Map<string, HybridStoredPathSummary>> {
-    const uniquePaths = Array.from(new Set(paths));
-    const summaries = new Map<string, HybridStoredPathSummary>();
-    if (uniquePaths.length === 0) {
-      return summaries;
-    }
-
-    for (const path of uniquePaths) {
-      summaries.set(path, { chunkCount: 0 });
-    }
-
-    for (
-      let start = 0;
-      start < uniquePaths.length;
-      start += DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE
-    ) {
-      const batchPaths = uniquePaths.slice(
-        start,
-        start + DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE,
-      );
-      const registryRows = await this.database.getDocRegistryEntries(batchPaths);
-      const docRefs = batchPaths.map((path) => registryRows.get(path)?.docRef ?? -1);
-      const generationKeys = batchPaths.map((path, index) => {
-        const row = registryRows.get(path);
-        return row == null
-          ? "__missing__"
-          : `${docRefs[index]}:${row.liveGeneration}`;
-      });
-      const [chunkRows, vectorRows, indexedFileRefs, snapshotRows, shadowRows] =
-        await Promise.all([
-          this.database.db.hybridChunks
-            .where("docRef")
-            .anyOf(docRefs)
-            .toArray(),
-          this.database.db.hybridChunkVectors.bulkGet(generationKeys),
-          this.database.db.hybridIndexedFileRefs.bulkGet(docRefs),
-          this.database.db.fileSnapshots.bulkGet(generationKeys),
-          this.database.db.hybridDirtyShadows.bulkGet(generationKeys),
-        ]);
-
-      for (const row of chunkRows) {
-        const path = batchPaths[docRefs.indexOf(row.docRef)];
-        if (path == null) {
-          continue;
-        }
-        const summary = this.getOrCreateHybridStoredPathSummary(
-          summaries,
-          path,
-        );
-        summary.chunkCount += 1;
-      }
-
-      for (let index = 0; index < batchPaths.length; index++) {
-        const path = batchPaths[index];
-        const summary = this.getOrCreateHybridStoredPathSummary(summaries, path);
-        const vectorRow = vectorRows[index];
-        if (vectorRow) {
-          summary.vectorInfo = {
-            precision: (vectorRow.precision === "float16"
-              ? "float16"
-              : "int8") as VectorPrecision,
-            chunkCount: vectorRow.chunkCount,
-            generation: vectorRow.generation,
-          };
-        }
-        const indexedFileRef = indexedFileRefs[index];
-        if (indexedFileRef) {
-          summary.indexedFileRef = indexedFileRef;
-        }
-        const snapshotRow = snapshotRows[index];
-        if (snapshotRow) {
-          summary.currentSnapshotGeneration = snapshotRow.generation;
-        }
-        const shadowRow = shadowRows[index];
-        if (shadowRow) {
-          summary.shadowSnapshotGeneration = shadowRow.generation;
-        }
-      }
-    }
-
-    return summaries;
-  }
-
-  private async inspectHybridStoredPaths(
-    paths: readonly string[],
-    existingPaths: ReadonlySet<string>,
-  ): Promise<Map<string, HybridStoredPathInspection>> {
-    const summaries = await this.collectHybridStoredPathSummariesForPaths(paths);
-    const inspections = new Map<string, HybridStoredPathInspection>();
-    for (const path of Array.from(new Set(paths))) {
-      const summary = summaries.get(path) ?? { chunkCount: 0 };
-      inspections.set(
-        path,
-        this.buildHybridStoredPathInspection(summary, existingPaths.has(path)),
-      );
-    }
-    return inspections;
-  }
-
-  private async collectHybridStoredPathSummaries(): Promise<
-    Map<string, HybridStoredPathSummary>
-  > {
-    const summaries = new Map<string, HybridStoredPathSummary>();
-    const registryRows = await this.database.listDocRegistryEntries();
-    const pathByDocRef = new Map(registryRows.map((row) => [row.docRef, row.path] as const));
-    const keyForRow = (row: { docRef: number }) => pathByDocRef.get(row.docRef);
-
-    await this.scanRowsInBatches<ChunkRow, number>(
-      (lastId, batchSize) => {
-        if (lastId === null) {
-          return this.database.db.hybridChunks
-            .orderBy(":id")
-            .limit(batchSize)
-            .toArray();
-        }
-        return this.database.db.hybridChunks
-          .where(":id")
-          .above(lastId)
-          .limit(batchSize)
-          .toArray();
-      },
-      (row) => row.id ?? 0,
-      (rows) => {
-        for (const row of rows) {
-          const path = keyForRow(row);
-          if (path == null) {
-            continue;
-          }
-          const summary = this.getOrCreateHybridStoredPathSummary(
-            summaries,
-            path,
-          );
-          summary.chunkCount += 1;
-        }
-      },
-    );
-
-    await this.scanRowsInBatches<ChunkVectorShardRow, string>(
-      (lastPath, batchSize) => {
-        if (lastPath === null) {
-          return this.database.db.hybridChunkVectors
-            .orderBy(":id")
-            .limit(batchSize)
-            .toArray();
-        }
-        return this.database.db.hybridChunkVectors
-          .where(":id")
-          .above(lastPath)
-          .limit(batchSize)
-          .toArray();
-      },
-      (row) => row.id,
-      (rows) => {
-        for (const row of rows) {
-          const path = keyForRow(row);
-          if (path == null) {
-            continue;
-          }
-          const summary = this.getOrCreateHybridStoredPathSummary(
-            summaries,
-            path,
-          );
-          summary.vectorInfo = {
-            precision: (row.precision === "float16"
-              ? "float16"
-              : "int8") as VectorPrecision,
-            chunkCount: row.chunkCount,
-            generation: row.generation,
-          };
-        }
-      },
-    );
-
-    await this.scanRowsInBatches<HybridIndexedFileRef, number>(
-      (lastDocRef, batchSize) => {
-        if (lastDocRef === null) {
-          return this.database.db.hybridIndexedFileRefs
-            .orderBy("docRef")
-            .limit(batchSize)
-            .toArray();
-        }
-        return this.database.db.hybridIndexedFileRefs
-          .where("docRef")
-          .above(lastDocRef)
-          .limit(batchSize)
-          .toArray();
-      },
-      (row) => row.docRef,
-      (rows) => {
-        for (const row of rows) {
-          const path = keyForRow(row);
-          if (path == null) {
-            continue;
-          }
-          const summary = this.getOrCreateHybridStoredPathSummary(
-            summaries,
-            path,
-          );
-          summary.indexedFileRef = row;
-        }
-      },
-    );
-
-    // Shared snapshots are not hybrid-owned; only inspect them for paths that
-    // already have hybrid-private rows or refs.
-    const summaryPaths = Array.from(summaries.keys());
-    for (
-      let start = 0;
-      start < summaryPaths.length;
-      start += DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE
-    ) {
-      const batchPaths = summaryPaths.slice(
-        start,
-        start + DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE,
-      );
-      const snapshotRows =
-        await this.database.db.fileSnapshots.bulkGet(
-          batchPaths.map((path) => {
-            const registryRow = registryRows.find((row) => row.path === path);
-            return registryRow == null
-              ? "__missing__"
-              : `${registryRow.docRef}:${registryRow.liveGeneration}`;
-          }),
-        );
-      for (const row of snapshotRows) {
-        if (!row) {
-          continue;
-        }
-        const path = keyForRow(row);
-        const summary = path == null ? undefined : summaries.get(path);
-        if (summary) {
-          summary.currentSnapshotGeneration = row.generation;
-        }
-      }
-    }
-    await this.scanRowsInBatches<HybridFileSnapshotRow, string>(
-      (lastPath, batchSize) => {
-        if (lastPath === null) {
-          return this.database.db.hybridDirtyShadows
-            .orderBy(":id")
-            .limit(batchSize)
-            .toArray();
-        }
-        return this.database.db.hybridDirtyShadows
-          .where(":id")
-          .above(lastPath)
-          .limit(batchSize)
-          .toArray();
-      },
-      (row) => row.id,
-      (rows) => {
-        for (const row of rows) {
-          const path = keyForRow(row);
-          if (path == null) {
-            continue;
-          }
-          const summary = this.getOrCreateHybridStoredPathSummary(
-            summaries,
-            path,
-          );
-          summary.shadowSnapshotGeneration = row.generation;
-        }
-      },
-    );
-
-
-    return summaries;
-  }
-
   private async repairHybridStoredState(
     currFiles: Map<string, TFile>,
   ): Promise<HybridStorageRepairReport> {
-    await this.purgeHybridArtifactsWithoutDocRegistry();
-    const summaries = await this.collectHybridStoredPathSummaries();
+    const gcMetrics = await runHybridStorageGc(this.database, {
+      reason: "startup-hybrid-storage-gc",
+    });
+    if (
+      gcMetrics.chunksRemoved > 0 ||
+      gcMetrics.vectorsRemoved > 0 ||
+      gcMetrics.indexedRefsRemoved > 0 ||
+      gcMetrics.snapshotsRemoved > 0 ||
+      gcMetrics.shadowsRemoved > 0
+    ) {
+      logger.debug(
+        `purged stale Hybrid artifacts: chunks=${gcMetrics.chunksRemoved}, vectors=${gcMetrics.vectorsRemoved}, refs=${gcMetrics.indexedRefsRemoved}, snapshots=${gcMetrics.snapshotsRemoved}, shadows=${gcMetrics.shadowsRemoved}, hnswDirty=${gcMetrics.hnswMarkedDirty}`,
+      );
+    }
+    const summaries = await collectHybridStoredPathSummaries({
+      database: this.database,
+      batchSize: DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE,
+    });
     const previousIndexedFileRefs = new Map<string, HybridIndexedFileRef>();
     const previousDocRegistryEntries = new Map<string, DocRegistryRow>(
       (await this.database.listDocRegistryEntries()).map((row) => [row.path, row]),
@@ -4650,10 +4302,12 @@ export class DataManager {
       if (indexedFileRef) {
         previousIndexedFileRefs.set(path, indexedFileRef);
       }
-      const { consistency } = this.buildHybridStoredPathInspection(
+      const { consistency } = buildHybridStoredPathInspection({
         summary,
-        existsNow,
-      );
+        existsInVault: existsNow,
+        currentPrecision:
+          this.setting.hybrid.vectorCompression === "float16" ? "float16" : "int8",
+      });
       if (consistency.repairReasons.length === 0) {
         continue;
       }
@@ -4717,24 +4371,6 @@ export class DataManager {
         previousDocRegistryEntries,
       };
     }
-
-  private async purgeHybridArtifactsWithoutDocRegistry(): Promise<void> {
-    const metrics = await runHybridStorageGc(this.database, {
-      reason: "startup-hybrid-storage-gc",
-    });
-    if (
-      metrics.chunksRemoved === 0 &&
-      metrics.vectorsRemoved === 0 &&
-      metrics.indexedRefsRemoved === 0 &&
-      metrics.snapshotsRemoved === 0 &&
-      metrics.shadowsRemoved === 0
-    ) {
-      return;
-    }
-    logger.debug(
-      `purged stale Hybrid artifacts: chunks=${metrics.chunksRemoved}, vectors=${metrics.vectorsRemoved}, refs=${metrics.indexedRefsRemoved}, snapshots=${metrics.snapshotsRemoved}, shadows=${metrics.shadowsRemoved}, hnswDirty=${metrics.hnswMarkedDirty}`,
-    );
-  }
 
   private isRetryableHybridIndexError(error: unknown): boolean {
     if (

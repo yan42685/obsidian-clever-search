@@ -4,6 +4,7 @@ import {
   isAutoRetryHybridFailureKind,
   type HybridRepairMode,
 } from "./index-recovery-state";
+import type { HybridRepairTaskRequest } from "./hybrid-bootstrap-types";
 import {
   HybridEmbeddingRecoveryManager,
   type HybridFailedEmbeddingSummary,
@@ -11,17 +12,9 @@ import {
 } from "./hybrid-embedding-recovery-manager";
 import { HybridRecoveryStateStore } from "./hybrid-recovery-state-store";
 
-export type HybridRecoveryCoordinatorRepairTask = {
-  path: string;
-  mode: HybridRepairMode;
-  reason: string;
-  eligibleAt: number;
-  sourceGeneration?: number;
-};
-
 type HybridRecoveryCoordinatorOptions = {
   canRetryPath: (path: string) => boolean;
-  enqueueRepair: (task: HybridRecoveryCoordinatorRepairTask) => void;
+  enqueueRepair: (task: HybridRepairTaskRequest) => void;
   onChanged: () => void;
   getFailedEmbeddingRetryIntervalMs: () => number;
 };
