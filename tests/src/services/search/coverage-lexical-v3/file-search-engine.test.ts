@@ -13,6 +13,10 @@ import { buildBlockPositionLane } from "src/services/search/coverage-lexical-v3/
 import { buildResidentHotBaseArtifacts, buildStableWitnessMatchKey } from "src/services/search/coverage-lexical-v3/build";
 import { createDexieCoverageLexicalV3ResidentShardArtifactStore } from "src/services/search/coverage-lexical-v3/artifact-loader";
 import { MemoryActiveOverlayJournalStore } from "src/services/search/coverage-lexical-v3/active-overlay-journal";
+import {
+	MemoryCompactJobManifestStore,
+	MemoryCompactTempArtifactStore,
+} from "src/services/search/coverage-lexical-v3/compact";
 import { MemoryCoverageLexicalV3SnapshotStore } from "src/services/search/coverage-lexical-v3/snapshot";
 import { createMemoryCoverageLexicalV3ProductionStores } from "src/services/search/coverage-lexical-v3/stores";
 import { hydrateCandidateEvidenceBatch } from "src/services/search/coverage-lexical-v3/ranking";
@@ -28,6 +32,7 @@ import type {
 import { planHanSurfaceGroupRecallsAfterFamilyLookup } from "src/services/search/coverage-lexical-v3/recall/han-surface-groups";
 import type { HanRescueAssessment } from "src/services/search/coverage-lexical-v3/han-rescue";
 import {
+	buildIndexedSnapshotRequestKey,
 	buildLexicalBlockEvidenceRowId,
 	buildLexicalDocEvidenceRowId,
 	FileSnapshotStore,
@@ -1484,6 +1489,138 @@ describe("coverage lexical v3 file search engine", () => {
 				{ docRef: 17, path: "notes/healed.md", generation: 2 },
 			]),
 		).resolves.toMatchObject({ status: "up_to_date" });
+	});
+
+	test("reloads runtime after maintenance fold so the next persist cannot roll registry back", async () => {
+		const productionStores = createMemoryCoverageLexicalV3ProductionStores();
+		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable((row) => row.id),
+		);
+		const overlayJournalStore = new MemoryActiveOverlayJournalStore();
+		const snapshotStore = new MemoryCoverageLexicalV3SnapshotStore();
+		const persistentStores = {
+			productionStores,
+			artifactStore,
+			overlayJournalStore,
+			snapshotStore,
+			compactJobStore: new MemoryCompactJobManifestStore(),
+			compactTempArtifactStore: new MemoryCompactTempArtifactStore(),
+		};
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		(engine as any).getPersistentStores = () => persistentStores;
+		const indexedTextSnapshots = new Map<string, { text: string }>();
+		const indexedMetadataSnapshots = new Map<string, any>();
+		const evidenceSnapshotStore = {
+			readIndexedTextSnapshots: jest.fn(async (requests: readonly any[]) => {
+				return new Map(
+					requests.flatMap((request) => {
+						const key = buildIndexedSnapshotRequestKey(request);
+						const snapshot = indexedTextSnapshots.get(key);
+						return snapshot == null ? [] : [[key, snapshot]];
+					}),
+				);
+			}),
+			readIndexedTexts: jest.fn(async (requests: readonly any[]) => {
+				return new Map(
+					requests.flatMap((request) => {
+						const key = buildIndexedSnapshotRequestKey(request);
+						const snapshot = indexedTextSnapshots.get(key);
+						return snapshot == null ? [] : [[request.path, snapshot.text]];
+					}),
+				);
+			}),
+			readIndexedMetadata: jest.fn(async (requests: readonly any[]) => {
+				return new Map(
+					requests.flatMap((request) => {
+						const key = buildIndexedSnapshotRequestKey(request);
+						const snapshot = indexedMetadataSnapshots.get(key);
+						return snapshot == null ? [] : [[key, snapshot]];
+					}),
+				);
+			}),
+			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
+			publishLexicalBodyEvidence: jest.fn(async () => {}),
+			readLexicalBodyEvidenceForBlocks: jest.fn(async () => new Map()),
+			publishLexicalHanDocEvidence: jest.fn(async () => {}),
+			readLexicalHanDocEvidenceForDocs: jest.fn(async () => new Map()),
+			publishLexicalHanBodyEvidence: jest.fn(async () => {}),
+			readLexicalHanBodyEvidenceForBlocks: jest.fn(async () => new Map()),
+			publishLexicalFuzzyRescue: jest.fn(async () => {}),
+			readLexicalFuzzyRescue: jest.fn(async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX),
+			readLexicalFuzzyRescueForLookupKeys: jest.fn(
+				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
+			),
+		};
+		(engine as any).getFileSnapshotStore = () => evidenceSnapshotStore;
+		await engine.reIndexAll([
+			createDocument({
+				docRef: 100,
+				path: "notes/base.md",
+				basename: "base",
+				folder: "notes",
+				content: "stable base content",
+				generation: 1,
+			}),
+		]);
+		indexedTextSnapshots.set(
+			buildIndexedSnapshotRequestKey({ path: "notes/base.md", generation: 1 }),
+			{ text: "stable base content" },
+		);
+		await engine.persistFileIndexArtifact();
+		const overlayDocuments = Array.from({ length: 64 }, (_, index) =>
+			createDocument({
+				docRef: 200 + index,
+				path: `notes/folded-${index}.md`,
+				basename: `folded-${index}`,
+				folder: "notes",
+				content: `folded maintenance target ${index}`,
+				generation: 1,
+			}),
+		);
+
+		await engine.applyPersistentRecoveryChanges({
+			deletePaths: [],
+			upsertDocuments: overlayDocuments,
+		});
+		await expect(
+			overlayJournalStore.loadActiveOverlayEntries({
+				activeShardId: "base-0",
+				activeShardGeneration: 1,
+			}),
+		).resolves.toHaveLength(64);
+
+		await engine.persistFileIndexArtifact();
+		await expect(
+			overlayJournalStore.loadActiveOverlayEntries({
+				activeShardId: "base-0",
+				activeShardGeneration: 1,
+			}),
+		).resolves.toHaveLength(0);
+		await expect(productionStores.shardRegistry.loadRegistry()).resolves.toEqual([
+			expect.objectContaining({
+				shardId: "base-0",
+				generation: 2,
+				state: "active",
+				docCount: 65,
+			}),
+		]);
+
+		await engine.persistFileIndexArtifact();
+		await expect(productionStores.shardRegistry.loadRegistry()).resolves.toEqual([
+			expect.objectContaining({
+				shardId: "base-0",
+				generation: 2,
+				state: "active",
+				docCount: 65,
+			}),
+		]);
+		const results = await engine.searchFiles({
+			queryText: "folded maintenance target 63",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			maxItemResults: 5,
+		});
+		expect(results[0]?.path).toBe("notes/folded-63.md");
 	});
 
 	test("releases pending content after indexed snapshot commit and can rebuild from snapshots", async () => {

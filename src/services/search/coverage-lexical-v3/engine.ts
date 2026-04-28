@@ -1226,9 +1226,10 @@ function buildMergedFuzzyRescueIndex(indexView: ResidentIndexView): ResidentFuzz
 		}
 	}
 	return {
-		candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey: mergedLookup,
+		candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey:
+			indexView.shards.length === 1 ? mergedLookup : new Map(),
 		indexedMetadataFamilyCount,
-		fuzzyLookupKeyCount: mergedLookup.size,
+		fuzzyLookupKeyCount: indexView.shards.length === 1 ? mergedLookup.size : 0,
 		bytes,
 	};
 }
@@ -1240,12 +1241,12 @@ function collectShardFamilyMatches(
 	fuzzyRescueIndex: ResidentFuzzyRescueIndex,
 ): readonly V3QueryUnitFamilyMatches[] {
 	const matchesByQueryUnitIndex = new Map<number, V3QueryUnitFamilyMatches>();
-		for (const shard of shards) {
+	for (const shard of shards) {
 		const shardMatches = lookupQueryUnitFamilies(
 			shard.base,
 			queryAnalysis,
 			options,
-			fuzzyRescueIndex,
+			selectFuzzyRescueIndexForShard(shard, shards.length, fuzzyRescueIndex),
 		);
 		for (const unitMatches of shardMatches) {
 			const shardOwnedUnitMatches: V3QueryUnitFamilyMatches = {
@@ -1270,6 +1271,19 @@ function collectShardFamilyMatches(
 	return [...matchesByQueryUnitIndex.values()].sort(
 		(left, right) => left.queryUnitIndex - right.queryUnitIndex,
 	);
+}
+
+function selectFuzzyRescueIndexForShard(
+	shard: ResidentIndexView["shards"][number],
+	shardCount: number,
+	fuzzyRescueIndex: ResidentFuzzyRescueIndex,
+): ResidentFuzzyRescueIndex {
+	if (
+		shard.base.fuzzyRescue.candidateMetadataShardLocalFamilySlotsByFuzzyLookupKey.size > 0
+	) {
+		return shard.base.fuzzyRescue;
+	}
+	return shardCount === 1 ? fuzzyRescueIndex : EMPTY_RESIDENT_FUZZY_RESCUE_INDEX;
 }
 
 function collectShardCandidateDocs(

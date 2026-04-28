@@ -111,23 +111,24 @@ export function applyPrefixFanoutGuard(
 		};
 	}
 
-	const keptBlockIdsByLiveDocSlot = new Map<number, Set<number>>();
+	const keptBlockIdsByCandidateKey = new Map<string, Set<number>>();
 	const anchoredKeptBlockCount = allocateBlocksForDocs(
 		anchored,
 		anchoredSoftBlockBudget,
-		keptBlockIdsByLiveDocSlot,
+		keptBlockIdsByCandidateKey,
 	);
 	const unanchoredKeptBlockCount = allocateBlocksForDocs(
 		unanchored,
 		Math.max(0, totalBodyBlockGuard - anchoredKeptBlockCount),
-		keptBlockIdsByLiveDocSlot,
+		keptBlockIdsByCandidateKey,
 	);
 
 	const guardedCandidateDocs: V3CandidateDocRecall[] = [];
 	let removedUnanchoredDocCount = 0;
 	for (const candidateRecall of candidateDocs) {
 		const keptBlockIds =
-			keptBlockIdsByLiveDocSlot.get(candidateRecall.liveDocSlot) ?? EMPTY_BLOCK_SET;
+			keptBlockIdsByCandidateKey.get(buildCandidateGuardKey(candidateRecall)) ??
+			EMPTY_BLOCK_SET;
 		const guardedCandidateRecall = buildGuardedCandidateRecall(
 			candidateRecall,
 			keptBlockIds,
@@ -220,7 +221,7 @@ function compareAnchoredDocs(left: GuardedDoc, right: GuardedDoc): number {
 		Number(right.hasHanMetadataGate) - Number(left.hasHanMetadataGate) ||
 		right.protectedBlockCount - left.protectedBlockCount ||
 		right.coreBlockCount - left.coreBlockCount ||
-		left.candidateRecall.liveDocSlot - right.candidateRecall.liveDocSlot
+		compareCandidateGuardKeys(left.candidateRecall, right.candidateRecall)
 	);
 }
 
@@ -229,26 +230,26 @@ function compareUnanchoredDocs(left: GuardedDoc, right: GuardedDoc): number {
 		right.protectedBlockCount - left.protectedBlockCount ||
 		right.coreBlockCount - left.coreBlockCount ||
 		left.weakPrefixOnlyBlockCount - right.weakPrefixOnlyBlockCount ||
-		left.candidateRecall.liveDocSlot - right.candidateRecall.liveDocSlot
+		compareCandidateGuardKeys(left.candidateRecall, right.candidateRecall)
 	);
 }
 
 function allocateBlocksForDocs(
 	docs: readonly GuardedDoc[],
 	budget: number,
-	keptBlockIdsByLiveDocSlot: Map<number, Set<number>>,
+	keptBlockIdsByCandidateKey: Map<string, Set<number>>,
 ): number {
 	let remainingBudget = budget;
 	remainingBudget = allocateBlocksForDocPass(
 		docs,
 		remainingBudget,
-		keptBlockIdsByLiveDocSlot,
+		keptBlockIdsByCandidateKey,
 		(doc) => doc.prioritizedCoreBlocks,
 	);
 	remainingBudget = allocateBlocksForDocPass(
 		docs,
 		remainingBudget,
-		keptBlockIdsByLiveDocSlot,
+		keptBlockIdsByCandidateKey,
 		(doc) => doc.prioritizedPrefixOnlyBlocks,
 	);
 	return budget - remainingBudget;
@@ -257,23 +258,23 @@ function allocateBlocksForDocs(
 function allocateBlocksForDocPass(
 	docs: readonly GuardedDoc[],
 	remainingBudget: number,
-	keptBlockIdsByLiveDocSlot: Map<number, Set<number>>,
+	keptBlockIdsByCandidateKey: Map<string, Set<number>>,
 	selectBlocks: (doc: GuardedDoc) => readonly V3CandidateBodyBlockRecall[],
 ): number {
 	for (const doc of docs) {
 		if (remainingBudget <= 0) {
 			break;
 		}
+		const candidateKey = buildCandidateGuardKey(doc.candidateRecall);
 		const blockIds =
-			keptBlockIdsByLiveDocSlot.get(doc.candidateRecall.liveDocSlot) ??
-			new Set<number>();
+			keptBlockIdsByCandidateKey.get(candidateKey) ?? new Set<number>();
 		const availableBlocks = selectBlocks(doc).filter((block) => !blockIds.has(block.blockId));
 		const keptBlocks = availableBlocks.slice(0, remainingBudget);
 		if (keptBlocks.length === 0) {
 			continue;
 		}
-		if (!keptBlockIdsByLiveDocSlot.has(doc.candidateRecall.liveDocSlot)) {
-			keptBlockIdsByLiveDocSlot.set(doc.candidateRecall.liveDocSlot, blockIds);
+		if (!keptBlockIdsByCandidateKey.has(candidateKey)) {
+			keptBlockIdsByCandidateKey.set(candidateKey, blockIds);
 		}
 		for (const block of keptBlocks) {
 			blockIds.add(block.blockId);
@@ -281,6 +282,26 @@ function allocateBlocksForDocPass(
 		remainingBudget -= keptBlocks.length;
 	}
 	return remainingBudget;
+}
+
+function buildCandidateGuardKey(
+	candidateRecall: Pick<
+		V3CandidateDocRecall,
+		"shardId" | "shardGeneration" | "liveDocSlot"
+	>,
+): string {
+	return `${candidateRecall.shardId}:${candidateRecall.shardGeneration}:${candidateRecall.liveDocSlot}`;
+}
+
+function compareCandidateGuardKeys(
+	left: Pick<V3CandidateDocRecall, "shardId" | "shardGeneration" | "liveDocSlot">,
+	right: Pick<V3CandidateDocRecall, "shardId" | "shardGeneration" | "liveDocSlot">,
+): number {
+	return (
+		left.shardId.localeCompare(right.shardId) ||
+		left.shardGeneration - right.shardGeneration ||
+		left.liveDocSlot - right.liveDocSlot
+	);
 }
 
 function isWeakPrefixOnlyBlock(block: V3CandidateBodyBlockRecall): boolean {

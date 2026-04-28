@@ -170,7 +170,11 @@ async function maybeRunOneCompactJob(params: {
 		indexedSnapshotReader: params.indexedSnapshotReader,
 	});
 	if (documents.length === 0) {
-		return false;
+		await markCompactInputsGarbage({
+			stores: params.stores,
+			inputShards,
+		});
+		return true;
 	}
 	const outputShardId = `sealed-compact-${params.now}`;
 	const outputDescriptor: ResidentShardDescriptor = {
@@ -224,6 +228,18 @@ async function maybeRunOneCompactJob(params: {
 		now: params.now,
 	});
 	return true;
+}
+
+async function markCompactInputsGarbage(params: {
+	stores: CoverageLexicalV3ProductionStores;
+	inputShards: readonly ResidentShardDescriptor[];
+}): Promise<void> {
+	await params.stores.shardRegistry.updateShards(
+		params.inputShards.map((shard) => ({
+			...shard,
+			state: "garbage" as const,
+		})),
+	);
 }
 
 async function buildCompactOutputDescriptorsByJobId(params: {

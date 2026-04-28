@@ -154,6 +154,8 @@ function createPackingProfile(
 	overrides: Partial<EvidencePackingProfile> & Pick<EvidencePackingProfile, "docId" | "path">,
 ): EvidencePackingProfile {
 	return {
+		shardId: overrides.shardId ?? "test-shard",
+		shardGeneration: overrides.shardGeneration ?? 1,
 		docId: overrides.docId,
 		liveDocSlot: overrides.liveDocSlot ?? overrides.docId,
 		path: overrides.path,

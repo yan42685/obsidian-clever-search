@@ -148,4 +148,35 @@ describe("coverage lexical v3 production multishard", () => {
 
 		expect(engine.search("orphan cleanup target").rankedCandidates).toHaveLength(0);
 	});
+
+	test("fuzzy rescue keeps shard-local family slots scoped to each shard", () => {
+		const engine = new CoverageLexicalV3Engine();
+		const indexView: ResidentIndexView = {
+			version: 1,
+			shards: [
+				buildShard("sealed-0", 1, [
+					createDocument("aaaaaa.md", "slot padding", 1, "aaaaaa"),
+					createDocument("projecta.md", "sealed target", 2, "projecta"),
+				]),
+				buildShard("active-1", 1, [
+					createDocument("projectb.md", "active target", 3, "projectb"),
+				]),
+			],
+		};
+
+		engine.loadResidentIndexView(indexView);
+		const result = engine.search("projectx", ["projectx"], {
+			allowFuzzyMatch: true,
+			allowPrefixMatch: false,
+		});
+
+		expect(result.rankedCandidates.map((candidate) => candidate.path)).toEqual(
+			expect.arrayContaining(["projecta.md", "projectb.md"]),
+		);
+		expect(
+			result.recallState.unitFamilyMatches.flatMap((unitMatch) =>
+				unitMatch.matches.map((match) => `${match.shardId}:${match.familyText}`),
+			),
+		).toEqual(expect.arrayContaining(["sealed-0:projecta", "active-1:projectb"]));
+	});
 });

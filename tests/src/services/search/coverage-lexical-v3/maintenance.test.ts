@@ -187,6 +187,64 @@ describe("coverage lexical v3 maintenance coordinator", () => {
 		expect(getDocPath(compactShard!.base, 0)).toBe("two.md");
 	});
 
+	test("compact marks fully stale sealed inputs garbage instead of retrying forever", async () => {
+		const first = descriptor("sealed-1", 1);
+		const second = descriptor("sealed-2", 2);
+		const stores = createMemoryCoverageLexicalV3ProductionStores({
+			registry: [first, second],
+			invalidations: [
+				{
+					shardId: "sealed-1",
+					shardGeneration: 1,
+					docRef: 1,
+					docGeneration: 1,
+					reason: "deleted",
+					createdAt: 9,
+				},
+				{
+					shardId: "sealed-2",
+					shardGeneration: 1,
+					docRef: 2,
+					docGeneration: 1,
+					reason: "deleted",
+					createdAt: 9,
+				},
+			],
+		});
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>(
+				(row) => row.id,
+			),
+		);
+		const docs = [doc("one.md", "one target", 1), doc("two.md", "two target", 2)];
+		await artifacts.publishResidentShardArtifact({
+			descriptor: first,
+			shard: residentShard("sealed-1", [docs[0]]),
+			createdAt: 1,
+		});
+		await artifacts.publishResidentShardArtifact({
+			descriptor: second,
+			shard: residentShard("sealed-2", [docs[1]]),
+			createdAt: 1,
+		});
+
+		const result = await runCoverageLexicalV3Maintenance({
+			stores,
+			residentShardArtifactStore: artifacts,
+			overlayJournalStore: new MemoryActiveOverlayJournalStore(),
+			compactJobStore: new MemoryCompactJobManifestStore(),
+			compactTempArtifactStore: new MemoryCompactTempArtifactStore(),
+			indexedSnapshotReader: indexedSnapshotReader(docs),
+			now: 30,
+		});
+
+		expect(result.stateChanged).toBe(true);
+		const registry = await stores.shardRegistry.loadRegistry();
+		expect(registry.find((shard) => shard.shardId === "sealed-1")?.state).toBe("garbage");
+		expect(registry.find((shard) => shard.shardId === "sealed-2")?.state).toBe("garbage");
+		expect(registry.map((shard) => shard.shardId)).not.toContain("sealed-compact-30");
+	});
+
 	test("ready compact recovery commits persisted temp descriptor", async () => {
 		const first = descriptor("sealed-1", 1);
 		const second = descriptor("sealed-2", 2);

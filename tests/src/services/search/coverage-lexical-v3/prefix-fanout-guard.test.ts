@@ -78,6 +78,9 @@ function createBodyBlockRecall(
 function createCandidateRecall(
 	docId: number,
 	options: Readonly<{
+		shardId?: string;
+		shardGeneration?: number;
+		liveDocSlot?: number;
 		identity?: readonly number[];
 		route?: readonly number[];
 		heading?: readonly number[];
@@ -90,8 +93,10 @@ function createCandidateRecall(
 		.filter((block) => block.hasStrongHanSupport)
 		.map((block) => block.blockId);
 	return {
+		shardId: options.shardId ?? "test-shard",
+		shardGeneration: options.shardGeneration ?? 1,
 		docId,
-		liveDocSlot: docId,
+		liveDocSlot: options.liveDocSlot ?? docId,
 		matchedIdentityUnitIndices: options.identity ?? [],
 		matchedRouteUnitIndices: options.route ?? [],
 		matchedHeadingUnitIndices: options.heading ?? [],
@@ -367,5 +372,30 @@ describe("coverage lexical v3 prefix fanout guard", () => {
 		expect(keptBlockIds).toContain(999);
 		expect(keptBlockIds).toHaveLength(ANCHORED_SOFT_BLOCK_BUDGET);
 		expect(keptBlockIds).not.toContain(298);
+	});
+
+	test("guard keys body block budgets by shard as well as live doc slot", () => {
+		const firstShardDoc = createCandidateRecall(1, {
+			shardId: "sealed-0",
+			liveDocSlot: 0,
+			bodyBlocks: buildWeakPrefixBlocks(180, 0),
+		});
+		const secondShardDoc = createCandidateRecall(2, {
+			shardId: "active-1",
+			liveDocSlot: 0,
+			bodyBlocks: [createBodyBlockRecall(0, { hasExactSupport: true })],
+		});
+
+		const guarded = applyPrefixFanoutGuard([firstShardDoc, secondShardDoc], 1);
+		const keptFirstShardDoc = guarded.candidateDocs.find(
+			(candidate) => candidate.shardId === "sealed-0",
+		);
+		const keptSecondShardDoc = guarded.candidateDocs.find(
+			(candidate) => candidate.shardId === "active-1",
+		);
+
+		expect(guarded.stats.guardApplied).toBe(true);
+		expect(keptFirstShardDoc?.shortlistedBodyBlockIds).toHaveLength(159);
+		expect(keptSecondShardDoc?.shortlistedBodyBlockIds).toEqual([0]);
 	});
 });

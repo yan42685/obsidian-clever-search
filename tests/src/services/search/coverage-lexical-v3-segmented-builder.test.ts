@@ -31,7 +31,7 @@ function createSink(captured: CapturedColdEvidence): ResidentColdEvidenceSink {
 
 function normalizeForComparison(value: unknown): unknown {
 	if (ArrayBuffer.isView(value)) {
-		return Array.from(value as ArrayLike<number>);
+		return Array.from(value as unknown as ArrayLike<number>);
 	}
 	if (Array.isArray(value)) {
 		return value.map(normalizeForComparison);

@@ -7,6 +7,7 @@ import {
 	createDexieCoverageLexicalV3ResidentShardArtifactStore,
 	type CoverageLexicalV3ResidentShardArtifactRow,
 } from "src/services/search/coverage-lexical-v3/artifact-loader";
+import { getDocPath } from "src/services/search/coverage-lexical-v3/recall";
 import type { ResidentShardDescriptor } from "src/services/search/coverage-lexical-v3/shards";
 import { createMemoryCoverageLexicalV3ProductionStores } from "src/services/search/coverage-lexical-v3/stores";
 import { publishActiveShardAppend } from "src/services/search/coverage-lexical-v3/active-shard-publisher";
@@ -115,6 +116,110 @@ describe("coverage lexical v3 active overlay fold", () => {
 		expect(
 			await overlayStore.loadActiveOverlayEntries({ activeShardId: "active-1", activeShardGeneration: 1 }),
 		).toHaveLength(0);
+	});
+
+	test("fold applies overlay delete tombstones to current active documents", async () => {
+		const active = activeDescriptor();
+		const stores = createMemoryCoverageLexicalV3ProductionStores({ registry: [active] });
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>((row) => row.id),
+		);
+		const overlayStore = new MemoryActiveOverlayJournalStore();
+		const baseDoc = doc("deleted.md", "delete me", 1);
+		await publishActiveShardAppend({
+			stores,
+			residentShardArtifactStore: artifacts,
+			activeShard: active,
+			currentActiveDocuments: [],
+			changes: [{ document: baseDoc }],
+			plannerOptions: { sealSourceBytes: 1024 * 1024, now: 1 },
+		});
+		const activeAfterBase = (await stores.shardRegistry.loadRegistry())[0] ?? active;
+		await writeActiveOverlayChanges({
+			stores,
+			overlayJournalStore: overlayStore,
+			activeShard: activeAfterBase,
+			changes: [
+				{
+					document: baseDoc,
+					deleted: true,
+					previousVersion: {
+						shardId: activeAfterBase.shardId,
+						shardGeneration: activeAfterBase.generation,
+						docRef: 1,
+						docGeneration: 1,
+					},
+				},
+			],
+			sequenceStart: 1,
+			now: 2,
+		});
+
+		const result = await runActiveOverlayFoldMaintenanceJob({
+			stores,
+			residentShardArtifactStore: artifacts,
+			overlayJournalStore: overlayStore,
+			activeShard: activeAfterBase,
+			indexedSnapshotReader: indexedSnapshotReader([baseDoc]),
+			sealSourceBytes: 1024 * 1024,
+			now: 3,
+		});
+
+		const foldedShard = await artifacts.loadResidentShard(result!.appendTargetShard);
+		expect(foldedShard?.base.docTable.docCount).toBe(0);
+	});
+
+	test("fold replaces a superseded current active document instead of carrying both generations", async () => {
+		const active = activeDescriptor();
+		const stores = createMemoryCoverageLexicalV3ProductionStores({ registry: [active] });
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>((row) => row.id),
+		);
+		const overlayStore = new MemoryActiveOverlayJournalStore();
+		const baseDoc = doc("updated.md", "old alpha", 1, 1);
+		const updatedDoc = doc("updated.md", "new beta", 1, 2);
+		await publishActiveShardAppend({
+			stores,
+			residentShardArtifactStore: artifacts,
+			activeShard: active,
+			currentActiveDocuments: [],
+			changes: [{ document: baseDoc }],
+			plannerOptions: { sealSourceBytes: 1024 * 1024, now: 1 },
+		});
+		const activeAfterBase = (await stores.shardRegistry.loadRegistry())[0] ?? active;
+		await writeActiveOverlayChanges({
+			stores,
+			overlayJournalStore: overlayStore,
+			activeShard: activeAfterBase,
+			changes: [
+				{
+					document: updatedDoc,
+					previousVersion: {
+						shardId: activeAfterBase.shardId,
+						shardGeneration: activeAfterBase.generation,
+						docRef: 1,
+						docGeneration: 1,
+					},
+				},
+			],
+			sequenceStart: 1,
+			now: 2,
+		});
+
+		const result = await runActiveOverlayFoldMaintenanceJob({
+			stores,
+			residentShardArtifactStore: artifacts,
+			overlayJournalStore: overlayStore,
+			activeShard: activeAfterBase,
+			indexedSnapshotReader: indexedSnapshotReader([baseDoc]),
+			sealSourceBytes: 1024 * 1024,
+			now: 3,
+		});
+
+		const foldedShard = await artifacts.loadResidentShard(result!.appendTargetShard);
+		expect(foldedShard?.base.docTable.docCount).toBe(1);
+		expect(getDocPath(foldedShard!.base, 0)).toBe("updated.md");
+		expect(foldedShard?.base.docTable.generationByDocId[0]).toBe(2);
 	});
 
 	test("oversized fold preserves replacement active shard generation", async () => {

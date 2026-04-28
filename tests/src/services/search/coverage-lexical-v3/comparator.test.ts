@@ -71,6 +71,8 @@ function createPackingProfile(
 	const strongestContainer = overrides.strongestContainer ?? null;
 	const secondStrongestContainer = overrides.secondStrongestContainer ?? null;
 	return {
+		shardId: overrides.shardId ?? "test-shard",
+		shardGeneration: overrides.shardGeneration ?? 1,
 		docId: overrides.docId ?? 0,
 		liveDocSlot: overrides.liveDocSlot ?? (overrides.docId ?? 0),
 		path: overrides.path,

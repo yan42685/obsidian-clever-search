@@ -777,6 +777,8 @@ export function buildPackingProfile(
 		realizedFamilies: baseRealizedFamilies,
 	});
 	const profile: EvidencePackingProfile = {
+		shardId: candidateRecall.shardId,
+		shardGeneration: candidateRecall.shardGeneration,
 		docId: candidateRecall.docId,
 		liveDocSlot: candidateRecall.liveDocSlot,
 		path: getLiveDocPath(base, candidateRecall.liveDocSlot),

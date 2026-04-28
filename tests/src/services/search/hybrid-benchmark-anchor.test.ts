@@ -1,5 +1,5 @@
 import { performance } from "perf_hooks";
-import { container } from "tsyringe";
+import { container, type InjectionToken } from "tsyringe";
 import { BM25Engine } from "src/services/search/hybrid/bm25";
 
 jest.mock("src/services/search/tokenizer", () => ({
@@ -182,6 +182,8 @@ function createInMemoryLexicalSnapshotStore() {
 		},
 	};
 }
+
+type InMemoryLexicalSnapshotStore = ReturnType<typeof createInMemoryLexicalSnapshotStore>;
 
 type OutcomeRegression = {
 	query: string;
@@ -632,7 +634,7 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 	container.register(Tokenizer, {
 		useValue: params.tokenizer,
 	});
-	container.register(FileSnapshotStore, {
+	container.register(FileSnapshotStore as unknown as InjectionToken<InMemoryLexicalSnapshotStore>, {
 		useValue: createInMemoryLexicalSnapshotStore(),
 	});
 

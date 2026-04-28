@@ -1388,6 +1388,26 @@ generation-aligned contracts found during the compact/overlay/snapshot audit:
 - snapshot restore now documents that manifest overlay refs are an integrity
   floor for the committed resident base, while restore intentionally replays the
   whole active-shard overlay tail for crash recovery.
+- active-overlay fold now applies journal entries as ordered live-document
+  operations: `previousVersion` tombstones remove the older logical document,
+  delete entries do not carry a replacement into the folded shard, and updates
+  replace the prior generation instead of preserving both versions under the new
+  active shard generation.
+- compact maintenance now handles fully stale input plans by marking the input
+  sealed shards garbage when no live documents remain, allowing normal GC to
+  collect the artifacts and invalidations instead of repeatedly selecting the
+  same unreadable output plan.
+- post-snapshot maintenance that mutates persistent shard state now reloads the
+  file-search runtime from the persisted registry, artifacts, snapshot, and
+  overlay journal before returning, so the next persist cannot overwrite a
+  folded or compacted registry with stale in-memory shard descriptors.
+- fuzzy rescue lookup remains shard-local in multi-shard resident views: each
+  shard uses its own `ResidentFuzzyRescueIndex`, and the legacy single external
+  fuzzy payload is only accepted for a one-shard runtime where its shard-local
+  family slots are unambiguous.
+- prefix fanout guard budgeting, filtered-candidate debug summaries, and Han
+  surface dominance profiles now key candidates by
+  `shardId + shardGeneration + liveDocSlot` rather than bare `liveDocSlot`.
 
 Validation completed for this update:
 
@@ -1400,3 +1420,13 @@ Validation completed for this update:
   active document hydration by requested generation.
 - GC regression coverage now verifies that stale manifest refs do not cause the
   active overlay tail or its overlay cold evidence to be collected.
+- active-overlay fold regression coverage verifies delete tombstones and
+  superseding updates are reflected in the folded active shard.
+- compact maintenance regression coverage verifies fully stale compact inputs
+  advance to garbage without publishing an empty replacement shard.
+- post-maintenance runtime reload regression coverage verifies an active-overlay
+  fold is not rolled back by a subsequent persist after the overlay journal is
+  cleared.
+- multi-shard fuzzy and prefix-guard regression coverage verifies shard-local
+  family slots, body block ids, and live doc slots no longer share a global key
+  space.

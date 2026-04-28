@@ -134,6 +134,8 @@ export type SingletonHanCompletion = Readonly<{
 }>;
 
 export type EvidencePackingProfile = Readonly<{
+	shardId: string;
+	shardGeneration: number;
 	docId: number;
 	liveDocSlot: number;
 	path: string;

@@ -183,6 +183,8 @@ export function createMinimalCandidate(
 	overrides: Partial<EvidencePackingProfile> = {},
 ): EvidencePackingProfile {
 	return {
+		shardId: overrides.shardId ?? "test-shard",
+		shardGeneration: overrides.shardGeneration ?? 1,
 		docId: overrides.docId ?? 0,
 		liveDocSlot: overrides.liveDocSlot ?? (overrides.docId ?? 0),
 		path: overrides.path ?? "doc.md",
@@ -267,6 +269,8 @@ export function createMinimalCandidateRecall(
 		hasScopedSingletonHanSupport: false,
 	}));
 	return {
+		shardId: overrides.shardId ?? "test-shard",
+		shardGeneration: overrides.shardGeneration ?? 1,
 		docId: overrides.docId ?? 0,
 		liveDocSlot: overrides.liveDocSlot ?? (overrides.docId ?? 0),
 		matchedIdentityUnitIndices: overrides.matchedIdentityUnitIndices ?? [],

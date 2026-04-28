@@ -837,6 +837,15 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 
 	async restorePersistedFileIndex(): Promise<boolean> {
 		const persistentStores = this.getPersistentStores();
+		return (
+			(await this.reloadRuntimeFromPersistentStores(persistentStores)) &&
+			this.documentViewsByPath.size > 0
+		);
+	}
+
+	private async reloadRuntimeFromPersistentStores(
+		persistentStores: CoverageLexicalV3PersistentStores,
+	): Promise<boolean> {
 		const restoredEngine = new CoverageLexicalV3Engine();
 		if (this.benchmarkPhaseTimingState != null) {
 			restoredEngine.setBenchmarkPhaseTrackingEnabled(true);
@@ -861,7 +870,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		if (activeShard != null) {
 			await this.reloadOverlayRuntimeState(persistentStores, activeShard);
 		}
-		return this.documentViewsByPath.size > 0;
+		return true;
 	}
 
 	async planPersistentRecovery(
@@ -1213,6 +1222,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			await healCoverageLexicalV3SnapshotState({
 				snapshotStore: persistentStores.snapshotStore,
 			});
+			await this.reloadRuntimeFromPersistentStores(persistentStores);
 		}
 		if (persistentStores.storageGcTables != null) {
 			gcResult = await runCoverageLexicalV3StorageGc({
@@ -2194,11 +2204,14 @@ function collectFilteredCandidatePaths(
 	before: readonly EvidencePackingProfile[],
 	after: readonly EvidencePackingProfile[],
 ): string[] {
-	const retainedLiveDocSlots = new Set(
-		after.map((candidate) => candidate.liveDocSlot),
+	const retainedCandidateKeys = new Set(
+		after.map((candidate) => buildEvidenceProfileCandidateKey(candidate)),
 	);
 	return before
-		.filter((candidate) => !retainedLiveDocSlots.has(candidate.liveDocSlot))
+		.filter(
+			(candidate) =>
+				!retainedCandidateKeys.has(buildEvidenceProfileCandidateKey(candidate)),
+		)
 		.map((candidate) => candidate.path);
 }
 
@@ -2251,17 +2264,17 @@ function applyHanSurfaceCompletionDominance(
 	if (eligibleSurfaceGroupIndices.length === 0) {
 		return candidates;
 	}
-	const dominanceProfiles = new Map<number, HanSurfaceDominanceProfile>(
+	const dominanceProfiles = new Map<string, HanSurfaceDominanceProfile>(
 		topBand.map((candidate) => [
-			candidate.liveDocSlot,
+			buildEvidenceProfileCandidateKey(candidate),
 			buildHanSurfaceDominanceProfile(candidate, eligibleSurfaceGroupIndices),
 		]),
 	);
 	const sortedTopBand = [...topBand].sort((left, right) => {
 		const dominanceComparison = compareHanSurfaceDominanceProfiles(
-			dominanceProfiles.get(left.liveDocSlot) ??
+			dominanceProfiles.get(buildEvidenceProfileCandidateKey(left)) ??
 				EMPTY_HAN_SURFACE_DOMINANCE_PROFILE,
-			dominanceProfiles.get(right.liveDocSlot) ??
+			dominanceProfiles.get(buildEvidenceProfileCandidateKey(right)) ??
 				EMPTY_HAN_SURFACE_DOMINANCE_PROFILE,
 		);
 		if (dominanceComparison !== 0) {
@@ -2270,12 +2283,12 @@ function applyHanSurfaceCompletionDominance(
 		return comparePackingProfiles(left, right);
 	});
 	const strongestProfile =
-		dominanceProfiles.get(sortedTopBand[0].liveDocSlot) ??
+		dominanceProfiles.get(buildEvidenceProfileCandidateKey(sortedTopBand[0])) ??
 		EMPTY_HAN_SURFACE_DOMINANCE_PROFILE;
 	const filteredTopBand =
 		hideWeaklyRelatedResults && strongestProfile.completedGroupCount > 0
 			? sortedTopBand.filter((candidate) =>
-				(dominanceProfiles.get(candidate.liveDocSlot) ??
+				(dominanceProfiles.get(buildEvidenceProfileCandidateKey(candidate)) ??
 					EMPTY_HAN_SURFACE_DOMINANCE_PROFILE)
 					.completedGroupCount > 0,
 			)
@@ -2284,6 +2297,15 @@ function applyHanSurfaceCompletionDominance(
 		return candidates;
 	}
 	return [...filteredTopBand, ...candidates.slice(topBand.length)];
+}
+
+function buildEvidenceProfileCandidateKey(
+	candidate: Pick<
+		EvidencePackingProfile,
+		"shardId" | "shardGeneration" | "liveDocSlot"
+	>,
+): string {
+	return `${candidate.shardId}:${candidate.shardGeneration}:${candidate.liveDocSlot}`;
 }
 
 const EMPTY_HAN_SURFACE_DOMINANCE_PROFILE: HanSurfaceDominanceProfile = {

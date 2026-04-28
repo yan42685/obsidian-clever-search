@@ -1,8 +1,8 @@
 import type { IndexedDocument } from "src/globals/search-types";
 import { loadCurrentActiveDocuments } from "./active-document-source";
-import {
-	materializeOverlayDocuments,
-	type ActiveOverlayJournalStore,
+import type {
+	ActiveOverlayJournalEntry,
+	ActiveOverlayJournalStore,
 } from "./active-overlay-journal";
 import {
 	publishActiveShardAppend,
@@ -70,8 +70,7 @@ export async function runActiveOverlayFoldMaintenanceJob(params: {
 		residentShardArtifactLoader: params.residentShardArtifactStore,
 		indexedSnapshotReader: params.indexedSnapshotReader,
 	});
-	const overlayDocuments = materializeOverlayDocuments(entries);
-	const foldedDocuments = mergeFoldDocuments(currentDocuments, overlayDocuments);
+	const foldedDocuments = foldOverlayEntriesIntoCurrentDocuments(currentDocuments, entries);
 	const nextGeneration = params.activeShard.generation + 1;
 	const activeShardForFold = {
 		...params.activeShard,
@@ -116,20 +115,36 @@ export async function runActiveOverlayFoldMaintenanceJob(params: {
 	};
 }
 
-function mergeFoldDocuments(
+function foldOverlayEntriesIntoCurrentDocuments(
 	currentDocuments: readonly IndexedDocument[],
-	overlayDocuments: readonly IndexedDocument[],
+	entries: readonly ActiveOverlayJournalEntry[],
 ): readonly IndexedDocument[] {
-	const documentByKey = new Map<string, IndexedDocument>();
+	const documentByLiveKey = new Map<string, IndexedDocument>();
 	for (const document of currentDocuments) {
-		documentByKey.set(buildDocumentKey(document), document);
+		documentByLiveKey.set(buildLiveDocumentKey(document), document);
 	}
-	for (const document of overlayDocuments) {
-		documentByKey.set(buildDocumentKey(document), document);
+	for (const entry of [...entries].sort((left, right) => left.sequence - right.sequence)) {
+		const previousKey = buildPreviousVersionLiveKey(entry);
+		if (previousKey != null) {
+			documentByLiveKey.delete(previousKey);
+		}
+		if (entry.operation === "delete") {
+			continue;
+		}
+		if (entry.document != null) {
+			documentByLiveKey.set(buildLiveDocumentKey(entry.document), entry.document);
+		}
 	}
-	return [...documentByKey.values()];
+	return [...documentByLiveKey.values()];
 }
 
-function buildDocumentKey(document: IndexedDocument): string {
-	return `${document.docRef ?? document.path}@${document.generation ?? 0}`;
+function buildLiveDocumentKey(document: IndexedDocument): string {
+	return typeof document.docRef === "number" && document.docRef > 0
+		? `docref:${document.docRef}`
+		: `path:${document.path}`;
+}
+
+function buildPreviousVersionLiveKey(entry: ActiveOverlayJournalEntry): string | null {
+	const previousVersion = entry.previousVersion;
+	return previousVersion == null ? null : `docref:${previousVersion.docRef}`;
 }
