@@ -30,6 +30,7 @@ import { container, singleton } from "tsyringe";
 import type {
 	FileSearchEngine,
 	FileSearchRequest,
+	FileSearchRebuildProgress,
 	PersistentFileIndexRecoveryChanges,
 	PersistentFileIndexRecoveryPlan,
 	SerializedFileSearchIndex,
@@ -1272,9 +1273,11 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		this.batchReindexing = true;
 	}
 
-	async finishBatchReindex(): Promise<void> {
+	async finishBatchReindex(
+		onProgress?: (progress: FileSearchRebuildProgress) => void,
+	): Promise<void> {
 		this.batchReindexing = false;
-		await this.rebuildResidentBase();
+		await this.rebuildResidentBase(onProgress);
 	}
 
 	abortBatchReindex(): void {
@@ -1311,8 +1314,10 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		}
 	}
 
-	private async rebuildResidentBase(): Promise<void> {
-		const rebuildPromise = this.rebuildResidentBaseInternal();
+	private async rebuildResidentBase(
+		onProgress?: (progress: FileSearchRebuildProgress) => void,
+	): Promise<void> {
+		const rebuildPromise = this.rebuildResidentBaseInternal(onProgress);
 		this.pendingResidentRebuild = rebuildPromise;
 		try {
 			await rebuildPromise;
@@ -1323,7 +1328,9 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		}
 	}
 
-	private async rebuildResidentBaseInternal(): Promise<void> {
+	private async rebuildResidentBaseInternal(
+		onProgress?: (progress: FileSearchRebuildProgress) => void,
+	): Promise<void> {
 		const documents = await this.materializeIndexedDocuments();
 		this.engine = new CoverageLexicalV3Engine();
 		const snapshotStore = this.getFileSnapshotStore();
@@ -1341,6 +1348,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 					await snapshotStore.publishLexicalHanBodyEvidence?.(rows);
 				},
 			},
+			{ onProgress },
 		);
 		this.lastRebuildStats = {
 			coldEvidenceFlushCount: artifacts.coldEvidenceFlushCount,

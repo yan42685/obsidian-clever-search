@@ -162,6 +162,12 @@ export type ResidentColdEvidenceSink = Readonly<{
 	publishHanBodyEvidence: (rows: readonly LexicalHanBodyEvidenceRow[]) => Promise<void>;
 }>;
 
+export type CoverageLexicalV3RebuildProgress = Readonly<{
+	phase: "pass1" | "pass2" | "merge";
+	processedBytes?: number;
+	totalBytes?: number;
+}>;
+
 export const DEFAULT_COLD_EVIDENCE_CHUNK_SIZE = 128;
 export const DEFAULT_RESIDENT_REBUILD_BATCH_RAW_TEXT_BYTE_CAP = 32 * 1024 * 1024;
 export const LOW_MEMORY_RESIDENT_REBUILD_BATCH_RAW_TEXT_BYTE_CAP = 16 * 1024 * 1024;
@@ -541,6 +547,7 @@ export async function buildResidentHotBaseArtifactsStreaming(
 	options: Readonly<{
 		coldEvidenceChunkSize?: number;
 		batchRawTextByteCap?: number;
+		onProgress?: (progress: CoverageLexicalV3RebuildProgress) => void;
 	}> = {},
 ): Promise<ResidentHotBaseStreamingArtifacts> {
 	const chunkSize = Math.max(
@@ -558,6 +565,11 @@ export async function buildResidentHotBaseArtifactsStreaming(
 	const sortedDocuments = [...documents].sort((left, right) =>
 		left.path.localeCompare(right.path),
 	);
+	const totalRawTextBytes = sortedDocuments.reduce(
+		(sum, document) => sum + estimateIndexedDocumentRawTextBytes(document),
+		0,
+	);
+	options.onProgress?.({ phase: "pass1" });
 	const pass1StartMs = nowMs();
 	const familySourceMaskByText = new Map<string, number>();
 	for (let docId = 0; docId < sortedDocuments.length; docId += 1) {
@@ -594,6 +606,11 @@ export async function buildResidentHotBaseArtifactsStreaming(
 		shardLocalFamilySlotByFamilyId:
 			familyLexicon.shardLocalFamilySlotByFamilyId,
 	});
+	options.onProgress?.({
+		phase: "pass2",
+		processedBytes: 0,
+		totalBytes: totalRawTextBytes,
+	});
 	const pass2StartMs = nowMs();
 	const identityFamilyIdsByDoc: number[][] = [];
 	const identitySourceMasksByDoc: Array<readonly number[]> = [];
@@ -617,6 +634,7 @@ export async function buildResidentHotBaseArtifactsStreaming(
 	let coldEvidenceFlushCount = 0;
 	let maxColdEvidenceChunkSize = 0;
 	let batchRawTextBytes = 0;
+	let pass2ProcessedRawTextBytes = 0;
 	let batchMaxRawTextBytes = 0;
 	let bodyEvidenceChunk: LexicalBodyEvidencePublishRow[] = [];
 	let hanBodyEvidenceChunk: LexicalHanBodyEvidenceRow[] = [];
@@ -652,10 +670,20 @@ export async function buildResidentHotBaseArtifactsStreaming(
 		await coldEvidenceSink.publishHanDocEvidence(rows);
 	};
 	const flushBatch = async (): Promise<void> => {
+		const flushedRawTextBytes = batchRawTextBytes;
 		await flushBodyEvidence();
 		await flushHanBodyEvidence();
 		await flushHanDocEvidence();
 		batchMaxRawTextBytes = Math.max(batchMaxRawTextBytes, batchRawTextBytes);
+		pass2ProcessedRawTextBytes = Math.min(
+			totalRawTextBytes,
+			pass2ProcessedRawTextBytes + flushedRawTextBytes,
+		);
+		options.onProgress?.({
+			phase: "pass2",
+			processedBytes: pass2ProcessedRawTextBytes,
+			totalBytes: totalRawTextBytes,
+		});
 		batchRawTextBytes = 0;
 	};
 	for (let docId = 0; docId < sortedDocuments.length; docId += 1) {
@@ -828,6 +856,7 @@ export async function buildResidentHotBaseArtifactsStreaming(
 	}
 	await flushBatch();
 	const pass2Ms = nowMs() - pass2StartMs;
+	options.onProgress?.({ phase: "merge" });
 	const finalMergeStartMs = nowMs();
 	const metadataContainers = buildMetadataContainerArena({
 		familyCount: familyLexicon.familyCount,

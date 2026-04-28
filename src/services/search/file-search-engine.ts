@@ -77,6 +77,12 @@ export type FileSearchIndexTimingSummary = {
 	phases: FileSearchIndexTimingPhaseSummary[];
 };
 
+export type FileSearchRebuildProgress = {
+	phase: "pass1" | "pass2" | "merge";
+	processedBytes?: number;
+	totalBytes?: number;
+};
+
 export interface FileSearchEngine {
 	readonly backend: FileSearchBackend;
 	readonly supportsSerialization: boolean;
@@ -117,7 +123,9 @@ export interface FileSearchEngine {
 	resetBenchmarkIndexTiming?(): void;
 	getBenchmarkIndexTimingSummary?(): FileSearchIndexTimingSummary | null;
 	beginBatchReindex?(): void;
-	finishBatchReindex?(): void | Promise<void>;
+	finishBatchReindex?(
+		onProgress?: (progress: FileSearchRebuildProgress) => void,
+	): void | Promise<void>;
 	abortBatchReindex?(): void | Promise<void>;
 }
 

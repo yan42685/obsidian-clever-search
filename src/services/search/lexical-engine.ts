@@ -17,6 +17,7 @@ import {
 } from "../../globals/plugin-setting";
 import {
 	FileSearchEngineFactory,
+	type FileSearchRebuildProgress,
 	type PersistentFileIndexRecoveryPlan,
 	type PersistentFileIndexRecoveryChanges,
 	type SerializedFileSearchIndex,
@@ -95,8 +96,10 @@ export class LexicalEngine {
 		this._isReady = false;
 	}
 
-  finishBatchReindex(): void {
-		void this.fileSearchEngine.finishBatchReindex?.();
+  async finishBatchReindex(
+		onProgress?: (progress: FileSearchRebuildProgress) => void,
+	): Promise<void> {
+		await this.fileSearchEngine.finishBatchReindex?.(onProgress);
 		this._isReady = true;
   }
 

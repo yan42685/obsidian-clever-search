@@ -323,10 +323,21 @@ class HybridIndexProgressNotice {
   }
 }
 
-type LexicalIndexProgress = {
-  processedFiles: number;
-  totalFiles: number;
-};
+type LexicalIndexProgress =
+  | {
+      stage: "reading";
+      processedFiles: number;
+      totalFiles: number;
+    }
+  | {
+      stage: "building";
+      phase: "pass1" | "pass2" | "merge";
+      processedBytes?: number;
+      totalBytes?: number;
+    }
+  | {
+      stage: "writing_snapshot";
+    };
 
 class LexicalIndexProgressNotice {
   private readonly notice: MyNotice;
@@ -344,7 +355,23 @@ class LexicalIndexProgressNotice {
   }
 
   private buildMessage(progress: LexicalIndexProgress): string {
-    return `${t("searchNotice.lexicalIndexingProgressPrefix")}${progress.processedFiles} / ${progress.totalFiles}${t("searchNotice.lexicalIndexingProgressSuffix")}`;
+    if (progress.stage === "reading") {
+      return `Reading documents: ${progress.processedFiles} / ${progress.totalFiles} files`;
+    }
+    if (progress.stage === "building") {
+      if (
+        progress.phase === "pass2" &&
+        progress.processedBytes !== undefined &&
+        progress.totalBytes !== undefined
+      ) {
+        return `Building Coverage V3 index: pass2 ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)}`;
+      }
+      if (progress.phase === "merge") {
+        return "Merging postings";
+      }
+      return `Building Coverage V3 index: ${progress.phase}`;
+    }
+    return "Writing snapshot";
   }
 }
 
@@ -2851,14 +2878,14 @@ export class DataManager {
     const filesToIndex = this.dataProvider.allFilesToBeIndexed();
     const indexedPaths = new Set<string>(filesToIndex.map((file) => file.path));
     const progressNotice = new LexicalIndexProgressNotice({
+      stage: "reading",
       processedFiles: 0,
       totalFiles: filesToIndex.length,
     });
-    let size = 0;
-    for (const file of filesToIndex) size += file.stat.size;
-    size /= 1024;
-    if (size > 2000) {
-      const sizeText = (size / 1024).toFixed(2) + " MB";
+    const totalBytes = filesToIndex.reduce((sum, file) => sum + file.stat.size, 0);
+    const sizeKb = totalBytes / 1024;
+    if (totalBytes > 128 * 1024 * 1024) {
+      const sizeText = (sizeKb / 1024).toFixed(2) + " MB";
       new MyNotice(
         `${sizeText} ${t("files need to be indexed. Obsidian may freeze for a while")}`,
         7000,
@@ -2868,38 +2895,49 @@ export class DataManager {
     const failures: LexicalIndexFailure[] = [];
     let processedFiles = 0;
     const reindexBatches = this.buildLexicalReindexBatches(filesToIndex);
-    this.lexicalEngine.beginBatchReindex();
     try {
-      for (let index = 0; index < reindexBatches.length; index += 1) {
-        const batchFiles = reindexBatches[index];
-        const batchResult = await this.addDocuments(batchFiles);
-        successfulFiles.push(...batchResult.indexedFiles);
-        failures.push(...batchResult.failures);
-        processedFiles += batchFiles.length;
-        progressNotice.update({
-          processedFiles,
-          totalFiles: filesToIndex.length,
-        });
-        if (index + 1 < reindexBatches.length) {
-          await MyLib.sleep(0);
+      this.lexicalEngine.beginBatchReindex();
+      try {
+        for (let index = 0; index < reindexBatches.length; index += 1) {
+          const batchFiles = reindexBatches[index];
+          const batchResult = await this.addDocuments(batchFiles);
+          successfulFiles.push(...batchResult.indexedFiles);
+          failures.push(...batchResult.failures);
+          processedFiles += batchFiles.length;
+          progressNotice.update({
+            stage: "reading",
+            processedFiles,
+            totalFiles: filesToIndex.length,
+          });
+          if (index + 1 < reindexBatches.length) {
+            await MyLib.sleep(0);
+          }
         }
+        await this.lexicalEngine.finishBatchReindex((progress) => {
+          progressNotice.update({
+            stage: "building",
+            phase: progress.phase,
+            processedBytes: progress.processedBytes,
+            totalBytes: progress.totalBytes,
+          });
+        });
+      } catch (error) {
+        this.lexicalEngine.abortBatchReindex();
+        throw error;
       }
-      await this.lexicalEngine.finishBatchReindex();
-    } catch (error) {
-      this.lexicalEngine.abortBatchReindex();
-      throw error;
+      progressNotice.update({ stage: "writing_snapshot" });
+      await this.saveLexicalIndexedFileRefs(successfulFiles);
+      await this.commitIndexedLexicalFiles(successfulFiles);
+      await this.fileSnapshotStore.retainOnlyFiles(indexedPaths);
+      await this.markLexicalSnapshotDirty();
+      this.clearLexicalIndexFailures(Array.from(indexedPaths));
+      if (failures.length > 0) {
+        this.addLexicalIndexFailures(failures);
+      }
+      this.isLexicalEngineUpToDate = failures.length === 0;
     } finally {
       progressNotice.hide();
     }
-    await this.saveLexicalIndexedFileRefs(successfulFiles);
-    await this.commitIndexedLexicalFiles(successfulFiles);
-    await this.fileSnapshotStore.retainOnlyFiles(indexedPaths);
-    await this.markLexicalSnapshotDirty();
-    this.clearLexicalIndexFailures(Array.from(indexedPaths));
-    if (failures.length > 0) {
-      this.addLexicalIndexFailures(failures);
-    }
-    this.isLexicalEngineUpToDate = failures.length === 0;
   }
 
 
