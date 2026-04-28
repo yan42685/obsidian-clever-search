@@ -115,6 +115,7 @@ const WITNESS_MATCH_FAMILY_ID_OFFSET = 1;
 const BLOCK_SHORTLIST_LIMIT = 6;
 const BODY_WINDOW_PREFILTER_PER_BUCKET = 4;
 const BODY_LOCALITY_TIGHTNESS_COMPACTNESS_WEIGHT = 90;
+const HAN_BIGRAM_OVERLAP_VISIBILITY_COVERAGE_WEIGHT = 0.3;
 
 export type CandidateDocEvidence = Readonly<{
 	identityFamilyIds: readonly number[];
@@ -382,6 +383,11 @@ type OpaqueBodyRescue = Readonly<{
 	matchedBigramCount: number;
 	assessment: HanRescueAssessment;
 	promotesBodyWindow: boolean;
+}>;
+
+type HanBigramVisibilityEvidence = Readonly<{
+	surfaceGroupIndex: number;
+	matchedBigrams: readonly string[];
 }>;
 
 export function buildPackingProfile(
@@ -764,7 +770,17 @@ export function buildPackingProfile(
 		bodyWitnessTextsByBlockId,
 		bestBodyWindowBlockIds,
 	);
-	const coverageGate = buildCoverageGateProfile(queryAnalysis, realizedFamilies, resolvedHanSurfaceGroupByIndex);
+	const coverageGate = buildCoverageGateProfile(
+		queryAnalysis,
+		realizedFamilies,
+		resolvedHanSurfaceGroupByIndex,
+		collectHanBigramVisibilityEvidence({
+			metadataWitnessBySurfaceGroupIndex:
+				hanRescueArtifacts.metadataWitnessBySurfaceGroupIndex,
+			bodyEvaluationBySurfaceGroupIndex:
+				hanRescueArtifacts.bodyEvaluationBySurfaceGroupIndex,
+		}),
+	);
 	const metadataPackingSignature = buildMetadataPackingSignature(realizedFamilies);
 	const singletonHanCompletion = summarizeSingletonHanCompletion({
 		base,
@@ -2338,7 +2354,6 @@ function isCompoundPrefixFamily(family: RealizedQueryUnitFamily): boolean {
 function isExactOrPrefixFamily(family: RealizedQueryUnitFamily): boolean {
 	return (
 		family.matchKind === "exact" ||
-		family.matchKind === "opaque_exact" ||
 		family.matchKind === "prefix"
 	);
 }
@@ -2744,6 +2759,52 @@ function materializeOpaqueBodyRescues(params: Readonly<{
 	}
 	return out;
 }
+
+function collectHanBigramVisibilityEvidence(params: Readonly<{
+	metadataWitnessBySurfaceGroupIndex: ReadonlyMap<
+		number,
+		SharedHanMetadataWitnessAssessmentCandidate
+	>;
+	bodyEvaluationBySurfaceGroupIndex: ReadonlyMap<
+		number,
+		HanBodyRescueEvaluation<BodyWindowCandidate>
+	>;
+}>): HanBigramVisibilityEvidence[] {
+	const matchedBigramsByGroup = new Map<number, Set<string>>();
+	for (const [surfaceGroupIndex, witness] of params.metadataWitnessBySurfaceGroupIndex) {
+		if (witness.assessment.strength === "none") {
+			continue;
+		}
+		for (const bigram of witness.matchedBigrams) {
+			ensureStringSet(matchedBigramsByGroup, surfaceGroupIndex).add(bigram);
+		}
+	}
+	for (const [surfaceGroupIndex, evaluation] of params.bodyEvaluationBySurfaceGroupIndex) {
+		if (evaluation.assessment.strength === "none") {
+			continue;
+		}
+		for (const bigram of evaluation.matchedBigrams) {
+			ensureStringSet(matchedBigramsByGroup, surfaceGroupIndex).add(bigram);
+		}
+	}
+	return [...matchedBigramsByGroup.entries()].map(([surfaceGroupIndex, matchedBigrams]) => ({
+		surfaceGroupIndex,
+		matchedBigrams: [...matchedBigrams],
+	}));
+}
+
+function ensureStringSet(
+	map: Map<number, Set<string>>,
+	key: number,
+): Set<string> {
+	let existing = map.get(key);
+	if (existing == null) {
+		existing = new Set<string>();
+		map.set(key, existing);
+	}
+	return existing;
+}
+
 function buildContainerCoverageKey(coveredUnitIndices: readonly number[]): string {
 	return coveredUnitIndices.join(",");
 }
@@ -2752,6 +2813,7 @@ function buildCoverageGateProfile(
 	queryAnalysis: V3QueryAnalysis,
 	realizedFamilies: readonly RealizedQueryUnitFamily[],
 	resolvedHanSurfaceGroupByIndex: ReadonlyMap<number, V3ResolvedHanSurfaceGroup>,
+	hanBigramVisibilityEvidence: readonly HanBigramVisibilityEvidence[] = [],
 ): CoverageGateProfile {
 	const realizedFamiliesByUnitIndex = new Map<number, RealizedQueryUnitFamily>(
 		realizedFamilies.map((family) => [family.queryUnitIndex, family]),
@@ -2847,12 +2909,141 @@ function buildCoverageGateProfile(
 	const realizedCoverageCount = realizedFamilies.filter(
 		(family) => family.matchKind !== "opaque_exact",
 	).length;
+	const hanBigramVisibilityCoverageCount = computeHanBigramVisibilityCoverageCount(
+		queryAnalysis,
+		realizedFamilies,
+		hanBigramVisibilityEvidence,
+	);
 	return {
 		realizedCoverageCount,
+		visibilityCoverageCount:
+			realizedCoverageCount + hanBigramVisibilityCoverageCount,
 		fullySatisfiedSurfaceGroupCount,
 		startedSurfaceGroupCount,
 		crossScriptSatisfiedGroupCount: fullySatisfiedScripts.size,
 	};
+}
+
+function computeHanBigramVisibilityCoverageCount(
+	queryAnalysis: V3QueryAnalysis,
+	realizedFamilies: readonly RealizedQueryUnitFamily[],
+	evidence: readonly HanBigramVisibilityEvidence[],
+): number {
+	if (evidence.length === 0) {
+		return 0;
+	}
+	const exactHanCoverageBySurfaceGroupIndex = buildExactHanCoverageMasks(
+		queryAnalysis,
+		realizedFamilies,
+	);
+	let total = 0;
+	for (const item of evidence) {
+		const group = queryAnalysis.surfaceGroups[item.surfaceGroupIndex];
+		if (group == null || group.kind !== "han") {
+			continue;
+		}
+		const exactCoverage = exactHanCoverageBySurfaceGroupIndex.get(group.index) ?? [];
+		const ranges = [...new Set(item.matchedBigrams)]
+			.flatMap((bigram) => collectHanTextRanges(group.text, bigram))
+			.map((range) => ({
+				...range,
+				overlapsExact: rangeOverlapsCoveredMask(range, exactCoverage),
+			}))
+			.sort((left, right) => left.start - right.start || left.end - right.end);
+		total += countMergedHanBigramVisibilityRanges(ranges);
+	}
+	return total;
+}
+
+function buildExactHanCoverageMasks(
+	queryAnalysis: V3QueryAnalysis,
+	realizedFamilies: readonly RealizedQueryUnitFamily[],
+): ReadonlyMap<number, readonly boolean[]> {
+	const masks = new Map<number, boolean[]>();
+	for (const family of realizedFamilies) {
+		if (family.matchKind !== "exact" || family.querySurfaceGroupIndex == null) {
+			continue;
+		}
+		const group = queryAnalysis.surfaceGroups[family.querySurfaceGroupIndex];
+		if (group == null || group.kind !== "han") {
+			continue;
+		}
+		const chars = Array.from(group.text);
+		const mask = masks.get(group.index) ?? Array.from({ length: chars.length }, () => false);
+		for (const range of collectHanTextRanges(group.text, family.queryUnitText)) {
+			for (let index = range.start; index < range.end; index += 1) {
+				mask[index] = true;
+			}
+		}
+		masks.set(group.index, mask);
+	}
+	return masks;
+}
+
+function collectHanTextRanges(
+	text: string,
+	needle: string,
+): Array<{ start: number; end: number }> {
+	const chars = Array.from(text);
+	const needleChars = Array.from(needle);
+	if (needleChars.length === 0 || needleChars.length > chars.length) {
+		return [];
+	}
+	const ranges: Array<{ start: number; end: number }> = [];
+	for (let start = 0; start <= chars.length - needleChars.length; start += 1) {
+		let matched = true;
+		for (let offset = 0; offset < needleChars.length; offset += 1) {
+			if (chars[start + offset] !== needleChars[offset]) {
+				matched = false;
+				break;
+			}
+		}
+		if (matched) {
+			ranges.push({ start, end: start + needleChars.length });
+		}
+	}
+	return ranges;
+}
+
+function rangeOverlapsCoveredMask(
+	range: Readonly<{ start: number; end: number }>,
+	covered: readonly boolean[],
+): boolean {
+	for (let index = range.start; index < range.end; index += 1) {
+		if (covered[index] === true) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function countMergedHanBigramVisibilityRanges(
+	ranges: ReadonlyArray<Readonly<{ start: number; end: number; overlapsExact: boolean }>>,
+): number {
+	let total = 0;
+	let activeEnd = -1;
+	let activeHasNonOverlappingBigram = false;
+	for (const range of ranges) {
+		if (activeEnd < 0 || range.start > activeEnd) {
+			if (activeEnd >= 0) {
+				total += activeHasNonOverlappingBigram
+					? 1
+					: HAN_BIGRAM_OVERLAP_VISIBILITY_COVERAGE_WEIGHT;
+			}
+			activeEnd = range.end;
+			activeHasNonOverlappingBigram = !range.overlapsExact;
+			continue;
+		}
+		activeEnd = Math.max(activeEnd, range.end);
+		activeHasNonOverlappingBigram =
+			activeHasNonOverlappingBigram || !range.overlapsExact;
+	}
+	if (activeEnd >= 0) {
+		total += activeHasNonOverlappingBigram
+			? 1
+			: HAN_BIGRAM_OVERLAP_VISIBILITY_COVERAGE_WEIGHT;
+	}
+	return total;
 }
 
 function summarizeSingletonHanCompletion(params: Readonly<{

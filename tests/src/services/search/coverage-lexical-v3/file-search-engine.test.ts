@@ -117,6 +117,7 @@ function createPackingProfile(
 		realizedCoverageCount: overrides.realizedCoverageCount ?? 1,
 		coverageGate: overrides.coverageGate ?? {
 			realizedCoverageCount: overrides.realizedCoverageCount ?? 1,
+			visibilityCoverageCount: overrides.realizedCoverageCount ?? 1,
 			fullySatisfiedSurfaceGroupCount: 1,
 			startedSurfaceGroupCount: 1,
 			crossScriptSatisfiedGroupCount: 1,
@@ -3650,6 +3651,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 					realizedCoverageCount: 0,
 					coverageGate: {
 						realizedCoverageCount: 0,
+						visibilityCoverageCount: 1,
 						fullySatisfiedSurfaceGroupCount: 1,
 						startedSurfaceGroupCount: 1,
 						crossScriptSatisfiedGroupCount: 1,
@@ -3754,6 +3756,7 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 					realizedCoverageCount: 0,
 					coverageGate: {
 						realizedCoverageCount: 0,
+						visibilityCoverageCount: 1,
 						fullySatisfiedSurfaceGroupCount: 1,
 						startedSurfaceGroupCount: 1,
 						crossScriptSatisfiedGroupCount: 1,
@@ -3789,5 +3792,300 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 		expect(visible.map((file) => file.path)).toEqual(["exact.md", "bigram.md"]);
 		expect(visible.map((file) => file.score)).toEqual([1, 0]);
 		expect(opaqueFamily.matchKind).toBe("opaque_exact");
+	});
+
+	test("hides opaque bigram rescue below a stronger visibility coverage gate", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		await engine.reIndexAll([
+			createDocument({
+				path: "strong.md",
+				basename: "strong",
+				folder: "notes",
+				content: "\u91ce\u602a\u7b56\u7565",
+			}),
+			createDocument({
+				path: "bigram.md",
+				basename: "bigram",
+				folder: "notes",
+				content: "\u5728\u91ce\u602a\u4e0a",
+			}),
+		]);
+		const fullSurface = "\u91ce\u602a";
+		const exactFamily = createRealizedFamily({
+			queryUnitIndex: 0,
+			queryUnitText: fullSurface,
+			querySurfaceGroupIndex: 0,
+			familyId: 1,
+			familyText: fullSurface,
+			matchKind: "exact",
+		});
+		const opaqueFamily = createRealizedFamily({
+			queryUnitIndex: 500000,
+			queryUnitText: fullSurface,
+			querySurfaceGroupIndex: 0,
+			familyId: -500001,
+			familyText: fullSurface,
+			matchKind: "opaque_exact",
+			inBodyResidue: true,
+		});
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: createHanQueryAnalysis(fullSurface, fullSurface),
+				unitFamilyMatches: [],
+				candidateDocs: [],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					path: "strong.md",
+					realizedFamilies: [exactFamily],
+					exactUnitCount: 2,
+					realizedCoverageCount: 2,
+					coverageGate: {
+						realizedCoverageCount: 2,
+						visibilityCoverageCount: 2,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+				}),
+				createPackingProfile({
+					docId: 1,
+					path: "bigram.md",
+					realizedFamilies: [opaqueFamily],
+					exactUnitCount: 0,
+					realizedCoverageCount: 0,
+					coverageGate: {
+						realizedCoverageCount: 0,
+						visibilityCoverageCount: 1,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+					hasOnlyWeakHanRescue: true,
+					hasAnyHanRescueAssessment: true,
+					hanRescueAssessments: [
+						createHanBigramRescueAssessment({ strength: "weak" }),
+					],
+					hanWeakRescueGroupCount: 1,
+					hanStrongRescueGroupCount: 0,
+				}),
+			],
+		}));
+		(engine as unknown as {
+			engine: {
+				search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
+				getResidentIndexView: () => { shards: [{ base: ResidentBase }] } | null;
+			};
+		}).engine = {
+			...createMockSearchRuntime(search, createResidentBaseForBlockCounts([1, 1])),
+			getResidentIndexView: () => null,
+		};
+
+		const visible = await engine.searchFiles({
+			queryText: fullSurface,
+			isPrefixMatch: true,
+			isFuzzy: false,
+			hideWeaklyRelatedResults: true,
+			maxItemResults: 5,
+		});
+
+		expect(visible.map((file) => file.path)).toEqual(["strong.md"]);
+	});
+
+	test("keeps candidates that trade one exact coverage for one bigram visibility span", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		await engine.reIndexAll([
+			createDocument({
+				path: "two-exact.md",
+				basename: "two exact",
+				folder: "notes",
+				content: "\u91ce\u602a\u7b56\u7565",
+			}),
+			createDocument({
+				path: "exact-plus-bigram.md",
+				basename: "exact plus bigram",
+				folder: "notes",
+				content: "\u91ce\u602a\u7b56\u7565",
+			}),
+		]);
+		const fullSurface = "\u91ce\u602a\u7b56\u7565";
+		const exactFamily = createRealizedFamily({
+			queryUnitIndex: 0,
+			queryUnitText: "\u91ce\u602a",
+			querySurfaceGroupIndex: 0,
+			familyId: 1,
+			familyText: "\u91ce\u602a",
+			matchKind: "exact",
+		});
+		const secondExactFamily = createRealizedFamily({
+			queryUnitIndex: 1,
+			queryUnitText: "\u7b56\u7565",
+			querySurfaceGroupIndex: 0,
+			familyId: 2,
+			familyText: "\u7b56\u7565",
+			matchKind: "exact",
+		});
+		const opaqueFamily = createRealizedFamily({
+			queryUnitIndex: 500000,
+			queryUnitText: "\u7b56\u7565",
+			querySurfaceGroupIndex: 0,
+			familyId: -500001,
+			familyText: "\u7b56\u7565",
+			matchKind: "opaque_exact",
+			inBodyResidue: true,
+		});
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: createHanQueryAnalysis(fullSurface, fullSurface),
+				unitFamilyMatches: [],
+				candidateDocs: [],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					path: "two-exact.md",
+					realizedFamilies: [exactFamily, secondExactFamily],
+					exactUnitCount: 2,
+					realizedCoverageCount: 2,
+					coverageGate: {
+						realizedCoverageCount: 2,
+						visibilityCoverageCount: 2,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+				}),
+				createPackingProfile({
+					docId: 1,
+					path: "exact-plus-bigram.md",
+					realizedFamilies: [exactFamily, opaqueFamily],
+					exactUnitCount: 1,
+					realizedCoverageCount: 1,
+					coverageGate: {
+						realizedCoverageCount: 1,
+						visibilityCoverageCount: 2,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+					hasAnyHanRescueAssessment: true,
+					hanRescueAssessments: [
+						createHanBigramRescueAssessment({ strength: "weak" }),
+					],
+					hanWeakRescueGroupCount: 1,
+				}),
+			],
+		}));
+		(engine as unknown as {
+			engine: {
+				search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
+				getResidentIndexView: () => { shards: [{ base: ResidentBase }] } | null;
+			};
+		}).engine = {
+			...createMockSearchRuntime(search, createResidentBaseForBlockCounts([1, 1])),
+			getResidentIndexView: () => null,
+		};
+
+		const visible = await engine.searchFiles({
+			queryText: fullSurface,
+			isPrefixMatch: true,
+			isFuzzy: false,
+			hideWeaklyRelatedResults: true,
+			maxItemResults: 5,
+		});
+
+		expect(visible.map((file) => file.path)).toEqual([
+			"two-exact.md",
+			"exact-plus-bigram.md",
+		]);
+	});
+
+	test("keeps candidates whose bigram visibility coverage exceeds the top real coverage gate", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		await engine.reIndexAll([
+			createDocument({
+				path: "exact.md",
+				basename: "exact",
+				folder: "notes",
+				content: "\u91ce\u602a",
+			}),
+			createDocument({
+				path: "overlap-bigram.md",
+				basename: "overlap",
+				folder: "notes",
+				content: "\u91ce\u602a\u7b14\u8bb0",
+			}),
+		]);
+		const fullSurface = "\u91ce\u602a";
+		const exactFamily = createRealizedFamily({
+			queryUnitIndex: 0,
+			queryUnitText: fullSurface,
+			querySurfaceGroupIndex: 0,
+			familyId: 1,
+			familyText: fullSurface,
+			matchKind: "exact",
+		});
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: createHanQueryAnalysis(fullSurface, fullSurface),
+				unitFamilyMatches: [],
+				candidateDocs: [],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					path: "exact.md",
+					realizedFamilies: [exactFamily],
+					exactUnitCount: 1,
+					realizedCoverageCount: 1,
+					coverageGate: {
+						realizedCoverageCount: 1,
+						visibilityCoverageCount: 1,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+				}),
+				createPackingProfile({
+					docId: 1,
+					path: "overlap-bigram.md",
+					realizedFamilies: [exactFamily],
+					exactUnitCount: 1,
+					realizedCoverageCount: 1,
+					coverageGate: {
+						realizedCoverageCount: 1,
+						visibilityCoverageCount: 1.3,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+					hasAnyHanRescueAssessment: true,
+					hanRescueAssessments: [
+						createHanBigramRescueAssessment({ strength: "weak" }),
+					],
+					hanWeakRescueGroupCount: 1,
+				}),
+			],
+		}));
+		(engine as unknown as {
+			engine: {
+				search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
+				getResidentIndexView: () => { shards: [{ base: ResidentBase }] } | null;
+			};
+		}).engine = {
+			...createMockSearchRuntime(search, createResidentBaseForBlockCounts([1, 1])),
+			getResidentIndexView: () => null,
+		};
+
+		const visible = await engine.searchFiles({
+			queryText: fullSurface,
+			isPrefixMatch: true,
+			isFuzzy: false,
+			hideWeaklyRelatedResults: true,
+			maxItemResults: 5,
+		});
+
+		expect(visible.map((file) => file.path)).toContain("overlap-bigram.md");
 	});
 });

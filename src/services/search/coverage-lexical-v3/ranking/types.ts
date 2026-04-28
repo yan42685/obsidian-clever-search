@@ -93,6 +93,7 @@ export type HanSurfaceCompletionTier =
 
 export type CoverageGateProfile = Readonly<{
 	realizedCoverageCount: number;
+	visibilityCoverageCount?: number;
 	fullySatisfiedSurfaceGroupCount: number;
 	startedSurfaceGroupCount: number;
 	crossScriptSatisfiedGroupCount: number;

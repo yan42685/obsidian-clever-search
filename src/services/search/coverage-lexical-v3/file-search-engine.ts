@@ -138,6 +138,8 @@ type HanSurfaceDominanceProfile = Readonly<{
 	tierScoreTotal: number;
 }>;
 
+const VISIBILITY_COVERAGE_GATE_TOLERANCE = 0.4;
+
 type IndexedDocumentView = Readonly<{
 	docRef?: IndexedDocument["docRef"];
 	path: string;
@@ -2228,8 +2230,22 @@ function filterToTopCoverageGateBand(
 		return candidates;
 	}
 	return candidates.filter((candidate) =>
-		hasSameCoverageGate(candidate.coverageGate, strongestCoverageGate) ||
-		hasHanBigramRescueSupport(candidate),
+		hasVisibilityCoverageGateAtLeastTop(candidate.coverageGate, strongestCoverageGate),
+	);
+}
+
+function hasVisibilityCoverageGateAtLeastTop(
+	left: EvidencePackingProfile["coverageGate"],
+	right: EvidencePackingProfile["coverageGate"],
+): boolean {
+	return (
+		getVisibilityCoverageCount(left) + VISIBILITY_COVERAGE_GATE_TOLERANCE >=
+			getVisibilityCoverageCount(right) &&
+		left.fullySatisfiedSurfaceGroupCount ===
+			right.fullySatisfiedSurfaceGroupCount &&
+		left.startedSurfaceGroupCount === right.startedSurfaceGroupCount &&
+		left.crossScriptSatisfiedGroupCount ===
+			right.crossScriptSatisfiedGroupCount
 	);
 }
 
@@ -2245,6 +2261,12 @@ function hasSameCoverageGate(
 		left.crossScriptSatisfiedGroupCount ===
 			right.crossScriptSatisfiedGroupCount
 	);
+}
+
+function getVisibilityCoverageCount(
+	coverageGate: EvidencePackingProfile["coverageGate"],
+): number {
+	return coverageGate.visibilityCoverageCount ?? coverageGate.realizedCoverageCount;
 }
 
 function applyHanSurfaceCompletionDominance(

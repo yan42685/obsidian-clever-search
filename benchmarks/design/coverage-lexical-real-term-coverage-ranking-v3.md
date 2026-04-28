@@ -2380,3 +2380,37 @@ Validation completed for this phase:
 - benchmark log captured at `tmp/coverage-benchmark-after-remove-top3-noise-final.log`
 - outcomes log confirming no remaining V3 Top3 misses captured at
   `tmp/coverage-benchmark-after-remove-top3-noise-outcomes.log`
+
+### Phase 51
+
+Status: Completed on 2026-04-29
+
+This phase tightens the top-level file-list hiding boundary for Han bigram
+rescue so weak rescue no longer survives through a separate visibility bypass:
+
+- `CoverageGateProfile` now carries a dedicated optional
+  `visibilityCoverageCount` used by file-list weak-result hiding
+- ranking still compares the original `realizedCoverageCount`, so Han bigram
+  rescue does not become exact/prefix lexical support or change the primary
+  ranking coverage gate
+- Han bigram rescue contributes only to the visibility coverage gate:
+  - connected matched bigram spans count once rather than once per bigram
+  - spans overlapping exact Han term coverage contribute `0.3`
+  - non-overlapping matched bigram spans contribute `1`
+- `opaque_exact` rescue families no longer count toward
+  `exactOrPrefixUnitCount`
+- file-list pruning now compares the candidate visibility coverage gate against
+  the top candidate's visibility coverage gate instead of preserving every
+  candidate with any Han bigram rescue support
+- the visibility coverage comparison allows a `0.4` tolerance so an overlapping
+  bigram `0.3` bonus does not hide otherwise same-band candidates, while a
+  candidate that trades one exact coverage for one non-overlapping bigram
+  visibility span remains visible
+- this removes the previous pollution case where a weak single-bigram rescue
+  could remain visible below a much stronger real-coverage top band
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-04-29
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts` passes on 2026-04-29
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/ranking-stability.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine-request-flags.test.ts` passes on 2026-04-29
