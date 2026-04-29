@@ -1814,6 +1814,137 @@ describe("coverage lexical v3 file search engine", () => {
 		]);
 	});
 
+	test("direct subitems wait for pending overlay recovery before reading document views", async () => {
+		class SlowAppendOverlayJournalStore extends MemoryActiveOverlayJournalStore {
+			async appendOverlayEntries(entries: readonly any[]) {
+				await new Promise((resolve) => setTimeout(resolve, 10));
+				await super.appendOverlayEntries(entries);
+			}
+		}
+		const productionStores = createMemoryCoverageLexicalV3ProductionStores();
+		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable((row) => row.id),
+		);
+		const persistentStores = {
+			productionStores,
+			artifactStore,
+			overlayJournalStore: new SlowAppendOverlayJournalStore(),
+			snapshotStore: new MemoryCoverageLexicalV3SnapshotStore(),
+		};
+		const evidenceSnapshotStore = {
+			readIndexedTexts: jest.fn(async () => new Map<string, string>()),
+			readIndexedMetadata: jest.fn(async () => new Map()),
+			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
+			publishLexicalBodyEvidence: jest.fn(async () => undefined),
+			readLexicalBodyEvidenceForBlocks: jest.fn(async () => new Map()),
+			publishLexicalHanDocEvidence: jest.fn(async () => undefined),
+			readLexicalHanDocEvidenceForDocs: jest.fn(async () => new Map()),
+			publishLexicalHanBodyEvidence: jest.fn(async () => undefined),
+			readLexicalHanBodyEvidenceForBlocks: jest.fn(async () => new Map()),
+			publishLexicalFuzzyRescue: jest.fn(async () => undefined),
+			readLexicalFuzzyRescue: jest.fn(async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX),
+			readLexicalFuzzyRescueForLookupKeys: jest.fn(
+				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
+			),
+		};
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		(engine as any).getPersistentStores = () => persistentStores;
+		(engine as any).getFileSnapshotStore = () => evidenceSnapshotStore;
+		await engine.reIndexAll([
+			createDocument({
+				docRef: 60,
+				path: "notes/base.md",
+				basename: "base",
+				folder: "notes",
+				content: "base content",
+				generation: 1,
+			}),
+		]);
+
+		const recovery = engine.applyPersistentRecoveryChanges({
+			deletePaths: [],
+			upsertDocuments: [
+				createDocument({
+					docRef: 61,
+					path: "notes/recovered-subitems.md",
+					basename: "recovered-subitems",
+					folder: "notes",
+					content: "needle phrase in recovered body",
+					generation: 1,
+				}),
+			],
+		});
+		await engine.getDirectSubItems("needle", "notes/recovered-subitems.md", 5);
+		expect(engine.getIndexedDocumentCount()).toBe(2);
+		await recovery;
+	});
+
+	test("clearIndex prevents stale pending overlay recovery from repopulating runtime views", async () => {
+		class SlowAppendOverlayJournalStore extends MemoryActiveOverlayJournalStore {
+			async appendOverlayEntries(entries: readonly any[]) {
+				await new Promise((resolve) => setTimeout(resolve, 10));
+				await super.appendOverlayEntries(entries);
+			}
+		}
+		const productionStores = createMemoryCoverageLexicalV3ProductionStores();
+		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable((row) => row.id),
+		);
+		const persistentStores = {
+			productionStores,
+			artifactStore,
+			overlayJournalStore: new SlowAppendOverlayJournalStore(),
+			snapshotStore: new MemoryCoverageLexicalV3SnapshotStore(),
+		};
+		const evidenceSnapshotStore = {
+			readIndexedTexts: jest.fn(async () => new Map<string, string>()),
+			readIndexedMetadata: jest.fn(async () => new Map()),
+			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
+			publishLexicalBodyEvidence: jest.fn(async () => undefined),
+			readLexicalBodyEvidenceForBlocks: jest.fn(async () => new Map()),
+			publishLexicalHanDocEvidence: jest.fn(async () => undefined),
+			readLexicalHanDocEvidenceForDocs: jest.fn(async () => new Map()),
+			publishLexicalHanBodyEvidence: jest.fn(async () => undefined),
+			readLexicalHanBodyEvidenceForBlocks: jest.fn(async () => new Map()),
+			publishLexicalFuzzyRescue: jest.fn(async () => undefined),
+			readLexicalFuzzyRescue: jest.fn(async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX),
+			readLexicalFuzzyRescueForLookupKeys: jest.fn(
+				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
+			),
+		};
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		(engine as any).getPersistentStores = () => persistentStores;
+		(engine as any).getFileSnapshotStore = () => evidenceSnapshotStore;
+		await engine.reIndexAll([
+			createDocument({
+				docRef: 70,
+				path: "notes/base.md",
+				basename: "base",
+				folder: "notes",
+				content: "base content",
+				generation: 1,
+			}),
+		]);
+
+		const recovery = engine.applyPersistentRecoveryChanges({
+			deletePaths: [],
+			upsertDocuments: [
+				createDocument({
+					docRef: 71,
+					path: "notes/stale.md",
+					basename: "stale",
+					folder: "notes",
+					content: "stale recovered content",
+					generation: 1,
+				}),
+			],
+		});
+		engine.clearIndex();
+		await recovery;
+
+		expect(engine.getIndexedDocumentCount()).toBe(0);
+	});
+
 	test("reloads runtime after maintenance fold so the next persist cannot roll registry back", async () => {
 		const productionStores = createMemoryCoverageLexicalV3ProductionStores();
 		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(

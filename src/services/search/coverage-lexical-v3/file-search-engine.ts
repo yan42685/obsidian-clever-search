@@ -326,6 +326,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	private batchReindexing = false;
 	private pendingResidentRebuild: Promise<void> | null = null;
 	private pendingOverlayRecovery: Promise<void> = Promise.resolve();
+	private overlayRecoveryGeneration = 0;
 	private residentRebuildGeneration = 0;
 	private lastRebuildStats: CoverageLexicalV3LastRebuildStats | null = null;
 	private lastMaintenanceStats: CoverageLexicalV3LastMaintenanceStats | null = null;
@@ -351,6 +352,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 
 	clearIndex(): void {
 		this.residentRebuildGeneration += 1;
+		this.overlayRecoveryGeneration += 1;
 		this.documentViewsByPath.clear();
 		this.pendingDocumentContentsByPath.clear();
 		this.pendingDocumentMetadataByPath.clear();
@@ -601,6 +603,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		path: string,
 		maxSubItemResults: number,
 	): Promise<FileSubItem[] | null> {
+		await this.awaitPendingOverlayRecovery();
 		await this.awaitPendingResidentRebuild();
 		if (!this.documentViewsByPath.has(path)) {
 			return null;
@@ -835,6 +838,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	}
 
 	async restorePersistedFileIndex(): Promise<boolean> {
+		await this.awaitPendingOverlayRecovery();
 		const persistentStores = this.getPersistentStores();
 		return (
 			(await this.reloadRuntimeFromPersistentStores(persistentStores)) &&
@@ -962,9 +966,12 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		changes: PersistentFileIndexRecoveryChanges,
 	): Promise<boolean> {
 		const previousRecovery = this.pendingOverlayRecovery;
+		const recoveryGeneration = this.overlayRecoveryGeneration;
 		const recovery = previousRecovery
 			.catch(() => undefined)
-			.then(() => this.applyOverlayRecoveryChangesInternal(changes));
+			.then(() =>
+				this.applyOverlayRecoveryChangesInternal(changes, recoveryGeneration),
+			);
 		this.pendingOverlayRecovery = recovery.then(
 			() => undefined,
 			() => undefined,
@@ -974,7 +981,11 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 
 	private async applyOverlayRecoveryChangesInternal(
 		changes: PersistentFileIndexRecoveryChanges,
+		recoveryGeneration: number,
 	): Promise<boolean> {
+		if (recoveryGeneration !== this.overlayRecoveryGeneration) {
+			return true;
+		}
 		const activeShard = this.getActiveBaseShardDescriptor();
 		if (activeShard == null) {
 			return false;
@@ -1024,6 +1035,9 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			changes: overlayChanges,
 			sequenceStart,
 		});
+		if (recoveryGeneration !== this.overlayRecoveryGeneration) {
+			return true;
+		}
 		await this.reloadOverlayRuntimeState(persistentStores, activeShard);
 		for (const path of changes.deletePaths) {
 			this.pendingDocumentContentsByPath.delete(path);
@@ -1292,6 +1306,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	}
 
 	async clearPersistedFileIndexArtifact(): Promise<void> {
+		await this.awaitPendingOverlayRecovery();
 		const database = this.getDatabase();
 		const tables = [
 			database.db.coverageLexicalV3ShardRegistry,
