@@ -114,7 +114,7 @@ describe("hybrid shared snippet header", () => {
 describe("buildHybridSharedSnippet", () => {
 	test("bridge preview bypasses header generation", () => {
 		const candidate = createCandidate({
-			bridgePreviewText: "alias preview",
+			bridgePreviewText: "alias <preview> & more",
 			bridgePreviewRanges: [{ start: 0, end: 5 }],
 		});
 
@@ -124,8 +124,11 @@ describe("buildHybridSharedSnippet", () => {
 		});
 
 		expect(payload.headerText).toBe("");
-		expect(payload.bodyText).toBe("alias preview");
-		expect(payload.snippetText).toBe("alias preview");
+		expect(payload.bodyText).toBe("alias <preview> & more");
+		expect(payload.snippetText).toBe("alias <preview> & more");
+		expect(payload.snippetHtml).toBe(
+			"<mark>alias</mark> &lt;preview&gt; &amp; more",
+		);
 		expect(payload.bodyHighlightRanges).toEqual([{ start: 0, end: 5 }]);
 	});
 

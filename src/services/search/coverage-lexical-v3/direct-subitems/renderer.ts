@@ -464,7 +464,7 @@ function renderHighlightedSnippet(
 	weakHighlightRanges: ReadonlyArray<{ start: number; end: number }>,
 ): string {
 	if (strongHighlightRanges.length === 0 && weakHighlightRanges.length === 0) {
-		return text;
+		return escapeHtml(text);
 	}
 	const boundaries = new Set<number>([0, text.length]);
 	for (const range of [...strongHighlightRanges, ...weakHighlightRanges]) {

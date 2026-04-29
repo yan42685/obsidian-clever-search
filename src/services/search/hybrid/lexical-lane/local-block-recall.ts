@@ -24,12 +24,12 @@ export async function buildHybridLexicalLaneLocalBlockCandidates(params: {
   maxBlocksPerFile: number;
 }): Promise<{
   blockCandidates: HybridLexicalLaneBlockCandidate[];
-  snapshotTextByPath: Map<string, string>;
+  snapshotTextByRequestKey: Map<string, string>;
 }> {
   const snapshotStore = getInstance(FileSnapshotStore);
   const blockCandidates: HybridLexicalLaneBlockCandidate[] = [];
-  const snapshotTextByPath = new Map<string, string>();
-  const snapshotsByPath = await snapshotStore.readIndexedTextSnapshots(
+  const snapshotTextByRequestKey = new Map<string, string>();
+  const snapshotsByRequestKey = await snapshotStore.readIndexedTextSnapshots(
     params.files.map((file) => ({
       path: file.filePath,
       generation: file.snapshotGeneration,
@@ -37,7 +37,7 @@ export async function buildHybridLexicalLaneLocalBlockCandidates(params: {
   );
 
   for (const file of params.files) {
-    const snapshot = snapshotsByPath.get(
+    const snapshot = snapshotsByRequestKey.get(
       buildIndexedSnapshotRequestKey({
         path: file.filePath,
         generation: file.snapshotGeneration,
@@ -50,7 +50,13 @@ export async function buildHybridLexicalLaneLocalBlockCandidates(params: {
     if (!snapshotText.trim()) {
       continue;
     }
-    snapshotTextByPath.set(file.filePath, snapshotText);
+    snapshotTextByRequestKey.set(
+      buildIndexedSnapshotRequestKey({
+        path: file.filePath,
+        generation: snapshot.generation,
+      }),
+      snapshotText,
+    );
     blockCandidates.push(
       ...buildHybridLexicalLaneBlockCandidatesForSnapshot({
         queryText: params.queryText,
@@ -67,7 +73,7 @@ export async function buildHybridLexicalLaneLocalBlockCandidates(params: {
 
   return {
     blockCandidates,
-    snapshotTextByPath,
+    snapshotTextByRequestKey,
   };
 }
 

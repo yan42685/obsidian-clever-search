@@ -610,6 +610,9 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 	const { FileSnapshotStore } = require(
 		"src/services/search/shared/file-snapshot-store",
 	) as typeof import("src/services/search/shared/file-snapshot-store");
+	const { buildIndexedSnapshotRequestKey } = require(
+		"src/services/search/shared/file-snapshot-store",
+	) as typeof import("src/services/search/shared/file-snapshot-store");
 	const { buildHybridLexicalLaneFileCandidates } = require(
 		"src/services/search/hybrid/lexical-lane/file-shortlist",
 	) as typeof import("src/services/search/hybrid/lexical-lane/file-shortlist");
@@ -676,11 +679,17 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 		},
 	});
 
-		const snapshotTextByPath = new Map<string, string>();
+		const snapshotTextByRequestKey = new Map<string, string>();
 		const blockCandidates = fileCandidates.flatMap((fileCandidate) => {
 			const document = docByPath.get(fileCandidate.filePath);
 			const snapshotText = document?.content ?? "";
-			snapshotTextByPath.set(fileCandidate.filePath, snapshotText);
+			snapshotTextByRequestKey.set(
+				buildIndexedSnapshotRequestKey({
+					path: fileCandidate.filePath,
+					generation: fileCandidate.snapshotGeneration,
+				}),
+				snapshotText,
+			);
 			return buildHybridLexicalLaneBlockCandidatesForSnapshot({
 				queryText: queryCase.query,
 				file: fileCandidate,
@@ -690,7 +699,7 @@ async function evaluateLexicalLaneAgainstCorpus(params: {
 		});
 		const displayCandidates = runHybridLexicalLaneCandidatePipeline({
 			blockCandidates,
-			snapshotTextByPath,
+			snapshotTextByRequestKey,
 			rerankTopK: 16,
 			displayTopK: 8,
 		});

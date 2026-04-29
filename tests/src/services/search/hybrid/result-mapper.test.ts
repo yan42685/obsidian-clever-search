@@ -71,4 +71,34 @@ describe("hybrid lexical lane result mapper", () => {
 		expect(items[0].freshnessState).toBe("stale_grace");
 		expect(items[0].freshnessReason).toBe("embedding_updating");
 	});
+
+	test("does not merge same-path candidates from different snapshot generations", () => {
+		const items = buildHybridLexicalLaneFileItems("cache restore", [
+			createDisplayCandidate({
+				filePath: "notes/recovered.md",
+				snapshotGeneration: 1,
+				snapshotSource: "indexed",
+				score: 100,
+				snippetText: "old cache restore",
+			}),
+			createDisplayCandidate({
+				filePath: "notes/recovered.md",
+				snapshotGeneration: 2,
+				snapshotSource: "indexed",
+				score: 90,
+				snippetText: "new cache restore",
+			}),
+		]);
+
+		expect(items).toHaveLength(2);
+		expect(items.map((item) => item.path)).toEqual([
+			"notes/recovered.md",
+			"notes/recovered.md",
+		]);
+		expect(items.map((item) => item.snapshotGeneration)).toEqual([1, 2]);
+		expect(items.map((item) => item.subItems[0].snippetText)).toEqual([
+			"old cache restore",
+			"new cache restore",
+		]);
+	});
 });

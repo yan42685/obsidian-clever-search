@@ -1,4 +1,5 @@
 import { FileUtil } from "src/utils/file-util";
+import { buildIndexedSnapshotRequestKey } from "src/services/search/shared/file-snapshot-store";
 import type {
 	HybridLexicalLaneBlockCandidate,
 	HybridLexicalLaneDisplayCandidate,
@@ -56,11 +57,16 @@ export function buildHybridLexicalLaneDisplayCandidates(params: {
 		| HybridLexicalLaneBlockCandidate
 		| HybridLexicalLaneRankedBlockCandidate
 	)[];
-	snapshotTextByPath: ReadonlyMap<string, string>;
+	snapshotTextByRequestKey: ReadonlyMap<string, string>;
 }): HybridLexicalLaneDisplayCandidate[] {
 	return params.candidates
 		.map((candidate) => {
-			const snapshotText = params.snapshotTextByPath.get(candidate.filePath);
+			const snapshotText = params.snapshotTextByRequestKey.get(
+				buildIndexedSnapshotRequestKey({
+					path: candidate.filePath,
+					generation: candidate.snapshotGeneration,
+				}),
+			);
 			if (!snapshotText) {
 				return null;
 			}

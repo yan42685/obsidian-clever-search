@@ -7,6 +7,7 @@ import type {
 	HybridLexicalLaneRankedBlockCandidate,
 	HybridLexicalLaneScoreBreakdown,
 } from "./contracts";
+import { isSameHybridLexicalLaneSnapshot } from "./candidate-key";
 
 export function rankHybridLexicalLaneBlockCandidates(
 	candidates: readonly HybridLexicalLaneBlockCandidate[],
@@ -192,7 +193,7 @@ function computeOverlapPenalty(
 ): number {
 	let penalty = 0;
 	for (const previous of selected) {
-		if (previous.filePath !== candidate.filePath) {
+		if (!isSameHybridLexicalLaneSnapshot(previous, candidate)) {
 			continue;
 		}
 		const overlapRatio = computeSpanOverlapRatio(previous, candidate);
@@ -222,7 +223,7 @@ function computeEvidenceDiversityBonus(
 	selected: readonly HybridLexicalLaneRankedBlockCandidate[],
 ): number {
 	const previousSameFile = selected.filter(
-		(previous) => previous.filePath === candidate.filePath,
+		(previous) => isSameHybridLexicalLaneSnapshot(previous, candidate),
 	);
 	if (previousSameFile.length === 0) {
 		return 0;

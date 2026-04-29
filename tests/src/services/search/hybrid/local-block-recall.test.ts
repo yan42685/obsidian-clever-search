@@ -112,7 +112,7 @@ describe("hybrid lexical lane local block recall", () => {
 			]),
 		);
 
-		const { blockCandidates, snapshotTextByPath } =
+		const { blockCandidates, snapshotTextByRequestKey } =
 			await buildHybridLexicalLaneLocalBlockCandidates({
 				queryText: "cache restore",
 				files: [file],
@@ -122,9 +122,9 @@ describe("hybrid lexical lane local block recall", () => {
 		expect(mockReadIndexedTextSnapshots).toHaveBeenCalledWith([
 			{ path: file.filePath, generation: 42 },
 		]);
-		expect(snapshotTextByPath.get(file.filePath)).toBe(
-			"shadow cache restore evidence",
-		);
+		expect(
+			snapshotTextByRequestKey.get(`${file.filePath}\0${file.snapshotGeneration ?? ""}`),
+		).toBe("shadow cache restore evidence");
 		expect(blockCandidates).toHaveLength(1);
 		expect(blockCandidates[0].snapshotGeneration).toBe(42);
 		expect(blockCandidates[0].snapshotSource).toBe("shadow");

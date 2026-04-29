@@ -668,7 +668,7 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		snapshotStore.readIndexedTextSnapshots.mockResolvedValue(
 			new Map([
 				[
-					"notes/stale.md",
+					`notes/stale.md\0${180}`,
 					{
 						path: "notes/stale.md",
 						text: "shadow body line",

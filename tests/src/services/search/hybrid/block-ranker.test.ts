@@ -75,6 +75,42 @@ function createBlockCandidate(
 }
 
 describe("hybrid lexical lane block ranker", () => {
+	test("does not apply same-file overlap penalties across snapshot generations", () => {
+		const first = createBlockCandidate({
+			snapshotGeneration: 1,
+			snapshotSource: "indexed",
+			blockId: "generation-1",
+		});
+		const second = createBlockCandidate({
+			snapshotGeneration: 2,
+			snapshotSource: "indexed",
+			blockId: "generation-2",
+		});
+		const sameGenerationSecond = createBlockCandidate({
+			snapshotGeneration: 1,
+			snapshotSource: "indexed",
+			blockId: "same-generation-2",
+		});
+
+		const crossGeneration = rankHybridLexicalLaneBlockCandidates([
+			first,
+			second,
+		]);
+		const sameGeneration = rankHybridLexicalLaneBlockCandidates([
+			first,
+			sameGenerationSecond,
+		]);
+
+		expect(
+			crossGeneration.find((candidate) => candidate.blockId === "generation-2")
+				?.scoreBreakdown.overlapPenalty,
+		).toBe(0);
+		expect(
+			sameGeneration.find((candidate) => candidate.blockId === "same-generation-2")
+				?.scoreBreakdown.overlapPenalty,
+		).toBeGreaterThan(0);
+	});
+
 	test("keeps explicit path-root anchors ahead of same-content mixed-script twins", () => {
 		const englishCandidate = createBlockCandidate();
 		const zhCandidate = createBlockCandidate({

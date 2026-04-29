@@ -61,6 +61,24 @@ function createCandidate(
 }
 
 describe("coverage lexical v3 direct subitems renderer", () => {
+	test("escapes fallback html when no highlight ranges are available", () => {
+		const payload = renderV3DirectSubitemCandidate({
+			snapshotText: "plain <tag> & body",
+			candidate: createCandidate({
+				start: 0,
+				end: 5,
+				anchorOffset: 0,
+				atoms: [],
+				displayAtoms: [],
+				component: createComponent([]),
+			}),
+		});
+
+		expect(payload.highlightRanges).toEqual([]);
+		expect(payload.weakHighlightRanges).toEqual([]);
+		expect(payload.html).toBe("plain &lt;tag&gt; &amp; body");
+	});
+
 	test("falls back to atoms when display atoms are empty", () => {
 		const payload = renderV3DirectSubitemCandidate({
 			snapshotText: "abc rest of snippet",
@@ -192,4 +210,3 @@ describe("coverage lexical v3 direct subitems renderer", () => {
 		expect(payload.text.length).toBeLessThanOrEqual(40);
 	});
 });
-

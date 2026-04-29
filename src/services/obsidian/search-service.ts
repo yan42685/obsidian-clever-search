@@ -25,7 +25,10 @@ import {
 	type PreparedHybridRecall,
 } from "../search/hybrid/hybrid-engine";
 import { LexicalEngine } from "../search/lexical-engine";
-import { FileSnapshotStore } from "../search/shared/file-snapshot-store";
+import {
+	buildIndexedSnapshotRequestKey,
+	FileSnapshotStore,
+} from "../search/shared/file-snapshot-store";
 import { TruncateOption } from "../search/truncate-option";
 import { throttle } from "throttle-debounce";
 import { MyNotice } from "./transformed-api";
@@ -868,7 +871,12 @@ export class SearchService {
 				generation: fileItem.snapshotGeneration,
 			},
 		]);
-		const snapshot = snapshots.get(fileItem.path);
+		const snapshot = snapshots.get(
+			buildIndexedSnapshotRequestKey({
+				path: fileItem.path,
+				generation: fileItem.snapshotGeneration,
+			}),
+		);
 		if (!snapshot || snapshot.source === "live") {
 			this.applyHybridFileItemFreshness(
 				fileItem,

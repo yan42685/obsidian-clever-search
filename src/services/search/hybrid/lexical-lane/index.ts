@@ -45,7 +45,7 @@ export async function prepareHybridLexicalLaneSearch(params: {
 					queryText: params.queryText,
 					limit: params.fileShortlist ?? HYBRID_LEXICAL_LANE_FILE_SHORTLIST,
 			  });
-	const { blockCandidates, snapshotTextByPath } =
+	const { blockCandidates, snapshotTextByRequestKey } =
 		await buildHybridLexicalLaneLocalBlockCandidates({
 			queryText: params.queryText,
 			files,
@@ -54,7 +54,7 @@ export async function prepareHybridLexicalLaneSearch(params: {
 		});
 	return runHybridLexicalLaneCandidatePipeline({
 		blockCandidates,
-		snapshotTextByPath,
+		snapshotTextByRequestKey,
 		rerankTopK: params.rerankTopK,
 		displayTopK: params.displayTopK,
 		globalPoolMax: params.globalPoolMax,
@@ -63,7 +63,7 @@ export async function prepareHybridLexicalLaneSearch(params: {
 
 export function runHybridLexicalLaneCandidatePipeline(params: {
 	blockCandidates: readonly HybridLexicalLaneBlockCandidate[];
-	snapshotTextByPath: ReadonlyMap<string, string>;
+	snapshotTextByRequestKey: ReadonlyMap<string, string>;
 	rerankTopK?: number;
 	displayTopK?: number;
 	globalPoolMax?: number;
@@ -79,7 +79,7 @@ export function runHybridLexicalLaneCandidatePipeline(params: {
 	);
 	const displayCandidates = buildHybridLexicalLaneDisplayCandidates({
 		candidates: mergedBlocks,
-		snapshotTextByPath: params.snapshotTextByPath,
+		snapshotTextByRequestKey: params.snapshotTextByRequestKey,
 	});
 	return mergeHybridLexicalLaneDisplayCandidates(
 		displayCandidates.sort((left, right) => right.score - left.score),
@@ -90,7 +90,7 @@ export function runHybridLexicalLaneCandidatePipeline(params: {
 export function runHybridLexicalLaneFileItemPipeline(params: {
 	queryText: string;
 	blockCandidates: readonly HybridLexicalLaneBlockCandidate[];
-	snapshotTextByPath: ReadonlyMap<string, string>;
+	snapshotTextByRequestKey: ReadonlyMap<string, string>;
 	rerankTopK?: number;
 	displayTopK?: number;
 	globalPoolMax?: number;

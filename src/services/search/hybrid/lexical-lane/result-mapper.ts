@@ -8,14 +8,16 @@ import {
 	HYBRID_LEXICAL_LANE_MAX_DISPLAY_FILES,
 	HYBRID_LEXICAL_LANE_MAX_SUBITEMS_PER_FILE,
 } from "./config";
+import { buildHybridLexicalLaneSnapshotKey } from "./candidate-key";
 
 export function buildHybridLexicalLaneFileItems(
 	queryText: string,
 	candidates: readonly HybridLexicalLaneDisplayCandidate[],
 ): FileItem[] {
-	const byFile = new Map<
+	const bySnapshot = new Map<
 		string,
 		{
+			filePath: string;
 			aggregateScore: number;
 			bestScore: number;
 			subItems: FileSubItem[];
@@ -27,8 +29,8 @@ export function buildHybridLexicalLaneFileItems(
 	for (const candidate of candidates) {
 		if (
 			!shouldAcceptDisplayCandidateForFileQuota(
-				byFile,
-				candidate.filePath,
+				bySnapshot,
+				buildHybridLexicalLaneSnapshotKey(candidate),
 			)
 		) {
 			continue;
@@ -43,7 +45,9 @@ export function buildHybridLexicalLaneFileItems(
 		subItem.snippetText = candidate.snippetText;
 		subItem.highlightRanges = candidate.highlightRanges.map((range) => ({ ...range }));
 
-		const entry = byFile.get(candidate.filePath) ?? {
+		const snapshotKey = buildHybridLexicalLaneSnapshotKey(candidate);
+		const entry = bySnapshot.get(snapshotKey) ?? {
+			filePath: candidate.filePath,
 			aggregateScore: candidate.score,
 			bestScore: candidate.score,
 			subItems: [],
@@ -51,13 +55,13 @@ export function buildHybridLexicalLaneFileItems(
 			snapshotSource: candidate.snapshotSource,
 		};
 		entry.subItems.push(subItem);
-		if (!byFile.has(candidate.filePath)) {
-			byFile.set(candidate.filePath, entry);
+		if (!bySnapshot.has(snapshotKey)) {
+			bySnapshot.set(snapshotKey, entry);
 		}
 	}
 
-	return [...byFile.entries()]
-		.map(([filePath, entry]) => {
+	return [...bySnapshot.values()]
+		.map((entry) => {
 			entry.subItems.sort(
 				(left, right) => (right.score ?? 0) - (left.score ?? 0),
 			);
@@ -65,18 +69,18 @@ export function buildHybridLexicalLaneFileItems(
 			entry.aggregateScore = computeHybridLexicalLaneFileAggregateScore(
 				entry.subItems,
 			);
-			return [filePath, entry] as const;
+			return entry;
 		})
 		.sort((left, right) => {
-			if (right[1].aggregateScore !== left[1].aggregateScore) {
-				return right[1].aggregateScore - left[1].aggregateScore;
+			if (right.aggregateScore !== left.aggregateScore) {
+				return right.aggregateScore - left.aggregateScore;
 			}
-			return right[1].bestScore - left[1].bestScore;
+			return right.bestScore - left.bestScore;
 		})
-		.map(([filePath, entry]) => {
+		.map((entry) => {
 			const item = new FileItem(
 				EngineType.HYBRID,
-				filePath,
+				entry.filePath,
 				[queryText],
 				[],
 				entry.subItems,
@@ -93,19 +97,19 @@ export function buildHybridLexicalLaneFileItems(
 }
 
 function shouldAcceptDisplayCandidateForFileQuota(
-	byFile: ReadonlyMap<
+	bySnapshot: ReadonlyMap<
 		string,
 		{
 			subItems: readonly FileSubItem[];
 		}
 	>,
-	filePath: string,
+	snapshotKey: string,
 ): boolean {
-	const existing = byFile.get(filePath);
+	const existing = bySnapshot.get(snapshotKey);
 	if (existing) {
 		return existing.subItems.length < HYBRID_LEXICAL_LANE_MAX_SUBITEMS_PER_FILE;
 	}
-	return byFile.size < HYBRID_LEXICAL_LANE_MAX_DISPLAY_FILES;
+	return bySnapshot.size < HYBRID_LEXICAL_LANE_MAX_DISPLAY_FILES;
 }
 
 function computeHybridLexicalLaneFileAggregateScore(

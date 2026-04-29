@@ -2,6 +2,7 @@ import type {
 	HybridLexicalLaneDisplayCandidate,
 	HybridLexicalLaneRankedBlockCandidate,
 } from "./contracts";
+import { isSameHybridLexicalLaneSnapshot } from "./candidate-key";
 
 export function mergeHybridLexicalLaneRankedBlocks(
 	candidates: readonly HybridLexicalLaneRankedBlockCandidate[],
@@ -45,7 +46,7 @@ function shouldSuppressRankedBlockCandidate(
 	candidate: HybridLexicalLaneRankedBlockCandidate,
 	existing: HybridLexicalLaneRankedBlockCandidate,
 ): boolean {
-	if (candidate.filePath !== existing.filePath) {
+	if (!isSameHybridLexicalLaneSnapshot(candidate, existing)) {
 		return false;
 	}
 	const overlapRatio = computeBlockOverlapRatio(candidate, existing);
@@ -72,7 +73,7 @@ function shouldSuppressDisplayCandidate(
 	candidate: HybridLexicalLaneDisplayCandidate,
 	existing: HybridLexicalLaneDisplayCandidate,
 ): boolean {
-	if (candidate.filePath !== existing.filePath) {
+	if (!isSameHybridLexicalLaneSnapshot(candidate, existing)) {
 		return false;
 	}
 	const overlapRatio = computeDisplayBodyOverlapRatio(candidate, existing);

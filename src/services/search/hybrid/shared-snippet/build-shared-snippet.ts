@@ -18,13 +18,16 @@ export function buildHybridSharedSnippet(params: {
 	const { snapshotText, candidate } = params;
 	if (candidate.bridgePreviewText) {
 		const previewLength = candidate.bridgePreviewText.length;
+		const bodyHighlightRanges =
+			candidate.bridgePreviewRanges?.map((range) => ({ ...range })) ?? [];
 		return {
 			snippetText: candidate.bridgePreviewText,
-			snippetHtml: candidate.bridgePreviewText,
-			highlightRanges:
-				candidate.bridgePreviewRanges?.map((range) => ({ ...range })) ?? [],
-			bodyHighlightRanges:
-				candidate.bridgePreviewRanges?.map((range) => ({ ...range })) ?? [],
+			snippetHtml: renderHighlightedBody(
+				candidate.bridgePreviewText,
+				bodyHighlightRanges,
+			),
+			highlightRanges: bodyHighlightRanges.map((range) => ({ ...range })),
+			bodyHighlightRanges,
 			coreStart: 0,
 			coreEnd: previewLength,
 			displayStart: 0,

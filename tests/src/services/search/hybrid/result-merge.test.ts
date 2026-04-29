@@ -60,4 +60,37 @@ describe("hybrid lexical lane result merge", () => {
 		expect(merged).toHaveLength(1);
 		expect(merged[0].score).toBe(120);
 	});
+
+	test("does not suppress overlapping same-path candidates from different snapshot generations", () => {
+		const first = createDisplayCandidate({
+			snapshotGeneration: 1,
+			snapshotSource: "indexed",
+			score: 120,
+			bodyHighlightRanges: [{ start: 0, end: 6 }],
+			highlightRanges: [{ start: 14, end: 20 }],
+			anchorOffset: 4,
+		});
+		const second = createDisplayCandidate({
+			snapshotGeneration: 2,
+			snapshotSource: "indexed",
+			score: 100,
+			bodyStart: 0,
+			bodyEnd: 24,
+			displayStart: 0,
+			displayEnd: 24,
+			bodyHighlightRanges: [{ start: 0, end: 6 }],
+			highlightRanges: [{ start: 14, end: 20 }],
+			anchorOffset: 20,
+		});
+
+		const merged = mergeHybridLexicalLaneDisplayCandidates(
+			[first, second],
+			8,
+		);
+
+		expect(merged.map((candidate) => candidate.snapshotGeneration)).toEqual([
+			1,
+			2,
+		]);
+	});
 });
