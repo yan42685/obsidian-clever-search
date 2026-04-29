@@ -1330,6 +1330,68 @@ describe("coverage lexical v3 file search engine", () => {
 		});
 	});
 
+	test("materializes restored document views from generation-keyed snapshot text", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		const request = { path: "notes/restored.md", generation: 42 };
+		const snapshotKey = buildIndexedSnapshotRequestKey(request);
+		(engine as any).documentViewsByPath.set(request.path, {
+			docRef: 7,
+			path: request.path,
+			generation: request.generation,
+			basename: "restored",
+			folder: "notes",
+		});
+		const readIndexedTextSnapshots = jest.fn(async () =>
+			new Map([
+				[
+					snapshotKey,
+					{
+						path: request.path,
+						text: "restored snapshot body",
+						generation: request.generation,
+						source: "indexed" as const,
+					},
+				],
+			]),
+		);
+		const readIndexedTexts = jest.fn(async () => {
+			throw new Error("materialize should use request-keyed snapshots");
+		});
+		const readIndexedMetadata = jest.fn(async () =>
+			new Map([
+				[
+					snapshotKey,
+					{
+						aliasesText: "snapshot alias",
+						tagsText: "#snapshot",
+						headingsText: "Snapshot heading",
+					},
+				],
+			]),
+		);
+		(engine as any).getFileSnapshotStore = () => ({
+			readIndexedTextSnapshots,
+			readIndexedTexts,
+			readIndexedMetadata,
+		});
+
+		const documents = await (engine as any).materializeIndexedDocuments();
+
+		expect(readIndexedTextSnapshots).toHaveBeenCalledWith([request]);
+		expect(readIndexedTexts).not.toHaveBeenCalled();
+		expect(documents).toEqual([
+			expect.objectContaining({
+				docRef: 7,
+				path: request.path,
+				generation: request.generation,
+				content: "restored snapshot body",
+				aliases: "snapshot alias",
+				tags: "#snapshot",
+				headings: "Snapshot heading",
+			}),
+		]);
+	});
+
 	test("clears all persisted V3 bootstrap and maintenance stores on reset", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		const tableNames = [

@@ -1635,12 +1635,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		const snapshotTexts =
 			viewsNeedingSnapshot.length === 0
 				? new Map<string, string>()
-				: await this.getFileSnapshotStore().readIndexedTexts(
-						viewsNeedingSnapshot.map((view) => ({
-							path: view.path,
-							generation: view.generation,
-						})),
-					);
+				: await this.readIndexedSnapshotTextsForViews(viewsNeedingSnapshot);
 		const snapshotMetadata =
 			viewsNeedingMetadata.length === 0
 				? new Map<string, { aliasesText?: string; tagsText?: string; headingsText?: string }>()
@@ -1702,6 +1697,31 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			return undefined;
 		}
 		return pendingContent;
+	}
+
+	private async readIndexedSnapshotTextsForViews(
+		views: readonly IndexedDocumentView[],
+	): Promise<Map<string, string>> {
+		const requests = views.map((view) => ({
+			path: view.path,
+			generation: view.generation,
+		}));
+		const snapshotStore = this.getFileSnapshotStore();
+		if (typeof snapshotStore.readIndexedTextSnapshots === "function") {
+			const snapshots = await snapshotStore.readIndexedTextSnapshots(requests);
+			return new Map(
+				[...snapshots.entries()].map(([key, snapshot]) => [key, snapshot.text]),
+			);
+		}
+		const textsByPath = await snapshotStore.readIndexedTexts(requests);
+		return new Map(
+			requests.flatMap((request) => {
+				const text = textsByPath.get(request.path);
+				return text === undefined
+					? []
+					: [[buildIndexedSnapshotRequestKey(request), text] as const];
+			}),
+		);
 	}
 
 	private getPendingMetadataForView(
