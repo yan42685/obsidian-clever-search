@@ -185,6 +185,7 @@ type LexicalBootstrapPlan = {
 
 export type HybridDeferredEmbeddingSummary = {
   deferredCount: number;
+  readyCount: number;
   nextEligibleAt: number | null;
   totalFiles: number;
 };
@@ -307,15 +308,15 @@ class HybridIndexProgressNotice {
 
   private buildMessage(progress: HybridIndexProgress): string {
     if (progress.stage === "repair") {
-      return `Hybrid self-healing: repaired ${progress.repairedPaths} file state(s). Preparing reindex... ${this.buildTokenLabel(progress.sessionTokens)}`;
+      return `Hybrid self-healing: repaired ${progress.repairedPaths} stored file state(s). Preparing reindex... ${this.buildTokenLabel(progress.sessionTokens)}`;
     }
     if (progress.stage === "done") {
       if (progress.totalFiles === 0) {
-        return `Hybrid self-healing finished: repaired ${progress.repairedPaths} file state(s), failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
+        return `Hybrid self-healing finished: repaired ${progress.repairedPaths} stored file state(s), semantic failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
       }
-      return `Hybrid indexing finished: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} (${progress.processedFiles}/${progress.totalFiles} files), repaired ${progress.repairedPaths}, failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
+      return `Hybrid indexing finished: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} processed (${progress.processedFiles}/${progress.totalFiles} attempted), stored repairs ${progress.repairedPaths}, semantic failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
     }
-    return `Hybrid indexing: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} (${progress.processedFiles}/${progress.totalFiles} files), repaired ${progress.repairedPaths}, failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
+    return `Hybrid indexing: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} processed (${progress.processedFiles}/${progress.totalFiles} attempted), stored repairs ${progress.repairedPaths}, semantic failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
   }
 
   private buildTokenLabel(tokens: number): string {
@@ -536,6 +537,7 @@ export class DataManager {
     if (!this.hybridEngine.isEnabled()) {
       return {
         deferredCount: 0,
+        readyCount: 0,
         nextEligibleAt: null,
         totalFiles,
       };
@@ -4132,14 +4134,6 @@ export class DataManager {
     if (this.hybridEngine.isEnabled()) {
       await this.hybridEngine.persistIndicesForBatch();
     }
-    if (isDevEnvironment) {
-      void this.noticeDevStorageStats().catch((error) => {
-        logger.warn(
-          "[clever-search] dev storage/runtime diagnostics failed:",
-          error,
-        );
-      });
-    }
   }
 
   private getHybridIndexConcurrency(): number {
@@ -4288,7 +4282,7 @@ export class DataManager {
     docsToAdd: TFile[],
     repairedPaths: number,
   ): HybridIndexProgressNotice | null {
-    if (docsToAdd.length === 0 && repairedPaths === 0) {
+    if (!isDevEnvironment || (docsToAdd.length === 0 && repairedPaths === 0)) {
       return null;
     }
     const progressNotice = new HybridIndexProgressNotice();

@@ -1083,6 +1083,18 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
           }
         }),
       },
+      docRegistry: {
+        put: jest.fn(async (row: Record<string, any> & { docRef: number }) => {
+          const index = docRegistryRows.findIndex(
+            (item) => item.docRef === row.docRef,
+          );
+          if (index >= 0) {
+            docRegistryRows[index] = { ...row };
+            return;
+          }
+          docRegistryRows.push({ ...row });
+        }),
+      },
     },
     ...overrides,
   };
@@ -2348,7 +2360,7 @@ describe("DataManager integration", () => {
       expect((manager as any).hybridRepairQueue.get(bm25File.path)).toMatchObject({
         path: bm25File.path,
         mode: "incremental",
-        reason: "startup-recover-persisted-state",
+        reason: "startup-probe-persisted-blocking-failure",
         sourceGeneration: bm25File.stat.mtime,
       });
       expect((manager as any).hybridRepairQueue.has(failedFile.path)).toBe(false);
@@ -2449,6 +2461,7 @@ describe("DataManager integration", () => {
     expect((manager as any).hybridRepairQueue.size).toBe(0);
     expect(await manager.getHybridDeferredEmbeddingSummary()).toEqual({
       deferredCount: 0,
+      readyCount: 0,
       nextEligibleAt: null,
       totalFiles: 2,
     });
@@ -2555,7 +2568,7 @@ describe("DataManager integration", () => {
       jest.useRealTimers();
     }
   });
-  test("blocking hybrid recovery does not spin retry timers after startup restore", async () => {
+  test("blocking hybrid recovery is probed once without spinning retry timers after startup restore", async () => {
     jest.useFakeTimers();
     jest.setSystemTime(100_000);
 
@@ -2608,7 +2621,7 @@ describe("DataManager integration", () => {
       expect((manager as any).hybridRepairQueue.get(file.path)).toMatchObject({
         path: file.path,
         mode: "incremental",
-        reason: "startup-recover-persisted-state",
+        reason: "startup-probe-persisted-blocking-failure",
         sourceGeneration: file.stat.mtime,
       });
       expect(scheduleSpy).toHaveBeenCalledTimes(1);

@@ -1402,6 +1402,8 @@ class HybridSearchModal extends Modal {
 			return;
 		}
 		const url = buildDashScopeApiUrl(rawDomain, "embedding");
+		const controller = new AbortController();
+		const timeoutId = window.setTimeout(() => controller.abort(), 10_000);
 		try {
 			const response = await fetch(url, {
 				method: "POST",
@@ -1415,6 +1417,7 @@ class HybridSearchModal extends Modal {
 					dimensions: 1024,
 					encoding_format: "float",
 				}),
+				signal: controller.signal,
 			});
 			if (!response.ok) {
 				const body = await response.text();
@@ -1437,16 +1440,48 @@ class HybridSearchModal extends Modal {
 				);
 				return;
 			}
+			const body = await response.text();
+			this.validateHybridConnectivityEmbeddingResponse(body);
 			new MyNotice(t("hybridModal.connectivityOk"), 4000);
 		} catch (error) {
 			const issue = buildHybridSearchIssue(error);
 			const message =
-				issue.message ||
-				(error instanceof Error ? error.message : String(error));
+				error instanceof DOMException && error.name === "AbortError"
+					? "Embedding API connectivity check timed out after 10 seconds"
+					: issue.message ||
+						(error instanceof Error ? error.message : String(error));
 			new MyNotice(
 				`${t("hybridModal.connectivityFailed")}: ${message}`.slice(0, 240),
 				7000,
 			);
+		} finally {
+			window.clearTimeout(timeoutId);
+		}
+	}
+
+	private validateHybridConnectivityEmbeddingResponse(body: string): void {
+		const trimmed = body.trim();
+		if (!trimmed) {
+			throw new Error("Embedding API returned an empty response");
+		}
+
+		const parsed = JSON.parse(trimmed) as {
+			data?: Array<{ embedding?: unknown }>;
+		};
+		if (!Array.isArray(parsed.data) || parsed.data.length === 0) {
+			throw new Error("Embedding API response missing embedding result");
+		}
+
+		const embedding = parsed.data.find((item) => Array.isArray(item?.embedding))
+			?.embedding;
+		if (!Array.isArray(embedding)) {
+			throw new Error("Embedding API response missing embedding vector");
+		}
+		if (embedding.length === 0) {
+			throw new Error("Embedding API response returned an empty vector");
+		}
+		if (!embedding.every((value) => typeof value === "number" && Number.isFinite(value))) {
+			throw new Error("Embedding API response contains non-finite vector values");
 		}
 	}
 
@@ -1525,11 +1560,24 @@ class HybridSearchModal extends Modal {
 			return;
 		}
 
-		if (summary.nextEligibleAt !== null) {
+		if (summary.readyCount > 0) {
 			this.appendStatusLine(
 				this.deferredEmbeddingStatusEl,
-				t("hybridModal.deferredEmbeddingStatus.nextResume"),
-				this.formatRelativeTime(summary.nextEligibleAt),
+				t("hybridModal.deferredEmbeddingStatus.ready"),
+				String(summary.readyCount),
+			);
+		}
+
+		if (summary.nextEligibleAt !== null) {
+			const isReady = summary.nextEligibleAt <= Date.now();
+			this.appendStatusLine(
+				this.deferredEmbeddingStatusEl,
+				isReady
+					? t("hybridModal.deferredEmbeddingStatus.resumeState")
+					: t("hybridModal.deferredEmbeddingStatus.nextResume"),
+				isReady
+					? t("hybridModal.deferredEmbeddingStatus.readyState")
+					: this.formatRelativeTime(summary.nextEligibleAt),
 			);
 		}
 	}

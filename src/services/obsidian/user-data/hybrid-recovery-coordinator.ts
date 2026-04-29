@@ -43,11 +43,13 @@ export class HybridRecoveryCoordinator {
 
   getDeferredSummary(totalFiles: number): {
     deferredCount: number;
+    readyCount: number;
     nextEligibleAt: number | null;
     totalFiles: number;
   } {
     const now = Date.now();
     let deferredCount = 0;
+    let readyCount = 0;
     let nextEligibleAt: number | null = null;
 
     for (const entry of this.recoveryManager.listDeferredEntries()) {
@@ -56,6 +58,9 @@ export class HybridRecoveryCoordinator {
       }
       deferredCount += 1;
       const eligibleAt = entry.nextRetryAt ?? now;
+      if (eligibleAt <= now) {
+        readyCount += 1;
+      }
       if (nextEligibleAt === null || eligibleAt < nextEligibleAt) {
         nextEligibleAt = eligibleAt;
       }
@@ -63,6 +68,7 @@ export class HybridRecoveryCoordinator {
 
     return {
       deferredCount,
+      readyCount,
       nextEligibleAt,
       totalFiles,
     };
@@ -211,13 +217,24 @@ export class HybridRecoveryCoordinator {
       }
 
       if (isAutoRetryHybridFailureKind(entry.errorKind)) {
+        if (entry.nextRetryAt !== null && entry.nextRetryAt > now) {
+          continue;
+        }
+        this.options.enqueueRepair({
+          path: entry.path,
+          mode: entry.mode,
+          reason: "startup-recover-persisted-retryable-failure",
+          eligibleAt: now,
+          sourceGeneration: entry.targetGeneration,
+        });
+        await this.markRetryQueued(entry.path);
         continue;
       }
 
       this.options.enqueueRepair({
         path: entry.path,
         mode: entry.mode,
-        reason: "startup-recover-persisted-state",
+        reason: "startup-probe-persisted-blocking-failure",
         eligibleAt: now,
         sourceGeneration: entry.targetGeneration,
       });

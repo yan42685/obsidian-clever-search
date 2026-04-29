@@ -29,6 +29,38 @@ describe("HybridEmbeddingRecoveryManager", () => {
     expect(summary.blockingKinds).toEqual([{ kind: "auth_401", count: 1 }]);
   });
 
+  test("reclassifies repeated blocking failures by the new failure kind", () => {
+    const manager = new HybridEmbeddingRecoveryManager(() => {});
+
+    manager.recordFailure(
+      "docs/blocking.md",
+      100,
+      "incremental",
+      new Error("Embedding API Error 401 Unauthorized"),
+      "auth failed",
+      60_000,
+    );
+    manager.recordFailure(
+      "docs/blocking.md",
+      100,
+      "incremental",
+      new Error("quota exhausted"),
+      "quota exhausted",
+      60_000,
+    );
+
+    const summary = manager.getSummary(1);
+    expect(summary.retryableCount).toBe(0);
+    expect(summary.blockingKinds).toEqual([
+      { kind: "quota_exhausted", count: 1 },
+    ]);
+    expect(manager.getEntry("docs/blocking.md")).toMatchObject({
+      errorKind: "quota_exhausted",
+      attemptCount: 2,
+      nextRetryAt: null,
+    });
+  });
+
   test("keeps transient provider failures on the timed retry path", () => {
     const manager = new HybridEmbeddingRecoveryManager(() => {});
 
@@ -48,6 +80,25 @@ describe("HybridEmbeddingRecoveryManager", () => {
     expect(summary.retryableKinds).toEqual([
       { kind: "provider_429", count: 1 },
     ]);
+  });
+
+  test("treats unknown failures as retryable instead of permanently blocking startup recovery", () => {
+    const manager = new HybridEmbeddingRecoveryManager(() => {});
+
+    manager.recordFailure(
+      "docs/unknown.md",
+      100,
+      "incremental",
+      new Error("unexpected embedding failure"),
+      "unexpected embedding failure",
+      60_000,
+    );
+
+    expect(isAutoRetryHybridFailureKind("unknown")).toBe(true);
+    const summary = manager.getSummary(1);
+    expect(summary.retryableCount).toBe(1);
+    expect(summary.retryableKinds).toEqual([{ kind: "unknown", count: 1 }]);
+    expect(summary.blockingKinds).toEqual([]);
   });
 
   test("tracks deferred embedding separately from failure summaries", () => {
