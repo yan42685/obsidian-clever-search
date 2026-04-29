@@ -58,7 +58,7 @@ function cosineScore(query: QuantizedVector, candidate: QuantizedVector): number
 	for (let index = 0; index < query.vector.length; index++) {
 		dot += query.vector[index] * candidate.vector[index];
 	}
-	return dot / (query.scale * candidate.scale * 127 * 127);
+	return (dot * query.scale * candidate.scale) / (127 * 127);
 }
 
 function buildDataset() {

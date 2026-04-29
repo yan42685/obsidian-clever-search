@@ -19,6 +19,15 @@ type HnswRuntimeMemoryEstimate = {
 	totalBytes: number;
 };
 
+export type HnswRuntimeStats = {
+	nodeCount: number;
+	deletedNodeCount: number;
+	liveNodeCount: number;
+	vectorCount: number;
+	precision: VectorPrecision;
+	maxLevel: number;
+};
+
 function int8CosineSim(
 	a: Int8Array,
 	scaleA: number,
@@ -27,7 +36,7 @@ function int8CosineSim(
 ): number {
 	let dot = 0;
 	for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
-	return dot / (scaleA * scaleB * 127 * 127);
+	return (dot * scaleA * scaleB) / (127 * 127);
 }
 
 function int8Dist(
@@ -229,6 +238,21 @@ export class HnswIndex {
 
 	hasDeletedNodes(): boolean {
 		return this.graph.deletedSet.size > 0;
+	}
+
+	getRuntimeStats(): HnswRuntimeStats {
+		const vectorCount = this.graph.precision === 'int8'
+			? this.vectorsInt8.size
+			: this.vectorsFloat16.size;
+
+		return {
+			nodeCount: this.graph.nodes.size,
+			deletedNodeCount: this.graph.deletedSet.size,
+			liveNodeCount: Math.max(0, this.graph.nodes.size - this.graph.deletedSet.size),
+			vectorCount,
+			precision: this.graph.precision,
+			maxLevel: this.graph.maxLevel,
+		};
 	}
 
 	estimateRuntimeMemoryBytes(): HnswRuntimeMemoryEstimate {

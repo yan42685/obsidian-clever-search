@@ -79,8 +79,8 @@ const INDEX_CHUNK_BATCH_SIZE = 24;
 const HNSW_HYDRATE_SHARD_BATCH_SIZE = 8;
 const HYBRID_DIRTY_ARTIFACTS = ["hnsw"] as const;
 const HYBRID_RERANK_LEXICAL_CANDIDATE_LIMIT = 10;
-const HYBRID_RERANK_DENSE_CANDIDATE_LIMIT = 30;
-const HYBRID_DENSE_FETCH_MULTIPLIER = 3;
+const HYBRID_RERANK_DENSE_CANDIDATE_LIMIT = 24;
+const HYBRID_DENSE_FETCH_MULTIPLIER = 2;
 const HYBRID_DENSE_DEDUPE_OVERLAP_RATIO = 0.7;
 
 type HybridArtifactName = (typeof HYBRID_DIRTY_ARTIFACTS)[number];
@@ -177,6 +177,21 @@ function throwIfHybridQueryAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw createHybridAbortError();
   }
+}
+
+function formatMemoryBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+  const mib = bytes / (1024 * 1024);
+  if (mib >= 0.1) {
+    return `${mib.toFixed(1)} MiB`;
+  }
+  const kib = bytes / 1024;
+  if (kib >= 0.1) {
+    return `${kib.toFixed(1)} KiB`;
+  }
+  return `${Math.round(bytes)} B`;
 }
 
 function markHybridItemsLexicalOnly(items: FileItem[]): FileItem[] {
@@ -1868,6 +1883,7 @@ export class HybridEngine {
     if (forceRebuild) {
       await this.rebuildHnswFromStore();
       this.updateSearchCapabilityFromDenseState();
+      this.logHnswRuntimeMemory("startup rebuild");
       return;
     }
 
@@ -1877,6 +1893,15 @@ export class HybridEngine {
       await this.hydrateHnswVectors();
     }
     this.updateSearchCapabilityFromDenseState();
+    this.logHnswRuntimeMemory(small ? "startup hydrate" : "startup empty");
+  }
+
+  private logHnswRuntimeMemory(reason: string): void {
+    const estimate = this.getRuntimeMemoryEstimate();
+    const stats = this.hnswSmall.getRuntimeStats();
+    logger.debug(
+      `hybrid HNSW runtime memory after ${reason}: total=${formatMemoryBytes(estimate.totalBytes)} (${estimate.totalBytes} bytes), vectors=${formatMemoryBytes(estimate.vectorsBytes)} (${estimate.vectorsBytes} bytes), graph=${formatMemoryBytes(estimate.graphBytes)} (${estimate.graphBytes} bytes), nodes=${stats.nodeCount}, liveNodes=${stats.liveNodeCount}, deletedNodes=${stats.deletedNodeCount}, hydratedVectors=${stats.vectorCount}, precision=${stats.precision}, maxLevel=${stats.maxLevel}, searchable=${this._canSearch}`,
+    );
   }
 
   private async hydrateHnswVectors(): Promise<void> {

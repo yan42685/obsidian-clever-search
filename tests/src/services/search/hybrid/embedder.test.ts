@@ -45,6 +45,18 @@ jest.mock("src/services/search/hybrid/hybrid-profiler", () => ({
 	recordHybridProfileMetric: jest.fn(),
 }));
 
+function createJsonFetchResponse(body: unknown) {
+	return {
+		ok: true,
+		status: 200,
+		headers: {
+			get: (name: string) =>
+				name.toLowerCase() === "content-type" ? "application/json" : null,
+		},
+		text: async () => JSON.stringify(body),
+	};
+}
+
 describe("Embedder response validation", () => {
 	beforeEach(() => {
 		jest.clearAllMocks();
@@ -64,9 +76,8 @@ describe("Embedder response validation", () => {
 
 	test("rejects provider responses with a missing embedding item", async () => {
 		const { Embedder } = require("src/services/search/hybrid/embedder");
-		(global as any).fetch = jest.fn().mockResolvedValue({
-			ok: true,
-			json: async () => ({
+		(global as any).fetch = jest.fn().mockResolvedValue(
+			createJsonFetchResponse({
 				data: [
 					{
 						index: 0,
@@ -74,7 +85,7 @@ describe("Embedder response validation", () => {
 					},
 				],
 			}),
-		});
+		);
 
 		const embedder = new Embedder();
 
@@ -86,9 +97,8 @@ describe("Embedder response validation", () => {
 	test("rejects provider responses with the wrong vector dimension", async () => {
 		const { Embedder } = require("src/services/search/hybrid/embedder");
 		const { EMBED_DIM } = require("src/services/search/hybrid/hybrid-types");
-		(global as any).fetch = jest.fn().mockResolvedValue({
-			ok: true,
-			json: async () => ({
+		(global as any).fetch = jest.fn().mockResolvedValue(
+			createJsonFetchResponse({
 				data: [
 					{
 						index: 0,
@@ -96,13 +106,35 @@ describe("Embedder response validation", () => {
 					},
 				],
 			}),
-		});
+		);
 
 		const embedder = new Embedder();
 
 		await expect(
 			(embedder as any).fetchEmbeddings(["alpha"]),
 		).rejects.toThrow("dimension mismatch");
+	});
+
+	test("reports a clear error when a successful response is HTML", async () => {
+		const { Embedder } = require("src/services/search/hybrid/embedder");
+		(global as any).fetch = jest.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			headers: {
+				get: (name: string) =>
+					name.toLowerCase() === "content-type" ? "text/html" : null,
+			},
+			text: async () => "<!DOCTYPE html><html><title>Login</title></html>",
+		});
+
+		const embedder = new Embedder();
+
+		await expect(
+			(embedder as any).fetchEmbeddings(["alpha"]),
+		).rejects.toThrow("returned non-JSON response");
+		await expect(
+			(embedder as any).fetchEmbeddings(["alpha"]),
+		).rejects.toThrow("contentType=text/html");
 	});
 });
 

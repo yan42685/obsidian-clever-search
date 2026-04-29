@@ -271,7 +271,13 @@ export class Embedder {
 						throw new Error(`Qwen embedding API error ${resp.status}: ${body}`);
 					}
 
-					const json = await resp.json() as ProviderEmbeddingResponse;
+					const body = await resp.text();
+					const json = parseEmbeddingJsonResponse({
+						body,
+						contentType: resp.headers.get('content-type'),
+						status: resp.status,
+						url: this.apiDomain,
+					});
 					const tokensUsed = json.usage?.total_tokens ?? json.usage?.input_tokens ?? 0;
 					return {
 						embeddings: this.validateEmbeddingResponse(texts, json),
@@ -701,6 +707,29 @@ export function buildDashScopeApiUrl(
 			? '/compatible-mode/v1/embeddings'
 			: '/compatible-api/v1/reranks';
 	return `https://${host}${path}`;
+}
+
+function parseEmbeddingJsonResponse(params: Readonly<{
+	body: string;
+	contentType: string | null;
+	status: number;
+	url: string;
+}>): ProviderEmbeddingResponse {
+	const { body, contentType, status, url } = params;
+	const trimmed = body.trim();
+	if (!trimmed) {
+		throw new Error(
+			`Qwen embedding API returned an empty response: status=${status}, url=${url}, contentType=${contentType ?? '<missing>'}`,
+		);
+	}
+	try {
+		return JSON.parse(trimmed) as ProviderEmbeddingResponse;
+	} catch (error) {
+		const preview = trimmed.slice(0, 240).replace(/\s+/g, ' ');
+		throw new Error(
+			`Qwen embedding API returned non-JSON response: status=${status}, url=${url}, contentType=${contentType ?? '<missing>'}, bodyPreview=${preview}`,
+		);
+	}
 }
 
 export function estimateTextTokenUsage(text: string): number {

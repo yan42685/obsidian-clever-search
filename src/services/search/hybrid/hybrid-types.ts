@@ -106,5 +106,5 @@ export const CHUNK_OVERLAP_MAX_RATIO = 0.18;
 export const BM25_K1 = 1.5;
 export const BM25_B = 0.75;
 export const HNSW_M = 16;
-export const HNSW_EF_CONSTRUCTION = 100;
-export const HNSW_EF = 40;
+export const HNSW_EF_CONSTRUCTION = 120;
+export const HNSW_EF = 64;
