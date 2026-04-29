@@ -1252,12 +1252,30 @@ export class HybridEngine {
           persistIndices: false,
           },
         );
+        this._canSearch = false;
+        this.lastIndexingFallbackNoticeKey = null;
+        if (strict) {
+          const failedIndexedAt = Date.now();
+          await this.putHybridIndexedFileRef({
+            docRef: docRegistryEntry.docRef,
+            state: "failed",
+            generation,
+            chunkCount: 0,
+            vectorPrecision: null,
+            indexedAt: failedIndexedAt,
+            lastIncrementalEmbedAt:
+              previousIndexedFileRef?.lastIncrementalEmbedAt,
+          });
+          logger.error(
+            `hybrid strict indexing embedding failed for ${filePath}`,
+            error,
+          );
+          throw error;
+        }
         logger.error(
           `hybrid indexing embedding failed; falling back to lexical-only mode for ${filePath}`,
           error,
         );
-        this._canSearch = false;
-        this.lastIndexingFallbackNoticeKey = null;
         try {
           await this.indexLexicalOnly(
             filePath,

@@ -3750,10 +3750,14 @@ export class DataManager {
       if (
         !indexedRef ||
         indexedRef.generation === undefined ||
-        indexedRef.generation !== file.stat.mtime
+        indexedRef.generation !== file.stat.mtime ||
+        indexedRef.state !== "ready"
       ) {
         logger.warn(
           `hybrid indexed file ref verification failed immediately after index for ${file.path}: expectedGeneration=${file.stat.mtime}, actualGeneration=${indexedRef?.generation ?? "missing"}, state=${indexedRef?.state ?? "missing"}`,
+        );
+        throw new Error(
+          `Hybrid semantic index did not reach ready state for ${file.path}`,
         );
       } else {
         this.recentlyVerifiedHybridIndexedRefs.set(file.path, {
