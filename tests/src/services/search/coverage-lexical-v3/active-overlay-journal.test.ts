@@ -2,6 +2,7 @@ import type { IndexedDocument } from "src/globals/search-types";
 import {
 	buildActiveOverlayJournalEntryId,
 	createDexieActiveOverlayJournalStore,
+	materializeOverlayDocuments,
 	MemoryActiveOverlayJournalStore,
 	type ActiveOverlayJournalEntry,
 } from "src/services/search/coverage-lexical-v3/active-overlay-journal";
@@ -30,14 +31,14 @@ class FakeOverlayTable<Row extends Record<string, unknown>, Key extends string> 
 	}
 }
 
-function doc(path: string, content: string, docRef: number): IndexedDocument {
+function doc(path: string, content: string, docRef: number, generation = 1): IndexedDocument {
 	return {
 		path,
 		basename: path.replace(/\.md$/, ""),
 		folder: "notes",
 		content,
 		docRef,
-		generation: 1,
+		generation,
 	};
 }
 
@@ -71,6 +72,28 @@ describe("coverage lexical v3 active overlay journal", () => {
 				(row) => row.document?.path,
 			),
 		).toEqual(["doc-1.md", "updated.md"]);
+	});
+
+	test("materialized overlay keeps the latest document version for a docRef", () => {
+		const first = entry(1, "doc.md");
+		const second: ActiveOverlayJournalEntry = {
+			...entry(2, "doc.md"),
+			document: doc("doc.md", "beta", 1, 2),
+			previousVersion: {
+				shardId: "active-1:overlay",
+				shardGeneration: 1,
+				docRef: 1,
+				docGeneration: 1,
+			},
+		};
+
+		expect(materializeOverlayDocuments([first, second])).toEqual([
+			expect.objectContaining({
+				content: "beta",
+				docRef: 1,
+				generation: 2,
+			}),
+		]);
 	});
 
 	test("dexie store removes selected entries and clears by active shard", async () => {

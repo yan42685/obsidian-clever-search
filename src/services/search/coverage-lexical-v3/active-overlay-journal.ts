@@ -332,27 +332,29 @@ export function materializeOverlayDocuments(
 ): readonly IndexedDocument[] {
 	const documentByKey = new Map<string, IndexedDocument>();
 	for (const entry of sortEntries(entries)) {
-		const key = buildOverlayDocumentKey(entry);
+		const previousKey = buildOverlayPreviousVersionLiveKey(entry);
+		if (previousKey != null) {
+			documentByKey.delete(previousKey);
+		}
 		if (entry.operation === "delete") {
-			documentByKey.delete(key);
 			continue;
 		}
 		if (entry.document != null) {
-			documentByKey.set(key, entry.document);
+			documentByKey.set(buildOverlayDocumentLiveKey(entry.document), entry.document);
 		}
 	}
 	return [...documentByKey.values()];
 }
 
-function buildOverlayDocumentKey(entry: ActiveOverlayJournalEntry): string {
-	const document = entry.document;
-	if (document != null) {
-		return `${document.docRef ?? document.path}@${document.generation ?? 0}`;
-	}
+function buildOverlayDocumentLiveKey(document: IndexedDocument): string {
+	return typeof document.docRef === "number" && document.docRef > 0
+		? `docref:${document.docRef}`
+		: `path:${document.path}`;
+}
+
+function buildOverlayPreviousVersionLiveKey(entry: ActiveOverlayJournalEntry): string | null {
 	const previousVersion = entry.previousVersion;
-	return previousVersion == null
-		? entry.id
-		: `${previousVersion.docRef}@${previousVersion.docGeneration}`;
+	return previousVersion == null ? null : `docref:${previousVersion.docRef}`;
 }
 
 function isEntryForActiveShard(
