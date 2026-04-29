@@ -184,6 +184,8 @@ export type PackingProfileQueryContext = Readonly<{
 		number,
 		readonly BodyOccurrenceMatchContext[]
 	>;
+	queryHanBigramSpecs: readonly QueryHanBigramSpec[];
+	queryHanBigramTexts: readonly string[];
 }>;
 
 export type CandidateHydratedHanBodyEvidenceBlock = Readonly<{
@@ -419,9 +421,14 @@ export function buildPackingProfile(
 	const routeSourceMaskByShardLocalFamilySlot =
 		docEvidence.routeSourceMaskByShardLocalFamilySlot;
 	const excludedSurfaceGroupIndices = options?.excludeSurfaceGroupIndices ?? null;
+	const allowBodyOpaqueRescueSurfaceGroupIndices =
+		options == null || !("allowBodyOpaqueRescueSurfaceGroupIndices" in options)
+			? undefined
+			: options.allowBodyOpaqueRescueSurfaceGroupIndices;
 	const queryContext =
 		options?.queryContext ??
 		preparePackingProfileQueryContext(
+			queryAnalysis,
 			unitFamilyMatches,
 			excludedSurfaceGroupIndices,
 		);
@@ -599,18 +606,29 @@ export function buildPackingProfile(
 		queryAnalysis,
 		bodyEvaluationBySurfaceGroupIndex:
 			hanRescueArtifacts.bodyEvaluationBySurfaceGroupIndex,
+		allowSurfaceGroupIndices: allowBodyOpaqueRescueSurfaceGroupIndices,
 	});
 	const hanRescueSummary = hanRescueArtifacts.summary;
-	if (shouldLogCoverageLexicalV3Debug(queryAnalysis.queryText)) {
+	if (
+		shouldLogCoverageLexicalV3Debug(queryAnalysis.queryText) &&
+		shouldLogHanOpaqueRescueDebug({
+			queryAnalysis,
+			resolvedHanSurfaceGroups,
+			metadataOpaqueRescueUnits,
+			bodyOpaqueRescues,
+			hanRescueAssessments: hanRescueSummary.assessments,
+			candidateRecall,
+		})
+	) {
 		logCoverageLexicalV3Debug("ranking.buildPackingProfile.hanOpaqueRescue", {
 			queryText: queryAnalysis.queryText,
 			docId: candidateRecall.docId,
 			liveDocSlot: candidateRecall.liveDocSlot,
 			path: getLiveDocPath(base, candidateRecall.liveDocSlot),
 			allowBodyOpaqueRescueSurfaceGroupIndices:
-				options?.allowBodyOpaqueRescueSurfaceGroupIndices == null
+				allowBodyOpaqueRescueSurfaceGroupIndices == null
 					? null
-					: [...options.allowBodyOpaqueRescueSurfaceGroupIndices].sort(
+					: [...allowBodyOpaqueRescueSurfaceGroupIndices].sort(
 							(left, right) => left - right,
 						),
 			resolvedHanSurfaceGroups: resolvedHanSurfaceGroups.map((group) => ({
@@ -774,12 +792,14 @@ export function buildPackingProfile(
 		queryAnalysis,
 		realizedFamilies,
 		resolvedHanSurfaceGroupByIndex,
-		collectHanBigramVisibilityEvidence({
-			metadataWitnessBySurfaceGroupIndex:
-				hanRescueArtifacts.metadataWitnessBySurfaceGroupIndex,
-			bodyEvaluationBySurfaceGroupIndex:
-				hanRescueArtifacts.bodyEvaluationBySurfaceGroupIndex,
-		}),
+		queryContext.queryHanBigramTexts.length === 0
+			? []
+			: collectHanBigramVisibilityEvidence({
+					metadataWitnessBySurfaceGroupIndex:
+						hanRescueArtifacts.metadataWitnessBySurfaceGroupIndex,
+					bodyEvaluationBySurfaceGroupIndex:
+						hanRescueArtifacts.bodyEvaluationBySurfaceGroupIndex,
+				}),
 	);
 	const metadataPackingSignature = buildMetadataPackingSignature(realizedFamilies);
 	const singletonHanCompletion = summarizeSingletonHanCompletion({
@@ -793,6 +813,8 @@ export function buildPackingProfile(
 			hanRescueArtifacts.bodyEvaluationBySurfaceGroupIndex,
 		bestBodyWindowBlockIds,
 		realizedFamilies: baseRealizedFamilies,
+		queryHanBigramSpecs: queryContext.queryHanBigramSpecs,
+		queryHanBigramTexts: queryContext.queryHanBigramTexts,
 	});
 	const profile: EvidencePackingProfile = {
 		shardId: candidateRecall.shardId,
@@ -850,6 +872,26 @@ export function buildPackingProfile(
 	return profile;
 }
 
+function shouldLogHanOpaqueRescueDebug(params: Readonly<{
+	queryAnalysis: V3QueryAnalysis;
+	resolvedHanSurfaceGroups: readonly V3ResolvedHanSurfaceGroup[];
+	metadataOpaqueRescueUnits: readonly OpaqueMetadataRescueUnit[];
+	bodyOpaqueRescues: readonly OpaqueBodyRescue[];
+	hanRescueAssessments: readonly HanRescueAssessment[];
+	candidateRecall: V3CandidateDocRecall;
+}>): boolean {
+	return (
+		params.queryAnalysis.surfaceGroups.some((group) => group.kind === "han") ||
+		params.resolvedHanSurfaceGroups.some(
+			(group) => group.rescueBigrams.length > 0,
+		) ||
+		params.metadataOpaqueRescueUnits.length > 0 ||
+		params.bodyOpaqueRescues.length > 0 ||
+		params.hanRescueAssessments.length > 0 ||
+		params.candidateRecall.hanSurfaceGroupRecalls.length > 0
+	);
+}
+
 export function hydrateCandidateEvidence(
 	base: ResidentBase,
 	candidateRecall: V3CandidateDocRecall,
@@ -894,6 +936,7 @@ export function hydrateCandidateEvidenceBatch(
 }
 
 export function preparePackingProfileQueryContext(
+	queryAnalysis: V3QueryAnalysis,
 	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
 	excludeSurfaceGroupIndices?: ReadonlySet<number> | null,
 ): PackingProfileQueryContext {
@@ -901,12 +944,15 @@ export function preparePackingProfileQueryContext(
 		unitFamilyMatches,
 		excludeSurfaceGroupIndices ?? null,
 	);
+	const queryHanBigramSpecs = collectAllQueryHanBigramSpecs(queryAnalysis);
 	return {
 		relevantUnitFamilyMatches,
 		bodyOccurrenceMatchContextsByShardLocalFamilySlot:
 			buildBodyOccurrenceMatchContextsByShardLocalFamilySlot(
 				relevantUnitFamilyMatches,
 			),
+		queryHanBigramSpecs,
+		queryHanBigramTexts: collectQueryHanBigramTexts(queryHanBigramSpecs),
 	};
 }
 
@@ -2728,9 +2774,19 @@ function materializeOpaqueBodyRescues(params: Readonly<{
 		number,
 		HanBodyRescueEvaluation<BodyWindowCandidate>
 	>;
+	allowSurfaceGroupIndices?: ReadonlySet<number> | null;
 }>): OpaqueBodyRescue[] {
 	const out: OpaqueBodyRescue[] = [];
 	for (const [surfaceGroupIndex, evaluation] of params.bodyEvaluationBySurfaceGroupIndex) {
+		if (params.allowSurfaceGroupIndices === null) {
+			continue;
+		}
+		if (
+			params.allowSurfaceGroupIndices !== undefined &&
+			!params.allowSurfaceGroupIndices.has(surfaceGroupIndex)
+		) {
+			continue;
+		}
 		if (evaluation.assessment.strength !== "strong") {
 			continue;
 		}
@@ -3059,24 +3115,28 @@ function summarizeSingletonHanCompletion(params: Readonly<{
 	>;
 	bestBodyWindowBlockIds: ReadonlySet<number>;
 	realizedFamilies: readonly RealizedQueryUnitFamily[];
+	queryHanBigramSpecs: readonly QueryHanBigramSpec[];
+	queryHanBigramTexts: readonly string[];
 }>): SingletonHanCompletion {
 	const candidateBlockIds = collectCandidateSingletonHanBlockIds(
 		params.base,
 		params.candidateRecall.liveDocSlot,
 		params.candidateRecall.shortlistedBodyBlockIds,
 	);
-	const queryBigramSpecs = collectAllQueryHanBigramSpecs(params.queryAnalysis);
-	const queryBigramTexts = collectQueryHanBigramTexts(queryBigramSpecs);
 	const bodyRescueBigramOccurrencesByBlockId = collectAllBodyRescueBigramOccurrencesByBlockId(
 		params.bodyRescueEvaluationBySurfaceGroupIndex,
+	);
+	const bodyBigramAnchorCache = new BodyBigramAnchorOccurrenceCache(
+		params.queryHanBigramTexts,
 	);
 	const matchedHanBigrams = collectMatchedHanBigramAnchorsForSingletonScope({
 		docEvidence: params.docEvidence,
 		bodyBlockEvidenceByBlockId: params.bodyBlockEvidenceByBlockId,
 		candidateBlockIds,
-		queryBigramSpecs,
-		queryBigramTexts,
+		queryBigramSpecs: params.queryHanBigramSpecs,
+		queryBigramTexts: params.queryHanBigramTexts,
 		bodyRescueBigramOccurrencesByBlockId,
+		bodyBigramAnchorCache,
 	});
 	const targets = collectCandidateSingletonHanTargets(
 		params.queryAnalysis,
@@ -3087,7 +3147,7 @@ function summarizeSingletonHanCompletion(params: Readonly<{
 	for (const target of targets) {
 		const targetQueryBigramTexts = collectQueryHanBigramTextsForSingletonTarget(
 			target,
-			queryBigramSpecs,
+			params.queryHanBigramSpecs,
 		);
 		const metadataCandidate = buildMetadataSingletonHanCompletionCandidate({
 			target,
@@ -3105,6 +3165,7 @@ function summarizeSingletonHanCompletion(params: Readonly<{
 			bodyBlockEvidenceByBlockId: params.bodyBlockEvidenceByBlockId,
 			bodyOccurrencesByBlockId: params.bodyOccurrencesByBlockId,
 			bodyRescueBigramOccurrencesByBlockId,
+			bodyBigramAnchorCache,
 			bestBodyWindowBlockIds: params.bestBodyWindowBlockIds,
 		});
 		best = chooseBetterSingletonHanCompletion(best, bodyCandidate);
@@ -3174,6 +3235,61 @@ function getQueryHanBigramSpecKey(spec: QueryHanBigramSpec): string {
 	return `${spec.surfaceGroupIndex}:${spec.bigramText}`;
 }
 
+class BodyBigramAnchorOccurrenceCache {
+	private readonly allQueryBigramTextsKey: string;
+	private readonly valuesByBlockAndQuery = new Map<
+		string,
+		readonly BodyBigramAnchorOccurrence[]
+	>();
+
+	constructor(allQueryBigramTexts: readonly string[]) {
+		this.allQueryBigramTextsKey = buildQueryBigramTextsKey(allQueryBigramTexts);
+	}
+
+	getOrCollect(params: Readonly<{
+		blockId: number;
+		blockEvidence: CandidateBodyBlockEvidence;
+		queryBigramTexts: readonly string[];
+		rescueOccurrences: readonly HanSyntheticBodyOccurrence[] | null;
+	}>): readonly BodyBigramAnchorOccurrence[] {
+		const queryKey = buildQueryBigramTextsKey(params.queryBigramTexts);
+		const rescueKey =
+			queryKey === this.allQueryBigramTextsKey
+				? "all"
+				: buildRescueOccurrenceKey(params.rescueOccurrences);
+		const key = `${params.blockId}|${queryKey}|${rescueKey}`;
+		const existing = this.valuesByBlockAndQuery.get(key);
+		if (existing != null) {
+			return existing;
+		}
+		const occurrences = collectBodyBigramAnchorOccurrences({
+			blockEvidence: params.blockEvidence,
+			queryBigramTexts: params.queryBigramTexts,
+			rescueOccurrences: params.rescueOccurrences,
+		});
+		this.valuesByBlockAndQuery.set(key, occurrences);
+		return occurrences;
+	}
+}
+
+function buildQueryBigramTextsKey(queryBigramTexts: readonly string[]): string {
+	return queryBigramTexts.join("\u0000");
+}
+
+function buildRescueOccurrenceKey(
+	rescueOccurrences: readonly HanSyntheticBodyOccurrence[] | null,
+): string {
+	if (rescueOccurrences == null || rescueOccurrences.length === 0) {
+		return "";
+	}
+	return rescueOccurrences
+		.map(
+			(occurrence) =>
+				`${occurrence.surfaceGroupIndex}:${occurrence.match.familyText}:${occurrence.localPosition}:${occurrence.localEndPosition}`,
+		)
+		.join("\u0001");
+}
+
 function collectAllBodyRescueBigramOccurrencesByBlockId(
 	bodyRescueEvaluationBySurfaceGroupIndex: ReadonlyMap<
 		number,
@@ -3204,6 +3320,7 @@ function collectMatchedHanBigramAnchorsForSingletonScope(params: Readonly<{
 		number,
 		readonly HanSyntheticBodyOccurrence[]
 	>;
+	bodyBigramAnchorCache: BodyBigramAnchorOccurrenceCache;
 }>): readonly MatchedHanBigramLike[] {
 	const specsByText = collectQueryHanBigramSpecsByText(params.queryBigramSpecs);
 	const matched = new Map<string, QueryHanBigramSpec>();
@@ -3227,7 +3344,8 @@ function collectMatchedHanBigramAnchorsForSingletonScope(params: Readonly<{
 		if (blockEvidence == null) {
 			continue;
 		}
-		for (const occurrence of collectBodyBigramAnchorOccurrences({
+		for (const occurrence of params.bodyBigramAnchorCache.getOrCollect({
+			blockId,
 			blockEvidence,
 			queryBigramTexts: params.queryBigramTexts,
 			rescueOccurrences: params.bodyRescueBigramOccurrencesByBlockId.get(blockId) ?? null,
@@ -3477,6 +3595,7 @@ function buildBodySingletonHanCompletionCandidate(params: Readonly<{
 		number,
 		readonly HanSyntheticBodyOccurrence[]
 	>;
+	bodyBigramAnchorCache: BodyBigramAnchorOccurrenceCache;
 	bestBodyWindowBlockIds: ReadonlySet<number>;
 }>): SingletonHanCompletionCandidate | null {
 	const candidateBlockIds = collectCandidateSingletonHanBlockIds(
@@ -3484,33 +3603,32 @@ function buildBodySingletonHanCompletionCandidate(params: Readonly<{
 		params.liveDocSlot,
 		params.shortlistedBodyBlockIds,
 	);
-	const targetBodyOccurrencesByBlockId =
-		filterBodyOccurrencesByBlockIdForSingletonTarget(
-			params.target,
-			params.bodyOccurrencesByBlockId,
-		);
-	const targetBodyRescueBigramOccurrencesByBlockId =
-		filterBodyRescueBigramOccurrencesByBlockIdForSingletonTarget(
-			params.target,
-			params.bodyRescueBigramOccurrencesByBlockId,
-		);
 	let best: SingletonHanCompletionCandidate | null = null;
 	for (const blockId of candidateBlockIds) {
 		const blockEvidence = params.bodyBlockEvidenceByBlockId.get(blockId);
 		if (blockEvidence == null) {
 			continue;
 		}
-		const blockBigramAnchorOccurrences = collectBodyBigramAnchorOccurrences({
+		const targetBodyOccurrences = filterBodyOccurrencesForSingletonTarget(
+			params.target,
+			params.bodyOccurrencesByBlockId.get(blockId) ?? [],
+		);
+		const targetBodyRescueBigramOccurrences =
+			filterBodyRescueBigramOccurrencesForSingletonTarget(
+				params.target,
+				params.bodyRescueBigramOccurrencesByBlockId.get(blockId) ?? [],
+			);
+		const blockBigramAnchorOccurrences = params.bodyBigramAnchorCache.getOrCollect({
+			blockId,
 			blockEvidence,
 			queryBigramTexts: params.queryBigramTexts,
-			rescueOccurrences:
-				targetBodyRescueBigramOccurrencesByBlockId.get(blockId) ?? null,
+			rescueOccurrences: targetBodyRescueBigramOccurrences,
 		});
 		const charPositions = filterOverlappingSingletonCharPositions(
 			collectBodySingletonCharPositions(blockEvidence, params.target.char),
 			params.target.char,
 			[
-				...(targetBodyOccurrencesByBlockId.get(blockId) ?? []).map((occurrence) => ({
+				...targetBodyOccurrences.map((occurrence) => ({
 					start: occurrence.localPosition,
 					end: occurrence.localEndPosition,
 				})),
@@ -3527,7 +3645,7 @@ function buildBodySingletonHanCompletionCandidate(params: Readonly<{
 			target: params.target,
 			blockId,
 			charPositions,
-			bodyOccurrencesByBlockId: targetBodyOccurrencesByBlockId,
+			bodyOccurrences: targetBodyOccurrences,
 			bodyBigramAnchorOccurrences: blockBigramAnchorOccurrences,
 			bestBodyWindowBlockIds: params.bestBodyWindowBlockIds,
 			weightedGapIndex: blockEvidence.weightedGapIndex,
@@ -3544,56 +3662,44 @@ function buildBodySingletonHanCompletionCandidate(params: Readonly<{
 			charPositions,
 			weightedGapIndex: blockEvidence.weightedGapIndex,
 			bodyBlockEvidenceByBlockId: params.bodyBlockEvidenceByBlockId,
-			bodyOccurrencesByBlockId: targetBodyOccurrencesByBlockId,
+			bodyOccurrencesByBlockId: params.bodyOccurrencesByBlockId,
 			bodyRescueBigramOccurrencesByBlockId:
-				targetBodyRescueBigramOccurrencesByBlockId,
+				params.bodyRescueBigramOccurrencesByBlockId,
 			queryBigramTexts: params.queryBigramTexts,
 			bestBodyWindowBlockIds: params.bestBodyWindowBlockIds,
+			bodyBigramAnchorCache: params.bodyBigramAnchorCache,
 		});
 		best = chooseBetterSingletonHanCompletion(best, adjacentAnchor);
 	}
 	return best;
 }
 
-function filterBodyOccurrencesByBlockIdForSingletonTarget(
+function filterBodyOccurrencesForSingletonTarget(
 	target: SingletonHanTarget,
-	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>,
-): ReadonlyMap<number, readonly BodyOccurrence[]> {
+	occurrences: readonly BodyOccurrence[],
+): readonly BodyOccurrence[] {
 	if (target.kind !== "residual_singleton" || target.surfaceGroupIndex == null) {
-		return bodyOccurrencesByBlockId;
+		return occurrences;
 	}
-	const filtered = new Map<number, readonly BodyOccurrence[]>();
-	for (const [blockId, occurrences] of bodyOccurrencesByBlockId) {
-		const targetOccurrences = occurrences.filter(
-			(occurrence) => occurrence.querySurfaceGroupIndex === target.surfaceGroupIndex,
-		);
-		if (targetOccurrences.length > 0) {
-			filtered.set(blockId, targetOccurrences);
-		}
-	}
-	return filtered;
+	return occurrences.filter(
+		(occurrence) => occurrence.querySurfaceGroupIndex === target.surfaceGroupIndex,
+	);
 }
 
-function filterBodyRescueBigramOccurrencesByBlockIdForSingletonTarget(
+function filterBodyRescueBigramOccurrencesForSingletonTarget(
 	target: SingletonHanTarget,
-	bodyRescueBigramOccurrencesByBlockId: ReadonlyMap<
-		number,
-		readonly HanSyntheticBodyOccurrence[]
-	>,
-): ReadonlyMap<number, readonly HanSyntheticBodyOccurrence[]> {
+	occurrences: readonly HanSyntheticBodyOccurrence[],
+): readonly HanSyntheticBodyOccurrence[] | null {
+	if (occurrences.length === 0) {
+		return null;
+	}
 	if (target.kind !== "residual_singleton" || target.surfaceGroupIndex == null) {
-		return bodyRescueBigramOccurrencesByBlockId;
+		return occurrences;
 	}
-	const filtered = new Map<number, readonly HanSyntheticBodyOccurrence[]>();
-	for (const [blockId, occurrences] of bodyRescueBigramOccurrencesByBlockId) {
-		const targetOccurrences = occurrences.filter(
-			(occurrence) => occurrence.surfaceGroupIndex === target.surfaceGroupIndex,
-		);
-		if (targetOccurrences.length > 0) {
-			filtered.set(blockId, targetOccurrences);
-		}
-	}
-	return filtered;
+	const filtered = occurrences.filter(
+		(occurrence) => occurrence.surfaceGroupIndex === target.surfaceGroupIndex,
+	);
+	return filtered.length === 0 ? null : filtered;
 }
 
 function collectCandidateSingletonHanBlockIds(
@@ -3700,14 +3806,14 @@ function buildBodySingletonHanSameBlockAnchorCandidate(params: Readonly<{
 	target: SingletonHanTarget;
 	blockId: number;
 	charPositions: readonly number[];
-	bodyOccurrencesByBlockId: ReadonlyMap<number, readonly BodyOccurrence[]>;
+	bodyOccurrences: readonly BodyOccurrence[];
 	bodyBigramAnchorOccurrences: readonly BodyBigramAnchorOccurrence[];
 	bestBodyWindowBlockIds: ReadonlySet<number>;
 	weightedGapIndex: WeightedGapIndex;
 }>): SingletonHanCompletionCandidate | null {
 	let best: SingletonHanCompletionCandidate | null = null;
 	for (const charPosition of params.charPositions) {
-		for (const occurrence of params.bodyOccurrencesByBlockId.get(params.blockId) ?? []) {
+		for (const occurrence of params.bodyOccurrences) {
 			const completion = createSingletonHanCompletion({
 				target: params.target,
 				matchSource: "body_same_block",
@@ -3797,6 +3903,7 @@ function buildBodySingletonHanAdjacentAnchorCandidate(params: Readonly<{
 	> | null;
 	queryBigramTexts: readonly string[];
 	bestBodyWindowBlockIds: ReadonlySet<number>;
+	bodyBigramAnchorCache: BodyBigramAnchorOccurrenceCache;
 }>): SingletonHanCompletionCandidate | null {
 	let best: SingletonHanCompletionCandidate | null = null;
 	const currentOrdinal =
@@ -3809,14 +3916,25 @@ function buildBodySingletonHanAdjacentAnchorCandidate(params: Readonly<{
 		if (adjacentEvidence == null) {
 			continue;
 		}
-		const adjacentBigramAnchorOccurrences = collectBodyBigramAnchorOccurrences({
-			blockEvidence: adjacentEvidence,
-			queryBigramTexts: params.queryBigramTexts,
-			rescueOccurrences: params.bodyRescueBigramOccurrencesByBlockId?.get(adjacentBlockId) ?? null,
-		});
+		const adjacentBodyOccurrences = filterBodyOccurrencesForSingletonTarget(
+			params.target,
+			params.bodyOccurrencesByBlockId.get(adjacentBlockId) ?? [],
+		);
+		const adjacentRescueOccurrences =
+			filterBodyRescueBigramOccurrencesForSingletonTarget(
+				params.target,
+				params.bodyRescueBigramOccurrencesByBlockId?.get(adjacentBlockId) ?? [],
+			);
+		const adjacentBigramAnchorOccurrences =
+			params.bodyBigramAnchorCache.getOrCollect({
+				blockId: adjacentBlockId,
+				blockEvidence: adjacentEvidence,
+				queryBigramTexts: params.queryBigramTexts,
+				rescueOccurrences: adjacentRescueOccurrences,
+			});
 		const adjacentOrdinal =
 			params.base.bodyBlocks.blockOrdinalByBlockId[adjacentBlockId] ?? adjacentBlockId;
-		for (const occurrence of params.bodyOccurrencesByBlockId.get(adjacentBlockId) ?? []) {
+		for (const occurrence of adjacentBodyOccurrences) {
 			for (const charPosition of params.charPositions) {
 				const distance =
 					adjacentOrdinal < currentOrdinal

@@ -51,6 +51,7 @@ import {
 	type CandidateEvidenceHydrationSource,
 	type CandidateEvidencePackage,
 	type EvidencePackingProfile,
+	type PackingProfileQueryContext,
 } from "./ranking";
 import {
 	buildLexicalBlockEvidenceRowId,
@@ -95,6 +96,11 @@ type ResidentColdEvidenceRows = Readonly<{
 	bodyEvidenceByRowId: ReadonlyMap<string, LexicalBodyEvidenceSnapshot>;
 	hanDocEvidenceByRowId: ReadonlyMap<string, LexicalHanDocEvidenceSnapshot>;
 	hanBodyEvidenceByRowId: ReadonlyMap<string, LexicalHanBodyEvidenceSnapshot>;
+}>;
+
+type PackingContextForShard = Readonly<{
+	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[];
+	queryContext: PackingProfileQueryContext;
 }>;
 
 export class CoverageLexicalV3Engine {
@@ -478,25 +484,30 @@ export class CoverageLexicalV3Engine {
 		const provisionalPackingStartedAtMs = this.benchmarkPhaseTrackingEnabled
 			? nowDebugMs()
 			: 0;
+		const packingContextByShardKey = new Map<string, PackingContextForShard>();
+		const getPackingContextForCandidate = (
+			candidateRecall: V3CandidateDocRecall,
+		) =>
+			getOrCreatePackingContextForCandidate(
+				packingContextByShardKey,
+				queryAnalysis,
+				unitFamilyMatches,
+				candidateRecall,
+			);
 		const provisionalCandidateProfiles = guardedCandidateDocs.map((candidateRecall) => {
-				const shardUnitFamilyMatches = filterUnitFamilyMatchesForCandidateShard(
-					unitFamilyMatches,
-					candidateRecall,
-				);
-				const shardPackingQueryContext =
-					preparePackingProfileQueryContext(shardUnitFamilyMatches);
-				return buildPackingProfile(
+			const shardPackingContext = getPackingContextForCandidate(candidateRecall);
+			return buildPackingProfile(
 				this.requireCandidateResidentBase(candidateRecall),
 				queryAnalysis,
 				candidateRecall,
-				shardUnitFamilyMatches,
+				shardPackingContext.unitFamilyMatches,
 				{
 					allowBodyOpaqueRescueSurfaceGroupIndices: null,
 					hydratedEvidence:
 						effectiveHydratedEvidenceByCandidateKey.get(
 							buildCandidateHydrationKey(candidateRecall),
 						) ?? null,
-					queryContext: shardPackingQueryContext,
+					queryContext: shardPackingContext.queryContext,
 				},
 			);
 		});
@@ -546,22 +557,17 @@ export class CoverageLexicalV3Engine {
 			) {
 				return provisionalCandidateProfiles[index]!;
 			}
-			const shardUnitFamilyMatches = filterUnitFamilyMatchesForCandidateShard(
-				unitFamilyMatches,
-				candidateRecall,
-			);
-			const shardPackingQueryContext =
-				preparePackingProfileQueryContext(shardUnitFamilyMatches);
+			const shardPackingContext = getPackingContextForCandidate(candidateRecall);
 			return buildPackingProfile(
 				this.requireCandidateResidentBase(candidateRecall),
 				queryAnalysis,
 				candidateRecall,
-				shardUnitFamilyMatches,
+				shardPackingContext.unitFamilyMatches,
 				{
 					allowBodyOpaqueRescueSurfaceGroupIndices,
 					hydratedEvidence:
 						effectiveHydratedEvidenceByCandidateKey.get(candidateKey) ?? null,
-					queryContext: shardPackingQueryContext,
+					queryContext: shardPackingContext.queryContext,
 				},
 			);
 		});
@@ -647,25 +653,30 @@ export class CoverageLexicalV3Engine {
 			guardedCandidateDocs,
 		);
 		const packingStartedAtMs = shouldLogDebug ? nowDebugMs() : 0;
-		const provisionalCandidateProfiles = guardedCandidateDocs.map((candidateRecall) => {
-			const shardUnitFamilyMatches = filterUnitFamilyMatchesForCandidateShard(
+		const packingContextByShardKey = new Map<string, PackingContextForShard>();
+		const getPackingContextForCandidate = (
+			candidateRecall: V3CandidateDocRecall,
+		) =>
+			getOrCreatePackingContextForCandidate(
+				packingContextByShardKey,
+				queryAnalysis,
 				unitFamilyMatches,
 				candidateRecall,
 			);
-			const shardPackingQueryContext =
-				preparePackingProfileQueryContext(shardUnitFamilyMatches);
+		const provisionalCandidateProfiles = guardedCandidateDocs.map((candidateRecall) => {
+			const shardPackingContext = getPackingContextForCandidate(candidateRecall);
 			return buildPackingProfile(
 				this.requireCandidateResidentBase(candidateRecall),
 				queryAnalysis,
 				candidateRecall,
-				shardUnitFamilyMatches,
+				shardPackingContext.unitFamilyMatches,
 				{
 					allowBodyOpaqueRescueSurfaceGroupIndices: null,
 					hydratedEvidence:
 						hydratedEvidenceByCandidateKey.get(
 							buildCandidateHydrationKey(candidateRecall),
 						) ?? null,
-					queryContext: shardPackingQueryContext,
+					queryContext: shardPackingContext.queryContext,
 				},
 			);
 		});
@@ -695,22 +706,17 @@ export class CoverageLexicalV3Engine {
 			) {
 				return provisionalCandidateProfiles[index]!;
 			}
-			const shardUnitFamilyMatches = filterUnitFamilyMatchesForCandidateShard(
-				unitFamilyMatches,
-				candidateRecall,
-			);
-			const shardPackingQueryContext =
-				preparePackingProfileQueryContext(shardUnitFamilyMatches);
+			const shardPackingContext = getPackingContextForCandidate(candidateRecall);
 			return buildPackingProfile(
 				this.requireCandidateResidentBase(candidateRecall),
 				queryAnalysis,
 				candidateRecall,
-				shardUnitFamilyMatches,
+				shardPackingContext.unitFamilyMatches,
 				{
 					allowBodyOpaqueRescueSurfaceGroupIndices,
 					hydratedEvidence:
 						hydratedEvidenceByCandidateKey.get(candidateKey) ?? null,
-					queryContext: shardPackingQueryContext,
+					queryContext: shardPackingContext.queryContext,
 				},
 			);
 		});
@@ -1229,6 +1235,35 @@ function buildResidentBaseByShardKey(indexView: ResidentIndexView): Map<string, 
 
 function buildResidentShardKey(shardId: string, generation: number): string {
 	return `${shardId}@${generation}`;
+}
+
+function getOrCreatePackingContextForCandidate(
+	packingContextByShardKey: Map<string, PackingContextForShard>,
+	queryAnalysis: V3RecallState["queryAnalysis"],
+	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
+	candidateRecall: V3CandidateDocRecall,
+): PackingContextForShard {
+	const shardKey = buildResidentShardKey(
+		candidateRecall.shardId,
+		candidateRecall.shardGeneration,
+	);
+	const existing = packingContextByShardKey.get(shardKey);
+	if (existing != null) {
+		return existing;
+	}
+	const shardUnitFamilyMatches = filterUnitFamilyMatchesForCandidateShard(
+		unitFamilyMatches,
+		candidateRecall,
+	);
+	const created = {
+		unitFamilyMatches: shardUnitFamilyMatches,
+		queryContext: preparePackingProfileQueryContext(
+			queryAnalysis,
+			shardUnitFamilyMatches,
+		),
+	};
+	packingContextByShardKey.set(shardKey, created);
+	return created;
 }
 
 function buildMergedFuzzyRescueIndex(indexView: ResidentIndexView): ResidentFuzzyRescueIndex {

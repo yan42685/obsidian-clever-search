@@ -83,6 +83,7 @@ import {
 	getLiveDocRef,
 	getLiveDocSlotForBlockId,
 	type V3CandidateDocRecall,
+	type V3QueryUnitFamilyMatches,
 } from "./recall";
 import {
 	buildFuzzyLookupKeys,
@@ -559,6 +560,9 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 					hanBigramTexts: group.hanBigramTexts,
 					queryResidualUniqueBigrams: group.queryResidualUniqueBigrams,
 				})),
+				unitFamilyMatchDetails: summarizeFileSearchDebugUnitFamilyMatches(
+					result.recallState.unitFamilyMatches,
+				),
 				hideWeaklyRelatedResults: request.hideWeaklyRelatedResults === true,
 				maxItemResults: request.maxItemResults,
 				candidateDocCount: result.recallState.candidateDocs.length,
@@ -2248,6 +2252,34 @@ function roundDebugMs(value: number): number {
 	return Math.round(value * 1000) / 1000;
 }
 
+function summarizeFileSearchDebugUnitFamilyMatches(
+	unitFamilyMatches: readonly V3QueryUnitFamilyMatches[],
+): ReadonlyArray<{
+	queryUnitIndex: number;
+	queryUnitText: string;
+	queryUnitSource: string;
+	querySurfaceGroupIndex: number | null;
+	matchCount: number;
+	matches: ReadonlyArray<{
+		familyText: string;
+		matchKind: string;
+		editDistance: 0 | 1;
+	}>;
+}> {
+	return unitFamilyMatches.map((unitMatches) => ({
+		queryUnitIndex: unitMatches.queryUnitIndex,
+		queryUnitText: unitMatches.queryUnitText,
+		queryUnitSource: unitMatches.queryUnitSource,
+		querySurfaceGroupIndex: unitMatches.querySurfaceGroupIndex,
+		matchCount: unitMatches.matches.length,
+		matches: unitMatches.matches.slice(0, 12).map((match) => ({
+			familyText: match.familyText,
+			matchKind: match.matchKind,
+			editDistance: match.editDistance,
+		})),
+	}));
+}
+
 function summarizeFileSearchDebugCandidates(
 	candidates: readonly EvidencePackingProfile[],
 ): ReadonlyArray<{
@@ -2606,6 +2638,7 @@ function collectShortlistedBodyEvidenceLocators(
 	blockIds: readonly number[],
 ): CollectedLexicalBlockEvidenceRequest[] {
 	const requests: CollectedLexicalBlockEvidenceRequest[] = [];
+	const seenRowIds = new Set<string>();
 	for (const blockId of blockIds) {
 		const cached = getCachedLexicalBlockEvidenceLocatorEntry(
 			residentBase,
@@ -2615,6 +2648,10 @@ function collectShortlistedBodyEvidenceLocators(
 		if (cached == null) {
 			continue;
 		}
+		if (seenRowIds.has(cached.rowId)) {
+			continue;
+		}
+		seenRowIds.add(cached.rowId);
 		requests.push({
 			shardId: cached.shardId,
 			shardGeneration: cached.shardGeneration,
@@ -2632,6 +2669,7 @@ function collectCandidateDocEvidenceLocators(
 	candidateRecalls: readonly V3CandidateDocRecall[],
 ): CollectedLexicalDocEvidenceRequest[] {
 	const requests: CollectedLexicalDocEvidenceRequest[] = [];
+	const seenRowIds = new Set<string>();
 	for (const candidateRecall of candidateRecalls) {
 		if (
 			candidateRecall.shardId !== residentShard.shardId ||
@@ -2647,6 +2685,10 @@ function collectCandidateDocEvidenceLocators(
 		if (cached == null) {
 			continue;
 		}
+		if (seenRowIds.has(cached.rowId)) {
+			continue;
+		}
+		seenRowIds.add(cached.rowId);
 		requests.push({
 			shardId: cached.shardId,
 			shardGeneration: cached.shardGeneration,
