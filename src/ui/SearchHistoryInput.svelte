@@ -624,6 +624,7 @@
 
 <style>
 	.search-bar {
+		--cs-highlight-char-color-fallback: #6a9ba8;
 		--cs-history-row-height: 1.58em;
 		--cs-history-row-gap: 0.02em;
 		--cs-history-dropdown-offset: 0.04em;
@@ -634,6 +635,10 @@
 		z-index: 2;
 		width: 97%;
 		height: 30px;
+	}
+
+	:global(.theme-dark) .search-bar {
+		--cs-highlight-char-color-fallback: #5a93a2;
 	}
 
 	.search-bar.has-match-count {
@@ -835,6 +840,10 @@
 
 	.history-match {
 		font-weight: 700;
+		color: var(
+			--cs-highlight-char-color,
+			var(--cs-highlight-char-color-fallback)
+		) !important;
 	}
 
 	.history-count {

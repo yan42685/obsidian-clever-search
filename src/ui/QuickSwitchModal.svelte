@@ -422,6 +422,7 @@
 	}
 
 	.quickswitch-shell {
+		--cs-highlight-char-color-fallback: #6a9ba8;
 		display: flex;
 		flex-direction: column;
 		gap: 0.7rem;
@@ -429,6 +430,10 @@
 		min-width: 0;
 		height: 100%;
 		min-height: 0;
+	}
+
+	:global(.theme-dark) .quickswitch-shell {
+		--cs-highlight-char-color-fallback: #5a93a2;
 	}
 
 	.quickswitch-header {
@@ -526,8 +531,8 @@
 		font-weight: 800;
 		color: var(
 			--cs-highlight-char-color,
-			var(--text-accent, var(--text-normal))
-		);
+			var(--cs-highlight-char-color-fallback)
+		) !important;
 		text-decoration: none;
 	}
 

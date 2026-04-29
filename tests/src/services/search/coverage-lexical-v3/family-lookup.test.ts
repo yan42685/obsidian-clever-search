@@ -310,6 +310,72 @@ describe("coverage lexical v3 family lookup", () => {
 		expect(twoEdits.matches).toEqual([]);
 	});
 
+	test("fuzzy prefix probes recover typo prefixes without expanding the fuzzy index", () => {
+		const base = buildResidentBase([
+			createDocument({
+				path: "latin/programmers.md",
+				basename: "programmers",
+				folder: "latin",
+				content: "plain note",
+			}),
+			createDocument({
+				path: "latin/programming.md",
+				basename: "programming",
+				folder: "latin",
+				content: "plain note",
+			}),
+		]);
+
+		const [prefixMatch] = lookupQueryUnitFamilies(base, analyzeQuery("programmer"));
+		expect(prefixMatch.matches[0]).toEqual(
+			expect.objectContaining({
+				familyText: "programmers",
+				matchKind: "prefix",
+				editDistance: 0,
+			}),
+		);
+
+		const [fuzzyPrefixMatch] = lookupQueryUnitFamilies(base, analyzeQuery("programmar"));
+		expect(fuzzyPrefixMatch.matches[0]).toEqual(
+			expect.objectContaining({
+				familyText: "programmers",
+				matchKind: "fuzzy",
+				editDistance: 1,
+			}),
+		);
+		expect(
+			fuzzyPrefixMatch.matches.some((match) => match.familyText === "programming"),
+		).toBe(false);
+
+		const [twoEditMiss] = lookupQueryUnitFamilies(base, analyzeQuery("progrxxmar"));
+		expect(twoEditMiss.matches).toEqual([]);
+	});
+
+	test("fuzzy prefix probes honor prefix and fuzzy request flags", () => {
+		const base = buildResidentBase([
+			createDocument({
+				path: "latin/programmers.md",
+				basename: "programmers",
+				folder: "latin",
+				content: "plain note",
+			}),
+		]);
+
+		const [prefixDisabled] = lookupQueryUnitFamilies(
+			base,
+			analyzeQuery("programmar"),
+			{ allowPrefixMatch: false },
+		);
+		expect(prefixDisabled.matches).toEqual([]);
+
+		const [fuzzyDisabled] = lookupQueryUnitFamilies(
+			base,
+			analyzeQuery("programmar"),
+			{ allowFuzzyMatch: false },
+		);
+		expect(fuzzyDisabled.matches).toEqual([]);
+	});
+
 	test("fuzzy rescue can be disabled per request", () => {
 		const base = buildResidentBase([
 			createDocument({
@@ -392,6 +458,45 @@ describe("coverage lexical v3 family lookup", () => {
 		expect(headingOnlyMiss.matches).toEqual([]);
 
 		const [bodyOnlyMiss] = lookupQueryUnitFamilies(base, analyzeQuery("runboks"));
+		expect(bodyOnlyMiss.matches).toEqual([]);
+	});
+
+	test("fuzzy prefix probes stay on metadata anchors", () => {
+		const base = buildResidentBase([
+			createDocument({
+				path: "latin/alias.md",
+				basename: "notes",
+				folder: "latin",
+				aliases: "programmers",
+				content: "plain note",
+			}),
+			createDocument({
+				path: "latin/heading-only.md",
+				basename: "notes",
+				folder: "latin",
+				headings: "debuggers",
+				content: "plain note",
+			}),
+			createDocument({
+				path: "latin/body-only.md",
+				basename: "notes",
+				folder: "latin",
+				content: "designers",
+			}),
+		]);
+
+		const [aliasMatch] = lookupQueryUnitFamilies(base, analyzeQuery("programmar"));
+		expect(aliasMatch.matches).toEqual([
+			expect.objectContaining({
+				familyText: "programmers",
+				matchKind: "fuzzy",
+			}),
+		]);
+
+		const [headingOnlyMiss] = lookupQueryUnitFamilies(base, analyzeQuery("debuggors"));
+		expect(headingOnlyMiss.matches).toEqual([]);
+
+		const [bodyOnlyMiss] = lookupQueryUnitFamilies(base, analyzeQuery("designors"));
 		expect(bodyOnlyMiss.matches).toEqual([]);
 	});
 

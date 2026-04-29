@@ -1,4 +1,5 @@
 import {
+	FAMILY_SOURCE_MASK_FUZZY_RESCUE_METADATA,
 	getFamilySourceMask,
 	isFamilyPrefixExpandable,
 } from "../layout/family-lexicon";
@@ -30,7 +31,11 @@ const FUZZY_LOOKUP_BUDGET_MS = 8;
 const FUZZY_LOOKUP_TIME_CHECK_INTERVAL = 16;
 const FUZZY_LOOKUP_MAX_VERIFIED_CANDIDATES = 64;
 const FUZZY_LOOKUP_MATCH_LIMIT = 8;
+const FUZZY_PREFIX_PROBE_MAX_QUERY_LENGTH = 16;
+const FUZZY_PREFIX_PROBE_MAX_PROBES = 256;
+const FUZZY_PREFIX_PROBE_SCAN_BUDGET = 32;
 const MORPHOLOGY_LOOKUP_MATCH_LIMIT = 4;
+const FUZZY_PREFIX_PROBE_ALPHABET = "aeioubcdfghjklmnpqrstvwxyz0123456789";
 
 type PrefixLookupBudgetState = {
 	startedAtMs: number;
@@ -123,11 +128,23 @@ function lookupSortedQueryUnitFamilyMatches(
 	if (!allowFuzzyMatch || !shouldAttemptFuzzyRescue(queryUnit, queryAnalysis)) {
 		return [];
 	}
-	return collectBoundedFuzzyMatches(
+	const fuzzyMatches = collectBoundedFuzzyMatches(
 		base,
 		queryUnitText,
 		fuzzyBudgetState,
 		fuzzyRescueIndex,
+	);
+	if (fuzzyMatches.length > 0) {
+		return fuzzyMatches;
+	}
+	if (!allowPrefixMatch) {
+		return [];
+	}
+	return collectBoundedFuzzyPrefixProbeMatches(
+		base,
+		queryUnitText,
+		familyFlagsByFamilyId,
+		fuzzyBudgetState,
 	);
 }
 
@@ -303,6 +320,91 @@ function collectBoundedFuzzyMatches(
 					familyText,
 					matchKind: "fuzzy",
 					editDistance,
+				},
+				queryUnitText,
+				FUZZY_LOOKUP_MATCH_LIMIT,
+			);
+		}
+	}
+	if (nowMs() - fuzzyBudgetState.startedAtMs > FUZZY_LOOKUP_BUDGET_MS) {
+		fuzzyBudgetState.exhausted = true;
+	}
+	return matches;
+}
+
+function collectBoundedFuzzyPrefixProbeMatches(
+	base: ResidentBase,
+	queryUnitText: string,
+	familyFlagsByFamilyId: Uint8Array,
+	fuzzyBudgetState: FuzzyLookupBudgetState,
+): V3QueryFamilyMatch[] {
+	if (fuzzyBudgetState.exhausted || !isEligibleFuzzyPrefixProbeQuery(queryUnitText)) {
+		return [];
+	}
+	const matches: V3QueryFamilyMatch[] = [];
+	const seenShardLocalFamilySlots = new Set<number>();
+	let verifiedCandidateCount = 0;
+	for (const probeText of buildFuzzyPrefixProbeTexts(queryUnitText)) {
+		if (shouldAbortFuzzyLookup(fuzzyBudgetState, verifiedCandidateCount)) {
+			return matches;
+		}
+		const rangeStartShardLocalFamilySlot = findFirstShardLocalFamilySlotAtOrAfter(
+			base,
+			probeText,
+		);
+		let scannedPrefixFamilyCount = 0;
+		for (
+			let shardLocalFamilySlot = rangeStartShardLocalFamilySlot;
+			shardLocalFamilySlot < base.familyLexicon.shardLocalFamilyCount;
+			shardLocalFamilySlot += 1
+		) {
+			const familyText = getShardLocalFamilyText(base, shardLocalFamilySlot);
+			if (!familyText.startsWith(probeText)) {
+				break;
+			}
+			scannedPrefixFamilyCount += 1;
+			if (scannedPrefixFamilyCount > FUZZY_PREFIX_PROBE_SCAN_BUDGET) {
+				break;
+			}
+			if (seenShardLocalFamilySlots.has(shardLocalFamilySlot)) {
+				continue;
+			}
+			seenShardLocalFamilySlots.add(shardLocalFamilySlot);
+			verifiedCandidateCount += 1;
+			if (verifiedCandidateCount > FUZZY_LOOKUP_MAX_VERIFIED_CANDIDATES) {
+				return matches;
+			}
+			if (shouldAbortFuzzyLookup(fuzzyBudgetState, verifiedCandidateCount)) {
+				return matches;
+			}
+			const familyId = getFamilyIdForShardLocalFamilySlot(
+				base,
+				shardLocalFamilySlot,
+			);
+			const sourceMask = getFamilySourceMask(familyFlagsByFamilyId[familyId] ?? 0);
+			if (
+				(sourceMask & FAMILY_SOURCE_MASK_FUZZY_RESCUE_METADATA) === 0 ||
+				!canExpandFamilyPrefixForQuery(familyFlagsByFamilyId[familyId] ?? 0) ||
+				familyText.length <= queryUnitText.length
+			) {
+				continue;
+			}
+			if (
+				resolveEditDistanceAtMostOne(
+					queryUnitText,
+					familyText.slice(0, queryUnitText.length),
+				) !== 1
+			) {
+				continue;
+			}
+			insertBoundedPrefixMatch(
+				matches,
+				{
+					familyId,
+					shardLocalFamilySlot,
+					familyText,
+					matchKind: "fuzzy",
+					editDistance: 1,
 				},
 				queryUnitText,
 				FUZZY_LOOKUP_MATCH_LIMIT,
@@ -584,6 +686,48 @@ function isEligibleEnglishMorphologyQuery(queryUnitText: string): boolean {
 		/^[a-z]+$/u.test(queryUnitText) &&
 		/[aeiou]/u.test(queryUnitText)
 	);
+}
+
+function isEligibleFuzzyPrefixProbeQuery(queryUnitText: string): boolean {
+	return (
+		queryUnitText.length >= FUZZY_RESCUE_MIN_QUERY_LENGTH &&
+		queryUnitText.length <= FUZZY_PREFIX_PROBE_MAX_QUERY_LENGTH &&
+		/^[a-z0-9]+$/u.test(queryUnitText) &&
+		/[a-z]/u.test(queryUnitText)
+	);
+}
+
+function buildFuzzyPrefixProbeTexts(queryUnitText: string): string[] {
+	const probes: string[] = [];
+	const seen = new Set<string>();
+	for (
+		let index = 1;
+		index < queryUnitText.length &&
+		probes.length < FUZZY_PREFIX_PROBE_MAX_PROBES;
+		index += 1
+	) {
+		for (
+			let alphabetIndex = 0;
+			alphabetIndex < FUZZY_PREFIX_PROBE_ALPHABET.length &&
+			probes.length < FUZZY_PREFIX_PROBE_MAX_PROBES;
+			alphabetIndex += 1
+		) {
+			const replacement = FUZZY_PREFIX_PROBE_ALPHABET[alphabetIndex] ?? "";
+			if (replacement === queryUnitText[index]) {
+				continue;
+			}
+			const probeText =
+				queryUnitText.slice(0, index) +
+				replacement +
+				queryUnitText.slice(index + 1);
+			if (seen.has(probeText)) {
+				continue;
+			}
+			seen.add(probeText);
+			probes.push(probeText);
+		}
+	}
+	return probes;
 }
 
 function removeDoubledFinalConsonant(text: string): string {

@@ -198,7 +198,7 @@ export default {
 	"hybridModal.autoTriggerOnInput": "Auto trigger hybrid search after input",
 	"hybridModal.autoTriggerOnInput.desc": "If rerank API calls consume too many tokens, turn this off and press Enter to trigger hybrid search manually.",
 	"hybridModal.autoTriggerDebounceMs": "Auto trigger hybrid search interval",
-	"hybridModal.autoTriggerDebounceMs.desc": "Debounce interval for automatic hybrid search. Only applies when the search mode is hybrid.",
+	"hybridModal.autoTriggerDebounceMs.desc": "Debounce interval for automatic hybrid search, in milliseconds. Only applies when the search mode is hybrid.",
 	"hybridModal.maxResultCount": "Hybrid result count",
 	"hybridModal.maxResultCount.desc": "How many reranked hybrid results to return and display per search.",
 	"hybridModal.weeklyUsed": "This week used",
