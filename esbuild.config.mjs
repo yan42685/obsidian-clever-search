@@ -154,6 +154,21 @@ async function writeBundleAnalysis(metafile) {
     console.log(`main.js breakdown written to ${mainBreakdownPath}`);
 }
 
+async function removeStaleBundleAnalysis() {
+    const analysisPaths = [
+        pathUtil.join(DIST_PATH, "metafile.json"),
+        pathUtil.join(DIST_PATH, "analyze.txt"),
+        pathUtil.join(DIST_PATH, "main-breakdown.md"),
+    ];
+    for (const analysisPath of analysisPaths) {
+        try {
+            await fsUtil.promises.rm(analysisPath, { force: true });
+        } catch (err) {
+            console.warn(`Could not remove stale bundle analysis ${analysisPath}:`, err);
+        }
+    }
+}
+
 const DIST_PATH = "dist";
 const DEV_COMMAND_REGISTRY_STUB_PATH = pathUtil.resolve(
     "src/services/obsidian/command-registry.noop.ts",
@@ -231,7 +246,11 @@ const context = await esbuild.context(esbuildConfig);
 if (prod) {
     // 生产环境构建逻辑
     const result = await context.rebuild();
-    await writeBundleAnalysis(result.metafile);
+    if (analyzeBundle) {
+        await writeBundleAnalysis(result.metafile);
+    } else {
+        await removeStaleBundleAnalysis();
+    }
     
     // 自动将根目录的资源复制到 dist 文件夹，方便 GitHub Release 直接打包
     const filesToCopy = ["manifest.json", "styles.css"];
