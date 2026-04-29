@@ -387,7 +387,7 @@ type OpaqueBodyRescue = Readonly<{
 	promotesBodyWindow: boolean;
 }>;
 
-type HanBigramVisibilityEvidence = Readonly<{
+export type HanBigramVisibilityEvidence = Readonly<{
 	surfaceGroupIndex: number;
 	matchedBigrams: readonly string[];
 }>;
@@ -799,6 +799,8 @@ export function buildPackingProfile(
 						hanRescueArtifacts.metadataWitnessBySurfaceGroupIndex,
 					bodyEvaluationBySurfaceGroupIndex:
 						hanRescueArtifacts.bodyEvaluationBySurfaceGroupIndex,
+					allowBodySurfaceGroupIndices:
+						allowBodyOpaqueRescueSurfaceGroupIndices,
 				}),
 	);
 	const metadataPackingSignature = buildMetadataPackingSignature(realizedFamilies);
@@ -2816,7 +2818,7 @@ export function materializeOpaqueBodyRescues(params: Readonly<{
 	return out;
 }
 
-function collectHanBigramVisibilityEvidence(params: Readonly<{
+export function collectHanBigramVisibilityEvidence(params: Readonly<{
 	metadataWitnessBySurfaceGroupIndex: ReadonlyMap<
 		number,
 		SharedHanMetadataWitnessAssessmentCandidate
@@ -2825,6 +2827,7 @@ function collectHanBigramVisibilityEvidence(params: Readonly<{
 		number,
 		HanBodyRescueEvaluation<BodyWindowCandidate>
 	>;
+	allowBodySurfaceGroupIndices?: ReadonlySet<number> | null;
 }>): HanBigramVisibilityEvidence[] {
 	const matchedBigramsByGroup = new Map<number, Set<string>>();
 	for (const [surfaceGroupIndex, witness] of params.metadataWitnessBySurfaceGroupIndex) {
@@ -2836,6 +2839,15 @@ function collectHanBigramVisibilityEvidence(params: Readonly<{
 		}
 	}
 	for (const [surfaceGroupIndex, evaluation] of params.bodyEvaluationBySurfaceGroupIndex) {
+		if (params.allowBodySurfaceGroupIndices === null) {
+			continue;
+		}
+		if (
+			params.allowBodySurfaceGroupIndices !== undefined &&
+			!params.allowBodySurfaceGroupIndices.has(surfaceGroupIndex)
+		) {
+			continue;
+		}
 		if (evaluation.assessment.strength === "none") {
 			continue;
 		}

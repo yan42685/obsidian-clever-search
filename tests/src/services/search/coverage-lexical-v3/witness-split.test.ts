@@ -8,7 +8,10 @@ import {
 import {
 	getFamilyText,
 } from "src/services/search/coverage-lexical-v3/recall";
-import { materializeOpaqueBodyRescues } from "src/services/search/coverage-lexical-v3/ranking/containers";
+import {
+	collectHanBigramVisibilityEvidence,
+	materializeOpaqueBodyRescues,
+} from "src/services/search/coverage-lexical-v3/ranking/containers";
 
 function createDocument(
 	overrides: Partial<IndexedDocument> &
@@ -141,6 +144,78 @@ describe("coverage lexical v3 witness split", () => {
 				queryUnitText: "赢宋",
 				familyText: "赢宋",
 			}),
+		]);
+	});
+
+	test("body opaque rescue gate also suppresses unadmitted Han visibility evidence", () => {
+		const createBodyEvaluation = (
+			surfaceGroupIndex: number,
+			matchedBigram: string,
+		) =>
+			({
+				surfaceGroupIndex,
+				bodyWindow: {
+					blockIds: [surfaceGroupIndex],
+					boundaryCrossingCount: 0,
+					coveredUnitIndices: [surfaceGroupIndex],
+					coveredDistinctUnitCount: 1,
+					approxWindowStart: 0,
+					approxWindowEnd: 2,
+					approxHeadTailSpan: 2,
+					approxMaxAdjacentGap: 0,
+					approxTotalGapMass: 0,
+					preservesQueryOrder: true,
+					representatives: [],
+				},
+				assessment: {
+					surfaceGroupIndex,
+					context: "body",
+					rescueMode: "whole_group_when_real_miss",
+					strength: "strong",
+					matchedBigramCount: 1,
+					matchedRealAnchorCount: 0,
+					coversStartAnchor: true,
+					coversEndAnchor: true,
+					coversEndpoints: true,
+					preservesSurfaceOrder: true,
+					rankingScore: 1,
+					approxMaxAdjacentGap: 0,
+					approxHeadTailSpan: 2,
+					blockIds: [surfaceGroupIndex],
+					witnessKind: "body",
+				},
+				unresolvedBigrams: [matchedBigram],
+				matchedBigrams: [matchedBigram],
+				matchedOccurrencesByBlockId: new Map(),
+			}) as never;
+		const bodyEvaluationBySurfaceGroupIndex = new Map([
+			[0, createBodyEvaluation(0, "赢宋")],
+			[1, createBodyEvaluation(1, "星河")],
+		]);
+		const metadataWitnessBySurfaceGroupIndex = new Map() as never;
+
+		expect(
+			collectHanBigramVisibilityEvidence({
+				metadataWitnessBySurfaceGroupIndex,
+				bodyEvaluationBySurfaceGroupIndex,
+				allowBodySurfaceGroupIndices: null,
+			}),
+		).toEqual([]);
+		expect(
+			collectHanBigramVisibilityEvidence({
+				metadataWitnessBySurfaceGroupIndex,
+				bodyEvaluationBySurfaceGroupIndex,
+				allowBodySurfaceGroupIndices: new Set([1]),
+			}),
+		).toEqual([{ surfaceGroupIndex: 1, matchedBigrams: ["星河"] }]);
+		expect(
+			collectHanBigramVisibilityEvidence({
+				metadataWitnessBySurfaceGroupIndex,
+				bodyEvaluationBySurfaceGroupIndex,
+			}),
+		).toEqual([
+			{ surfaceGroupIndex: 0, matchedBigrams: ["赢宋"] },
+			{ surfaceGroupIndex: 1, matchedBigrams: ["星河"] },
 		]);
 	});
 });
