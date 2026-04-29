@@ -1693,17 +1693,17 @@ export class FileSnapshotStore {
 		validDocRefs: ReadonlySet<number>,
 		getKey: (row: Row) => Key,
 	): Promise<void> {
-		let lastDocRef: number | null = null;
+		let lastKey: Key | null = null;
 		while (true) {
 			const rows: Row[] =
-				lastDocRef === null
+				lastKey === null
 					? await getTable()
-						.orderBy("docRef")
+						.orderBy(":id")
 						.limit(FileSnapshotStore.INDEXED_SNAPSHOT_SCAN_BATCH_SIZE)
 						.toArray()
 					: await getTable()
-						.where("docRef")
-						.above(lastDocRef)
+						.where(":id")
+						.above(lastKey)
 						.limit(FileSnapshotStore.INDEXED_SNAPSHOT_SCAN_BATCH_SIZE)
 						.toArray();
 			if (rows.length === 0) {
@@ -1717,7 +1717,7 @@ export class FileSnapshotStore {
 				await deleteRows(staleKeys);
 			}
 
-			lastDocRef = rows[rows.length - 1].docRef;
+			lastKey = getKey(rows[rows.length - 1]);
 		}
 	}
 

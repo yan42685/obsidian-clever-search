@@ -350,7 +350,7 @@ function createHybridIndexedRefTable(initialRows: HybridIndexedFileRefRow[] = []
                     .filter((row) =>
                       field === "docRef"
                         ? (row.docRef ?? 0) > Number(lastValue)
-                        : (row.path ?? "").localeCompare(String(lastValue)) > 0,
+                        : (row.docRef ?? 0) > Number(lastValue),
                     )
                     .slice(0, limit),
               };
@@ -815,6 +815,80 @@ describe("FileSnapshotStore", () => {
       }),
     );
     await expect(database.db.hybridIndexedFileRefs.get(stalePath)).resolves.toBeUndefined();
+  });
+
+  test("retainOnlyFiles scans every generation for stale docRefs across batches", async () => {
+    const originalBatchSize = (FileSnapshotStore as any).INDEXED_SNAPSHOT_SCAN_BATCH_SIZE;
+    (FileSnapshotStore as any).INDEXED_SNAPSHOT_SCAN_BATCH_SIZE = 2;
+    try {
+      const keepPath = "docs/keep.md";
+      const stalePath = "docs/stale.md";
+      const { store, database } = createStoreHarness({
+        fileSnapshots: [
+          {
+            filePath: stalePath,
+            plainText: "stale one",
+            generation: 1,
+          },
+          {
+            filePath: stalePath,
+            plainText: "stale two",
+            generation: 2,
+          },
+          {
+            filePath: stalePath,
+            plainText: "stale three",
+            generation: 3,
+          },
+          {
+            filePath: keepPath,
+            plainText: "keep",
+            generation: 4,
+          },
+        ],
+        hybridDirtyShadows: [
+          {
+            filePath: stalePath,
+            plainText: "stale shadow one",
+            generation: 1,
+          },
+          {
+            filePath: stalePath,
+            plainText: "stale shadow two",
+            generation: 2,
+          },
+          {
+            filePath: stalePath,
+            plainText: "stale shadow three",
+            generation: 3,
+          },
+          {
+            filePath: keepPath,
+            plainText: "keep shadow",
+            generation: 4,
+          },
+        ],
+      });
+
+      await store.retainOnlyFiles(new Set([keepPath]));
+
+      const snapshotRows = Array.from(database.db.fileSnapshots.rows.values());
+      const shadowRows = Array.from(database.db.hybridDirtyShadows.rows.values());
+      expect(snapshotRows).toEqual([
+        expect.objectContaining({
+          filePath: keepPath,
+          generation: 4,
+        }),
+      ]);
+      expect(shadowRows).toEqual([
+        expect.objectContaining({
+          filePath: keepPath,
+          generation: 4,
+        }),
+      ]);
+    } finally {
+      (FileSnapshotStore as any).INDEXED_SNAPSHOT_SCAN_BATCH_SIZE = originalBatchSize;
+    }
   });
 
   test("assigns and reuses a stable docRef across hybrid refs and indexed snapshots", async () => {
