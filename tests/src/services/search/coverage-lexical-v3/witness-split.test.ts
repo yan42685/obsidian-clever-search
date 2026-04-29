@@ -1,8 +1,14 @@
 ﻿import type { IndexedDocument } from "src/globals/search-types";
 import { buildResidentHotBaseArtifacts } from "src/services/search/coverage-lexical-v3/build";
 import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
-import type { V3DocumentTokenizer } from "src/services/search/coverage-lexical-v3/query";
-import { getFamilyText } from "src/services/search/coverage-lexical-v3/recall";
+import {
+	analyzeQuery,
+	type V3DocumentTokenizer,
+} from "src/services/search/coverage-lexical-v3/query";
+import {
+	getFamilyText,
+} from "src/services/search/coverage-lexical-v3/recall";
+import { materializeOpaqueBodyRescues } from "src/services/search/coverage-lexical-v3/ranking/containers";
 
 function createDocument(
 	overrides: Partial<IndexedDocument> &
@@ -60,5 +66,81 @@ describe("coverage lexical v3 witness split", () => {
 		expect(result.rankedCandidates[0].strongestHanSurfaceCompletionTier).toBe(
 			"body_window",
 		);
+	});
+
+	test("explicit body opaque rescue gate suppresses unadmitted Han body rescues", () => {
+		const queryAnalysis = analyzeQuery("赢宋", ["赢宋"]);
+		const bodyEvaluation = {
+			surfaceGroupIndex: 0,
+			bodyWindow: {
+				blockIds: [0],
+				boundaryCrossingCount: 0,
+				coveredUnitIndices: [0],
+				coveredDistinctUnitCount: 1,
+				approxWindowStart: 0,
+				approxWindowEnd: 2,
+				approxHeadTailSpan: 2,
+				approxMaxAdjacentGap: 0,
+				approxTotalGapMass: 0,
+				preservesQueryOrder: true,
+				representatives: [],
+			},
+			assessment: {
+				surfaceGroupIndex: 0,
+				context: "body",
+				rescueMode: "whole_group_when_real_miss",
+				strength: "strong",
+				matchedBigramCount: 1,
+				matchedRealAnchorCount: 0,
+				coversStartAnchor: true,
+				coversEndAnchor: true,
+				coversEndpoints: true,
+				preservesSurfaceOrder: true,
+				rankingScore: 1,
+				approxMaxAdjacentGap: 0,
+				approxHeadTailSpan: 2,
+				blockIds: [0],
+				witnessKind: "body",
+			},
+			unresolvedBigrams: ["赢宋"],
+			matchedBigrams: ["赢宋"],
+			matchedOccurrencesByBlockId: new Map(),
+		};
+		const bodyEvaluationBySurfaceGroupIndex = new Map([[0, bodyEvaluation]]) as never;
+
+		expect(
+			materializeOpaqueBodyRescues({
+				queryAnalysis,
+				bodyEvaluationBySurfaceGroupIndex,
+				allowSurfaceGroupIndices: null,
+			}),
+		).toEqual([]);
+		expect(
+			materializeOpaqueBodyRescues({
+				queryAnalysis,
+				bodyEvaluationBySurfaceGroupIndex,
+				allowSurfaceGroupIndices: new Set(),
+			}),
+		).toEqual([]);
+		expect(
+			materializeOpaqueBodyRescues({
+				queryAnalysis,
+				bodyEvaluationBySurfaceGroupIndex,
+				allowSurfaceGroupIndices: new Set([1]),
+			}),
+		).toEqual([]);
+		expect(
+			materializeOpaqueBodyRescues({
+				queryAnalysis,
+				bodyEvaluationBySurfaceGroupIndex,
+				allowSurfaceGroupIndices: new Set([0]),
+			}),
+		).toEqual([
+			expect.objectContaining({
+				surfaceGroupIndex: 0,
+				queryUnitText: "赢宋",
+				familyText: "赢宋",
+			}),
+		]);
 	});
 });

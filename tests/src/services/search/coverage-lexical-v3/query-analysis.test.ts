@@ -2,6 +2,24 @@ import { analyzeQuery } from "src/services/search/coverage-lexical-v3/query";
 import { markCoveredHanChars as markRecallCoveredHanChars } from "src/services/search/coverage-lexical-v3/recall/han-surface-groups";
 
 describe("coverage lexical v3 query analysis", () => {
+	test("filters Latin surfaces that the tokenizer omitted from query terms", () => {
+		const analysis = analyzeQuery("focus on workig in", ["focus", "workig"]);
+
+		expect(analysis.surfaceGroups.map((group) => group.text)).toEqual([
+			"focus",
+			"workig",
+		]);
+		expect(
+			analysis.primaryUnits.map((unit) => ({
+				text: unit.text,
+				surfaceGroupIndex: unit.surfaceGroupIndex,
+			})),
+		).toEqual([
+			{ text: "focus", surfaceGroupIndex: 0 },
+			{ text: "workig", surfaceGroupIndex: 1 },
+		]);
+	});
+
 	test("selects a stable non-overlapping Han cover over overlapping tokenizer terms", () => {
 		const analysis = analyzeQuery("赢宋窄体", ["赢宋窄体", "赢宋", "窄体"]);
 

@@ -66,15 +66,27 @@ export function analyzeQuery(
 	const normalizedQueryTerms = queryTerms
 		.map((term) => normalizeText(term).trim())
 		.filter((term) => term.length > 0);
+	const normalizedQueryTermSet = new Set(normalizedQueryTerms);
+	const shouldFilterLatinSurfacesByQueryTerms = normalizedQueryTerms.length > 0;
 	const initialSurfaceGroups = (normalizedQueryText.match(RAW_SURFACE_REGEX) ?? [])
 		.map((text) => text.trim())
 		.filter((text) => text.length > 0)
-		.map((text, index) => ({
-			index,
+		.map((text) => ({
 			text,
 			kind: classifySurfaceKind(text),
+		}))
+		.filter(
+			(group) =>
+				group.kind === "han" ||
+				!shouldFilterLatinSurfacesByQueryTerms ||
+				normalizedQueryTermSet.has(group.text),
+		)
+		.map((group, index) => ({
+			index,
+			text: group.text,
+			kind: group.kind,
 			hanBigramTexts:
-				classifySurfaceKind(text) === "han" ? extractHanBigrams(text) : [],
+				group.kind === "han" ? extractHanBigrams(group.text) : [],
 		}));
 	const primaryUnits: V3QueryUnit[] = [];
 	const hanBackstopGroups: V3HanBackstopGroup[] = [];

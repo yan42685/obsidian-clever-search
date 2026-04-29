@@ -2768,7 +2768,7 @@ function materializeOpaqueMetadataRescueUnits(params: Readonly<{
 	return out;
 }
 
-function materializeOpaqueBodyRescues(params: Readonly<{
+export function materializeOpaqueBodyRescues(params: Readonly<{
 	queryAnalysis: V3QueryAnalysis;
 	bodyEvaluationBySurfaceGroupIndex: ReadonlyMap<
 		number,

@@ -135,6 +135,42 @@ describe("coverage lexical v3 engine", () => {
 		expect(candidate.realizedFamilies).toHaveLength(1);
 	});
 
+	test("short exact latin units do not prevent fuzzy rescue for a neighboring typo", () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.buildResidentIndexView([
+			createDocument({
+				path: "all_notes/unsorted/focus.md",
+				basename: "Focus on working IN Obsidian, not ON Obsidian",
+				folder: "all_notes/unsorted",
+				content:
+					"# Focus on working IN Obsidian, not ON Obsidian\n\nObsidian, not ON Obsidian.",
+			}),
+		]);
+
+		const prepared = engine.prepareSearch(
+			"focus on workig in",
+			["focus", "workig"],
+			{ allowFuzzyMatch: true, allowPrefixMatch: true },
+		);
+		expect(prepared.queryAnalysis.primaryUnits.map((unit) => unit.text)).toEqual([
+			"focus",
+			"workig",
+		]);
+		const workigMatches = prepared.unitFamilyMatches.find(
+			(unitMatches) => unitMatches.queryUnitText === "workig",
+		);
+
+		expect(workigMatches?.matches).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					familyText: "working",
+					matchKind: "fuzzy",
+					editDistance: 1,
+				}),
+			]),
+		);
+	});
+
 	test("han tokenizer real terms become the only primary units for ranking", () => {
 		const engine = new CoverageLexicalV3Engine();
 		const tokenizer = createDocumentTokenizer({
@@ -503,7 +539,7 @@ describe("coverage lexical v3 engine", () => {
 					matchKind: "opaque_exact",
 				}),
 				expect.objectContaining({
-					querySurfaceGroupIndex: 2,
+					querySurfaceGroupIndex: 1,
 					familyText: "\u8d62\u5b8b",
 					matchKind: "opaque_exact",
 				}),
