@@ -82,18 +82,28 @@ export async function collectHybridStoredPathSummariesForPaths(params: {
     const batchPaths = uniquePaths.slice(start, start + params.batchSize);
     const registryRows = await params.database.getDocRegistryEntries(batchPaths);
     const docRefs = batchPaths.map((path) => registryRows.get(path)?.docRef ?? -1);
+    const indexedFileRefs = await params.database.db.hybridIndexedFileRefs.bulkGet(
+      docRefs,
+    );
+    const inspectedGenerationByDocRef = new Map<number, number | undefined>();
     const generationKeys = batchPaths.map((path, index) => {
       const row = registryRows.get(path);
-      return row == null ? "__missing__" : `${docRefs[index]}:${row.liveGeneration}`;
+      const docRef = docRefs[index];
+      const generation = indexedFileRefs[index]?.generation ?? row?.liveGeneration;
+      if (docRef !== -1) {
+        inspectedGenerationByDocRef.set(docRef, generation);
+      }
+      return row == null || generation == null
+        ? "__missing__"
+        : `${docRef}:${generation}`;
     });
     const chunkQuery = params.database.db.hybridChunks.where("docRef");
-    const [chunkRows, vectorRows, indexedFileRefs, snapshotRows, shadowRows] =
+    const [chunkRows, vectorRows, snapshotRows, shadowRows] =
       await Promise.all([
         chunkQuery.anyOf === undefined
           ? Promise.resolve([])
           : chunkQuery.anyOf(docRefs).toArray(),
         params.database.db.hybridChunkVectors.bulkGet(generationKeys),
-        params.database.db.hybridIndexedFileRefs.bulkGet(docRefs),
         params.database.db.fileSnapshots.bulkGet(generationKeys),
         params.database.db.hybridDirtyShadows.bulkGet(generationKeys),
       ]);
@@ -106,6 +116,14 @@ export async function collectHybridStoredPathSummariesForPaths(params: {
     for (const row of chunkRows) {
       const path = pathByDocRef.get(row.docRef);
       if (path == null) {
+        continue;
+      }
+      const inspectedGeneration = inspectedGenerationByDocRef.get(row.docRef);
+      if (
+        inspectedGeneration !== undefined &&
+        row.generation !== undefined &&
+        row.generation !== inspectedGeneration
+      ) {
         continue;
       }
       const summary = getOrCreateHybridStoredPathSummary(summaries, path);
