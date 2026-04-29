@@ -58,6 +58,7 @@ type HybridQuerySessionControllerOptions = {
 	getSearchType: () => SearchType;
 	getIsHybrid: () => boolean;
 	getHybridMode: () => HybridSearchMode;
+	getAutoTriggerDelayMs: () => number;
 	getCurrentQueryText: () => string;
 	getCachedResult: (query: string) => SearchResult | undefined;
 	setCachedResult: (query: string, result: SearchResult) => void;
@@ -184,12 +185,12 @@ export class AutoHybridFallbackController {
 
 export class HybridQuerySessionController {
 	private static readonly PREPARE_DEBOUNCE_MS = 100;
-	private static readonly RERANK_GATE_MS = 400;
 
 	private readonly searchService: SearchService;
 	private readonly getSearchType: () => SearchType;
 	private readonly getIsHybrid: () => boolean;
 	private readonly getHybridMode: () => HybridSearchMode;
+	private readonly getAutoTriggerDelayMs: () => number;
 	private readonly getCurrentQueryText: () => string;
 	private readonly getCachedResult: (query: string) => SearchResult | undefined;
 	private readonly setCachedResult: (query: string, result: SearchResult) => void;
@@ -206,6 +207,7 @@ export class HybridQuerySessionController {
 		this.getSearchType = options.getSearchType;
 		this.getIsHybrid = options.getIsHybrid;
 		this.getHybridMode = options.getHybridMode;
+		this.getAutoTriggerDelayMs = options.getAutoTriggerDelayMs;
 		this.getCurrentQueryText = options.getCurrentQueryText;
 		this.getCachedResult = options.getCachedResult;
 		this.setCachedResult = options.setCachedResult;
@@ -216,7 +218,7 @@ export class HybridQuerySessionController {
 		this.cancelSession(this.currentSession);
 	}
 
-	handleInput(query: string): void {
+	handleInput(query: string, options: { immediate?: boolean } = {}): void {
 		if (!this.shouldHandle()) {
 			this.clear();
 			return;
@@ -235,14 +237,20 @@ export class HybridQuerySessionController {
 		}
 
 		this.cancelSession(this.currentSession);
+		const rerankGateMs = options.immediate
+			? 0
+			: this.getNormalizedAutoTriggerDelayMs();
+		const prepareDelayMs = options.immediate
+			? 0
+			: HybridQuerySessionController.PREPARE_DEBOUNCE_MS;
+		const now = Date.now();
 		const session: HybridQuerySession = {
 			id: ++this.nextSessionId,
 			query,
 			prepareTimer: null,
 			rerankGateTimer: null,
-			startedAt: Date.now(),
-			rerankEligibleAt:
-				Date.now() + HybridQuerySessionController.RERANK_GATE_MS,
+			startedAt: now,
+			rerankEligibleAt: now + rerankGateMs,
 			abortPrepare: new AbortController(),
 			abortRerank: new AbortController(),
 			cancelled: false,
@@ -252,7 +260,7 @@ export class HybridQuerySessionController {
 		session.prepareTimer = setTimeout(() => {
 			session.prepareTimer = null;
 			void this.runPrepare(session);
-		}, HybridQuerySessionController.PREPARE_DEBOUNCE_MS);
+		}, prepareDelayMs);
 	}
 
 	private shouldHandle(): boolean {
@@ -260,6 +268,14 @@ export class HybridQuerySessionController {
 			this.getSearchType() === SearchType.IN_VAULT &&
 			this.getIsHybrid()
 		);
+	}
+
+	private getNormalizedAutoTriggerDelayMs(): number {
+		const value = this.getAutoTriggerDelayMs();
+		if (!Number.isFinite(value)) {
+			return 400;
+		}
+		return Math.min(5000, Math.max(200, Math.round(value)));
 	}
 
 	private cancelSession(session: HybridQuerySession | null): void {
@@ -550,4 +566,3 @@ export class HybridFreshnessNoticeController {
 		].join("");
 	}
 }
-

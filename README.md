@@ -6,12 +6,14 @@
 
 ## What's New in 0.3
 
-Version 0.3 focuses on making Clever Search feel faster, more forgiving, and easier to reuse across repeated searches.
+Version 0.3 brings a full search capability upgrade across the lexical engine, hybrid search, search history, and Quick entry points, making Clever Search feel faster, more forgiving, and easier to reuse across repeated searches.
 
-- Hybrid vault search: combine lexical retrieval with semantic ranking, with graceful fallback to lexical-only results when the semantic path is unavailable
+- Lexical engine upgrade: the self-built Coverage Lexical engine now fully replaces MiniSearch, making results feel more intuitive
+- Hybrid vault search: lexical-vector hybrid search now replaces Semantic Search as the main complement for cross-language, synonym, and near-synonym queries; when the hybrid path is unavailable, results gracefully fall back to lexical-only search
 - Search history autocomplete: only previously confirmed queries are recorded, then reused for fuzzy-ranked candidates, top-history ghost completion, and matched-character emphasis while typing
 - Search history controls: enable or disable history, choose the maximum history size, clear saved history from settings, and remove individual entries directly from the candidate list
 - Cleaner repeat-search workflow: history suggestions support mouse selection, keyboard navigation, `Ctrl+R` manual toggle, `Tab` ghost acceptance, `Delete` or `x` removal, and Enter confirmation without changing result ranking logic
+- New QuickSwitch and QuickCommand entries: search history is persisted, and frequently confirmed item preferences are remembered
 
 ## Demo
 
@@ -29,7 +31,7 @@ Version 0.3 focuses on making Clever Search feel faster, more forgiving, and eas
 
 ### Major
 
-- [x] Hybrid search in the vault (lexical + semantic, with fallback)
+- [x] Hybrid search in the vault (lexical + vector, with fallback)
 - [x] Semantic search in the vault (Windows only)
 - [x] Fuzzy search in the vault
 - [x] Fuzzy search inside current note
@@ -56,13 +58,6 @@ Version 0.3 focuses on making Clever Search feel faster, more forgiving, and eas
 ### Integrate with other plugins
 
 - [x] `Style Settings`
-- [x] `Omnisearch`
-  <details><summary>Details</summary>
-      New command:<br>"Search in file with last Omnisearch query"<br><br>
-      Use case:<br>
-      When you confirm an in-vault search by Omnisearch and think there might be more matched text that are not listed by Omnisearch in current file, trigger this command will open a in-file search modal and fill the search bar with last query in Omnisearch.<br><br>
-      Note: <br>This is just a temporary workaround for a better in-vault search. I will implement full-featured in-vault search without dependency on Omnisearch in the future.
-  </details>
 
 ## Available Commands
 
@@ -75,17 +70,12 @@ Version 0.3 focuses on making Clever Search feel faster, more forgiving, and eas
 | Modal    | Previous subItem                                                   | `Ctrl-P`                 |
 | Modal    | Confirm item                                                       | `Enter` / `Right Click` / `Double Click` |
 | Modal | Confirm item in the background | `Ctrl` + `Enter` / `Right Click` / `Double Click` |
-| Modal    | Toggle lexical / semantic search                                                    | `Ctrl-S`                 |
+| Modal    | Toggle lexical / hybrid search                                                      | `Ctrl-S`                 |
 | Modal    | Insert file link                                                    | `Alt-I`                 |
-| Obsidian | Search in vault semantically                                       | undefined                |
+| Obsidian | Search in vault hybrid                                             | undefined                |
 | Obsidian | Search in vault lexically                                          | undefined                |
 | Obsidian | Search in file                                                     | undefined                |
-| Obsidian | Search in file with last Omnisearch query (preserved as a tribute) | undefined                |
 | Obsidian | Toggle privacy mode                                                | undefined                |
-
-## Limitations
-
-In-file Search performance may be slower when a file contains over 500k characters. However, there is no such performance limitation for in-vault search.
 
 ## Installation
 

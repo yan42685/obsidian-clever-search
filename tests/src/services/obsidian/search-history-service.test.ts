@@ -96,4 +96,64 @@ describe("SearchHistoryService", () => {
 			"delta note",
 		]);
 	});
+
+	test("keeps QuickSwitch history independent from search query history", async () => {
+		const { service, setting } = createServiceHarness();
+		setting.searchHistory.enabled = false;
+		setting.quickSwitchHistory.enabled = true;
+
+		await service.recordNavigationSelection("alpha", {
+			path: "notes/a.md",
+			primaryText: "A",
+			kind: "file",
+			openLinkText: "notes/a.md",
+		});
+		await service.recordNavigationSelection("cmd", {
+			path: "app:open",
+			primaryText: "Open",
+			kind: "quickCommand",
+			openLinkText: "app:open",
+		});
+
+		expect(service.getRecentNavigationSelections()).toHaveLength(1);
+		expect(service.getRecentQuickCommandSelections()).toHaveLength(1);
+		expect(service.getNavigationHabitSignals("alpha").get("notes/a.md")).toMatchObject({
+			querySelectionCount: 1,
+			totalSelectionCount: 2,
+		});
+		expect(service.getQuickCommandHabitSignals("cmd").get("app:open")).toMatchObject({
+			querySelectionCount: 1,
+			totalSelectionCount: 2,
+		});
+	});
+
+	test("does not record or expose QuickSwitch history when QuickSwitch history is disabled", async () => {
+		const { service, setting, plugin } = createServiceHarness();
+		setting.quickSwitchHistory.enabled = false;
+
+		await service.recordNavigationSelection("alpha", {
+			path: "notes/a.md",
+			primaryText: "A",
+			kind: "file",
+			openLinkText: "notes/a.md",
+		});
+
+		setting.quickSwitchHistory.navigationEntries = [
+			{
+				path: "notes/old.md",
+				primaryText: "Old",
+				kind: "file",
+				openLinkText: "notes/old.md",
+				timestamp: 1000,
+				count: 1,
+				queries: [{ queryText: "old", timestamp: 1000, count: 1 }],
+			},
+		];
+
+		expect(plugin.saveData).not.toHaveBeenCalled();
+		expect(service.getRecentNavigationSelections()).toEqual([]);
+		expect(service.getRecentQuickCommandSelections()).toEqual([]);
+		expect(service.getNavigationHabitSignals("old").size).toBe(0);
+		expect(service.getQuickCommandHabitSignals("cmd").size).toBe(0);
+	});
 });

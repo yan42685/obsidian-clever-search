@@ -106,6 +106,31 @@ describe("Embedder response validation", () => {
 	});
 });
 
+describe("DashScope API domain normalization", () => {
+	test.each([
+		[undefined, "dashscope.aliyuncs.com"],
+		["", "dashscope.aliyuncs.com"],
+		["dashscope.aliyuncs.com", "dashscope.aliyuncs.com"],
+		["dashscope.aliyuncs.com/", "dashscope.aliyuncs.com"],
+		["dashscope.aliyuncs.com/compatible-mode", "dashscope.aliyuncs.com"],
+		["dashscope.aliyuncs.com/compatible-mode/", "dashscope.aliyuncs.com"],
+		["http://dashscope.aliyuncs.com/compatible-mode/", "dashscope.aliyuncs.com"],
+		["https://dashscope.aliyuncs.com/compatible-mode/", "dashscope.aliyuncs.com"],
+	])("normalizes %p to %p", (input, expected) => {
+		const { normalizeApiDomain } = require("src/services/search/hybrid/embedder");
+
+		expect(normalizeApiDomain(input)).toBe(expected);
+	});
+
+	test("builds compatible-mode path for embeddings from the normalized host", () => {
+		const { buildDashScopeApiUrl } = require("src/services/search/hybrid/embedder");
+
+		expect(
+			buildDashScopeApiUrl("dashscope.aliyuncs.com/compatible-mode/", "embedding"),
+		).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings");
+	});
+});
+
 type MockTokenRecord = {
 	id?: number;
 	filePath: string;

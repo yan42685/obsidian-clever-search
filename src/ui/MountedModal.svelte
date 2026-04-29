@@ -104,6 +104,7 @@
 		getSearchType: () => searchType,
 		getIsHybrid: () => isHybrid,
 		getHybridMode: () => hybridMode,
+		getAutoTriggerDelayMs: () => setting.hybrid.autoTriggerDebounceMs ?? 400,
 		getCurrentQueryText: () => queryText,
 		getCachedResult: (query) => cachedResult.get(query),
 		setCachedResult: (query, result) => {
@@ -379,10 +380,23 @@
 			});
 		}
 		if (searchType === SearchType.IN_VAULT && isHybrid) {
-			hybridQuerySessionController.handleInput(queryText);
+			if (setting.hybrid.autoTriggerOnInput ?? true) {
+				hybridQuerySessionController.handleInput(queryText);
+			} else {
+				hybridQuerySessionController.clear();
+			}
 			return;
 		}
 		hybridQuerySessionController.clear();
+		handleInputDebounced();
+	}
+
+	function handleManualSearch() {
+		if (searchType === SearchType.IN_VAULT && isHybrid) {
+			latestSearchTrigger = "input";
+			hybridQuerySessionController.handleInput(queryText, { immediate: true });
+			return;
+		}
 		handleInputDebounced();
 	}
 
@@ -565,7 +579,15 @@
 	}
 	viewHelper.focusInput();
 	latestSearchTrigger = "initial_mount";
-	handleInputAsync();
+	if (
+		searchType === SearchType.IN_VAULT &&
+		isHybrid &&
+		!(setting.hybrid.autoTriggerOnInput ?? true)
+	) {
+		searchResult = new SearchResult("no result", []);
+	} else {
+		handleInputAsync();
+	}
 </script>
 
 <div class="search-container">
@@ -575,6 +597,7 @@
 			bind:queryText
 			{matchCountText}
 			on:querychange={handleInput}
+			on:enter={handleManualSearch}
 		/>
 		<div class="result-items">
 			<!-- ul used to keep button positioning stable when the outer container scrolls -->

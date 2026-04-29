@@ -78,6 +78,10 @@ export class SearchHistoryService {
 		return this.setting.searchHistory.enabled;
 	}
 
+	isQuickSwitchHistoryEnabled(): boolean {
+		return this.setting.quickSwitchHistory.enabled;
+	}
+
 	getEntryCount(): number {
 		return this.getEntries().length;
 	}
@@ -125,7 +129,7 @@ export class SearchHistoryService {
 			openLinkText?: string;
 		},
 	): Promise<void> {
-		if (!this.isEnabled()) {
+		if (!this.isQuickSwitchHistoryEnabled()) {
 			return;
 		}
 
@@ -185,18 +189,27 @@ export class SearchHistoryService {
 	}
 
 	getRecentNavigationSelections(limit = 6): RecentNavigationSelection[] {
+		if (!this.isQuickSwitchHistoryEnabled()) {
+			return [];
+		}
 		return this.getQuickSwitchNavigationEntries()
 			.slice(0, limit)
 			.map((entry) => this.toRecentNavigationSelection(entry));
 	}
 
 	getRecentQuickCommandSelections(limit = 8): RecentNavigationSelection[] {
+		if (!this.isQuickSwitchHistoryEnabled()) {
+			return [];
+		}
 		return this.getQuickSwitchQuickCommandEntries()
 			.slice(0, limit)
 			.map((entry) => this.toRecentNavigationSelection(entry));
 	}
 
 	getNavigationHabitSignals(queryText: string): Map<string, NavigationHabitSignal> {
+		if (!this.isQuickSwitchHistoryEnabled()) {
+			return new Map();
+		}
 		return this.getQuickSwitchHabitSignals(
 			this.getQuickSwitchNavigationEntries(),
 			queryText,
@@ -204,6 +217,9 @@ export class SearchHistoryService {
 	}
 
 	getQuickCommandHabitSignals(queryText: string): Map<string, NavigationHabitSignal> {
+		if (!this.isQuickSwitchHistoryEnabled()) {
+			return new Map();
+		}
 		return this.getQuickSwitchHabitSignals(
 			this.getQuickSwitchQuickCommandEntries(),
 			queryText,
@@ -431,44 +447,7 @@ export class SearchHistoryService {
 
 	private getQuickSwitchHistorySetting() {
 		this.ensureSettingFresh();
-		const quickSwitchHistory = (this.setting.quickSwitchHistory ??= {
-			maxItems: 5000,
-			navigationEntries: [],
-			quickCommandEntries: [],
-		}) as typeof this.setting.quickSwitchHistory & {
-			entries?: QuickSwitchHistoryEntry[];
-		};
-
-		const legacyEntries = Array.isArray(quickSwitchHistory.entries)
-			? quickSwitchHistory.entries
-			: [];
-		const navigationEntries = Array.isArray(quickSwitchHistory.navigationEntries)
-			? quickSwitchHistory.navigationEntries
-			: [];
-		const quickCommandEntries = Array.isArray(quickSwitchHistory.quickCommandEntries)
-			? quickSwitchHistory.quickCommandEntries
-			: [];
-
-		if (legacyEntries.length > 0) {
-			quickSwitchHistory.navigationEntries = [
-				...navigationEntries,
-				...legacyEntries.filter(
-					(entry) => normalizeSearchHistoryNavigationKind(entry.kind) !== "quickCommand",
-				),
-			];
-			quickSwitchHistory.quickCommandEntries = [
-				...quickCommandEntries,
-				...legacyEntries.filter(
-					(entry) => normalizeSearchHistoryNavigationKind(entry.kind) === "quickCommand",
-				),
-			];
-			delete quickSwitchHistory.entries;
-		} else {
-			quickSwitchHistory.navigationEntries = navigationEntries;
-			quickSwitchHistory.quickCommandEntries = quickCommandEntries;
-		}
-
-		return quickSwitchHistory;
+		return this.setting.quickSwitchHistory;
 	}
 
 	private ensureSettingFresh(): void {

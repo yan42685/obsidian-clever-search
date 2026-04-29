@@ -49,32 +49,9 @@
 		void scrollSelectedIntoView();
 	}
 
-	function getRecentQuickCommandFallbackResults(
-		limit: number,
-	): SearchAutocompleteCandidate[] {
-		return searchHistoryService.getRecentQuickCommandSelections(limit).map((entry) => ({
-			id: "recent-quick-command-fallback:" + entry.openLinkText,
-			kind: "quickCommand",
-			section: "recent-targets",
-			insertText: entry.primaryText,
-			primaryText: entry.primaryText,
-			secondaryText: entry.secondaryText,
-			path: entry.path,
-			openLinkText: entry.openLinkText,
-			positions: [],
-			pathPositions: [],
-			secondaryPositions: [],
-			score: entry.timestamp,
-			confidence: "medium",
-		}));
-	}
-
 	function refreshResults(resetIndex = false): void {
 		if (mode === "quickCommand") {
-			results =
-				queryText.trim().length === 0
-					? getRecentQuickCommandFallbackResults(24)
-					: autocompleteService.getQuickCommandSuggestions(queryText, 24);
+			results = autocompleteService.getQuickCommandSuggestions(queryText, 24);
 		} else {
 			results = autocompleteService.getNavigationSuggestions(queryText, 24);
 		}
@@ -125,6 +102,10 @@
 			return;
 		}
 		if (mode === "quickCommand") {
+			if (!isCommandAvailable(candidate.openLinkText)) {
+				refreshResults(true);
+				return;
+			}
 			await searchHistoryService.recordNavigationSelection(queryText, {
 				path: candidate.path,
 				primaryText: candidate.primaryText,
@@ -152,6 +133,16 @@
 			getSetting().ui.openInNewPane,
 		);
 		requestClose();
+	}
+
+	function isCommandAvailable(commandId: string): boolean {
+		return Boolean(
+			(app as App & {
+				commands?: {
+					commands?: Record<string, unknown>;
+				};
+			}).commands?.commands?.[commandId],
+		);
 	}
 
 	function handleKeydown(event: KeyboardEvent): void {

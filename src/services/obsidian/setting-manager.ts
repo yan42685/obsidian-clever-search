@@ -27,6 +27,7 @@ import {
 	getEstimatedTokenSavingsSummary,
 	getTopTokenFiles,
 	getTotalTokens,
+	normalizeApiDomain,
 	resetCurrentWeekTokenUsage,
 } from "src/services/search/hybrid/embedder";
 import {
@@ -700,6 +701,18 @@ class QuickSwitchManageModal extends Modal {
 			);
 
 		new Setting(contentEl)
+			.setName(t("Enable QuickSwitch history"))
+			.setDesc(t("Enable QuickSwitch history desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.quickSwitchHistory.enabled)
+					.onChange(async (value) => {
+						this.setting.quickSwitchHistory.enabled = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		new Setting(contentEl)
 			.setName(t("QuickSwitch history max items"))
 			.setDesc(t("QuickSwitch history max items desc"))
 			.addDropdown((dropdown) =>
@@ -956,6 +969,7 @@ class HybridSearchModal extends Modal {
 	private suggester: CommonSuggester;
 	private weeklyLimitInputEl: HTMLInputElement;
 	private weeklyQuotaEl: HTMLElement;
+	private autoTriggerDebounceSettingEl: HTMLElement;
 	private hybridApiDomainInputEl: HTMLInputElement;
 	private hybridApiKeyInputEl: HTMLInputElement;
 	private failedEmbeddingStatusEl: HTMLElement;
@@ -1026,7 +1040,7 @@ class HybridSearchModal extends Modal {
 					}),
 			);
 
-		const defaultApiDomain = "dashscope.aliyuncs.com/compatible-mode";
+		const defaultApiDomain = "dashscope.aliyuncs.com";
 		new Setting(contentEl)
 			.setName(t("hybridModal.apiDomain"))
 			.setDesc(t("hybridModal.apiDomain.desc"))
@@ -1035,10 +1049,15 @@ class HybridSearchModal extends Modal {
                 text.inputEl.style.width = "24.62rem";
 				text
 					.setPlaceholder(defaultApiDomain)
-					.setValue(this.setting.hybrid.apiDomain || defaultApiDomain)
+					.setValue(
+						this.setting.hybrid.apiDomain
+							? normalizeApiDomain(this.setting.hybrid.apiDomain)
+							: defaultApiDomain,
+					)
 					.onChange((v) => {
+						const normalized = normalizeApiDomain(v);
 						this.setting.hybrid.apiDomain =
-							v.trim() === defaultApiDomain ? "" : v;
+							normalized === defaultApiDomain ? "" : normalized;
 						this.settingManager.saveSettings();
 					});
 			});
@@ -1063,6 +1082,21 @@ class HybridSearchModal extends Modal {
 				}),
 			);
 		// 闂傚倸鍊风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛?Weekly token limit 闂傚倸鍊风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫滈梻鍌氬€风粈渚€宕崸妤€鍌ㄦ繝濠傜墕绾惧鏌熼崜褏甯涢柣鎾冲暣閺屾稖绠涢幙鍐┬︽繛瀛樼矒缁犳牕顫忓ú顏勭闁圭粯甯掓潏鍛存⒑缁嬫鍎愰柟鐟版喘瀵顓兼径濠勵槯婵犮垼娉涢敃锝嗙珶閺囥垺鈷掑ù锝囶焾閺嗛亶鏌涘Ο鑽ょ煉鐎规洘鍨块獮妯肩磼濡厧甯楅梻浣侯焾缁绘劙藝椤栨稓顩插Δ锝呭暞閳锋垿鏌涢幇顓炵祷閻㈩垬鍔戦弻娑氣偓锝庡亝瀹曞矂鏌＄仦鐣屝х€规洘顨嗗鍕節娴ｅ壊妫?		new Setting(contentEl).setDesc(t("hybridModal.apiKeyNotice"));
+		new Setting(contentEl)
+			.setName(t("hybridModal.autoTriggerOnInput"))
+			.setDesc(t("hybridModal.autoTriggerOnInput.desc"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.setting.hybrid.autoTriggerOnInput ?? true)
+					.onChange((value) => {
+						this.setting.hybrid.autoTriggerOnInput = value;
+						this.settingManager.saveSettings();
+						this.renderAutoTriggerDebounceSetting();
+					}),
+			);
+		this.autoTriggerDebounceSettingEl = contentEl.createDiv();
+		this.renderAutoTriggerDebounceSetting();
+
 		new Setting(contentEl)
 			.setName(t("hybridModal.weeklyTokenLimit"))
 			.setDesc(t("hybridModal.weeklyTokenLimit.desc"))
@@ -1294,6 +1328,38 @@ class HybridSearchModal extends Modal {
 		}
 	}
 
+	private renderAutoTriggerDebounceSetting() {
+		if (!this.autoTriggerDebounceSettingEl) {
+			return;
+		}
+		this.autoTriggerDebounceSettingEl.empty();
+		if (!(this.setting.hybrid.autoTriggerOnInput ?? true)) {
+			return;
+		}
+
+		new Setting(this.autoTriggerDebounceSettingEl)
+			.setName(t("hybridModal.autoTriggerDebounceMs"))
+			.setDesc(t("hybridModal.autoTriggerDebounceMs.desc"))
+			.addSlider((slider) =>
+				slider
+					.setLimits(200, 5000, 100)
+					.setValue(this.normalizeAutoTriggerDebounceMs())
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.setting.hybrid.autoTriggerDebounceMs = value;
+						await this.settingManager.saveSettings();
+					}),
+			);
+	}
+
+	private normalizeAutoTriggerDebounceMs(): number {
+		const value = this.setting.hybrid.autoTriggerDebounceMs ?? 400;
+		if (!Number.isFinite(value)) {
+			return 400;
+		}
+		return Math.min(5000, Math.max(200, Math.round(value / 100) * 100));
+	}
+
 
 	private async updateWeeklyTokenLimit() {
 		if (!this.weeklyLimitInputEl) {
@@ -1328,7 +1394,7 @@ class HybridSearchModal extends Modal {
 		const rawDomain =
 			this.hybridApiDomainInputEl?.value?.trim() ||
 			this.setting.hybrid.apiDomain ||
-			"dashscope.aliyuncs.com/compatible-mode";
+			"dashscope.aliyuncs.com";
 		const apiKey =
 			this.hybridApiKeyInputEl?.value?.trim() || this.setting.hybrid.apiKey;
 		if (!apiKey) {

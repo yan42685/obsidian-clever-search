@@ -1,6 +1,5 @@
 import { THIS_PLUGIN } from "src/globals/constants";
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
-import { OmnisearchIntegration } from "src/integrations/omnisearch";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import {
 	RELEASE_ANNOUNCEMENT_VERSION_030,
@@ -45,7 +44,6 @@ export class PluginManager {
 		commandRegistry.addInVaultCommands();
 		await commandRegistry.addDevCommands();
 		await getInstance(DataManager).initAsync();
-		await getInstance(OmnisearchIntegration).initAsync();
 		await this.maybeShowReleaseAnnouncement();
 	}
 

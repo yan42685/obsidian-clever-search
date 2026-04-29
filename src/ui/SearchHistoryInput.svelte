@@ -17,6 +17,7 @@
 	const setting = getInstance(OuterSetting);
 	const dispatch = createEventDispatcher<{
 		querychange: void;
+		enter: void;
 	}>();
 
 	export let queryText: string;
@@ -279,6 +280,7 @@
 				return;
 			}
 			event.preventDefault();
+			dispatch("enter");
 			return;
 		}
 	}

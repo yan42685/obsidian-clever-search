@@ -9,7 +9,6 @@ import { THIS_PLUGIN } from "src/globals/constants";
 import { EventEnum } from "src/globals/enums";
 import { OuterSetting } from "src/globals/plugin-setting";
 import { SearchType } from "src/globals/search-types";
-import { OmnisearchIntegration } from "src/integrations/omnisearch";
 import type CleverSearch from "src/main";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import { QuickSwitchModal } from "src/ui/quick-switch-modal";
@@ -109,18 +108,6 @@ export class CommandRegistry {
 				}),
 		});
 
-		this.addCommand({
-			id: "cs-in-file-search-with-omnisearch-query",
-			name: "Search in file with last Omnisearch query",
-			callback: async () => {
-				new SearchModal(
-					this.app,
-					SearchType.IN_FILE,
-					false,
-					await getInstance(OmnisearchIntegration).getLastQuery(),
-				).open();
-			},
-		});
 	}
 
 	onunload() {

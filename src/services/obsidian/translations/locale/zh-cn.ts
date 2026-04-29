@@ -45,6 +45,8 @@ export default {
 	"Search history max items desc": "保留的搜索历史记录最大条数，当前最高支持 10000 条。",
 	"Clear search history": "清空搜索历史",
 	"Clear search history desc": "删除已保存的搜索词记录。",
+	"Enable QuickSwitch history": "启用 QuickSwitch 历史",
+	"Enable QuickSwitch history desc": "记录并使用已确认的 QuickSwitch 和 QuickCommand 选择，用于空查询建议和习惯排序。",
     "QuickSwitch history max items": "QuickSwitch 历史最大条数",
     "QuickSwitch history max items desc": "保留已确认 QuickSwitch 目标的最大条数，当前最高支持 10000 条。",
     "Clear QuickSwitch history": "清空 QuickSwitch 历史",
@@ -73,6 +75,12 @@ export default {
 	"hybridModal.weeklyTokenLimit": "每周 token 限额",
 	"hybridModal.weeklyTokenLimit.desc":
 		"每周（周一至周日）最多允许消耗的 token 数量，设为 0 表示不限制。统计并非完全准确，以实际消耗为准。",
+	"hybridModal.autoTriggerOnInput": "\u8f93\u5165\u540e\u81ea\u52a8\u89e6\u53d1\u6df7\u5408\u641c\u7d22",
+	"hybridModal.autoTriggerOnInput.desc":
+		"\u5982\u679c\u89c9\u5f97 rerank api \u9891\u7e41\u8c03\u7528\u6d88\u8017 token \u592a\u591a\u53ef\u5173\u95ed\u6b64\u8bbe\u7f6e\u9879\u5e76\u6539\u4e3a\u6309 enter \u624b\u52a8\u89e6\u53d1",
+	"hybridModal.autoTriggerDebounceMs": "\u81ea\u52a8\u89e6\u53d1\u6df7\u5408\u641c\u7d22\u7684\u95f4\u9694",
+	"hybridModal.autoTriggerDebounceMs.desc":
+		"\u81ea\u52a8\u6df7\u5408\u641c\u7d22\u7684 debounce \u95f4\u9694\uff0c\u4ec5\u5728\u641c\u7d22\u6a21\u5f0f\u4e3a hybrid \u65f6\u751f\u6548\u3002",
 	"hybridModal.maxResultCount": "混合搜索结果数量",
 	"hybridModal.maxResultCount.desc":
 		"每次混合搜索返回并展示的 rerank 结果数量。",

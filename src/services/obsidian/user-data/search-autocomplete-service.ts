@@ -461,20 +461,20 @@ export class SearchAutocompleteService {
 		);
 		const selections = this.searchHistoryService.getRecentQuickCommandSelections(limit);
 
-		return selections.map((selection) => {
+		return selections.flatMap((selection) => {
 			const habitSignal = navigationHabitSignals.get(selection.openLinkText);
 			const indexedEntry = indexedQuickCommands.get(selection.openLinkText);
-			const primaryText = indexedEntry?.primaryText ?? selection.primaryText;
-			const secondaryText = indexedEntry?.secondaryText ?? selection.secondaryText;
-			const insertText = indexedEntry?.insertText ?? selection.primaryText;
-			return {
+			if (!indexedEntry) {
+				return [];
+			}
+			return [{
 				id: `recent-quick-command:${selection.openLinkText}`,
 				kind: "quickCommand",
 				section: "recent-targets",
-				insertText,
-				primaryText,
-				secondaryText,
-				path: selection.path,
+				insertText: indexedEntry.insertText,
+				primaryText: indexedEntry.primaryText,
+				secondaryText: indexedEntry.secondaryText,
+				path: indexedEntry.path,
 				openLinkText: selection.openLinkText,
 				positions: [],
 				pathPositions: [],
@@ -492,7 +492,7 @@ export class SearchAutocompleteService {
 					(habitSignal.dayStreak >= 3 || habitSignal.totalSelectionCount >= 4)
 						? "high"
 						: "medium",
-			};
+			}];
 		});
 	}
 
@@ -626,10 +626,6 @@ export class SearchAutocompleteService {
 	}
 
 	private getIndexedQuickCommandEntries(): IndexedQuickCommandEntry[] {
-		if (this.indexedQuickCommandEntriesCache) {
-			return this.indexedQuickCommandEntriesCache;
-		}
-
 		const registry = (this.app as App & {
 			commands?: {
 				commands?: Record<string, { id?: string; name?: string }>;

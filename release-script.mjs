@@ -15,12 +15,14 @@ const ENV_CANDIDATE_PATHS = [
 ];
 
 async function main() {
-	const releaseType = normalizeReleaseType(process.argv[2]);
+	const options = parseReleaseOptions(process.argv.slice(2));
+	const releaseType = normalizeReleaseType(options.releaseType);
 
 	ensureCleanWorktree();
 
-	console.log("Generating changelog with GPT-5.4 before release...");
-	const releaseNotesBody = await generateReleaseNotesBody();
+	const releaseNotesBody = await generateReleaseNotesBody({
+		useLlm: options.useLlm,
+	});
 
 	const manifestPath = "manifest.json";
 	const originalManifestText = readFileSync(manifestPath, "utf8");
@@ -65,6 +67,45 @@ function normalizeReleaseType(rawType) {
 	return DEFAULT_RELEASE_TYPE;
 }
 
+function parseReleaseOptions(args) {
+	let releaseType = DEFAULT_RELEASE_TYPE;
+	let useLlm = true;
+
+	for (const arg of args) {
+		if (arg === "--no-ai" || arg === "--no-llm") {
+			useLlm = false;
+			continue;
+		}
+		if (RELEASE_TYPES.has(arg)) {
+			releaseType = arg;
+			continue;
+		}
+		if (arg === "--help" || arg === "-h") {
+			printUsageAndExit();
+		}
+		throw new Error(`Unknown release option: ${arg}`);
+	}
+
+	return {
+		releaseType,
+		useLlm,
+	};
+}
+
+function printUsageAndExit() {
+	console.log(
+		[
+			"Usage: pnpm run release [major|minor|patch] [--no-ai]",
+			"",
+			"Options:",
+			"  major|minor|patch  Version bump type. Defaults to patch.",
+			"  --no-ai            Skip LLM changelog summarization and use commit subjects directly.",
+			"  --no-llm           Alias for --no-ai.",
+		].join("\n"),
+	);
+	process.exit(0);
+}
+
 function ensureCleanWorktree() {
 	const status = runCommand("git status --porcelain");
 	if (status.trim().length > 0) {
@@ -72,12 +113,18 @@ function ensureCleanWorktree() {
 	}
 }
 
-async function generateReleaseNotesBody() {
+async function generateReleaseNotesBody({ useLlm }) {
 	const commitLines = collectReleaseCommitLines();
 	if (commitLines.length === 0) {
 		throw new Error("No commits found since the last release. Abort release.");
 	}
 
+	if (!useLlm) {
+		console.log("Generating changelog from commit subjects without LLM...");
+		return generateReleaseNotesFromCommitSubjects(commitLines);
+	}
+
+	console.log("Generating changelog with GPT-5.4 before release...");
 	const apiKey = resolveOpenAIApiKey();
 	const apiBaseUrl = resolveOpenAIBaseUrl();
 	if (!apiKey) {
@@ -111,6 +158,29 @@ async function generateReleaseNotesBody() {
 	].join("\n");
 
 	return await summarizeCommitsWithOpenAI(prompt, apiKey, apiBaseUrl);
+}
+
+function generateReleaseNotesFromCommitSubjects(commitLines) {
+	const releaseNotes = commitLines
+		.map((line) => parseCommitLine(line).subject)
+		.filter((subject) => subject.length > 0)
+		.map((subject) => `- ${subject}`)
+		.join("\n");
+
+	if (!releaseNotes) {
+		throw new Error("No usable commit subjects found since the last release. Abort release.");
+	}
+
+	return finalizeReleaseNotes(releaseNotes);
+}
+
+function parseCommitLine(line) {
+	const parts = line.split("\t");
+	return {
+		hash: parts[0] ?? "",
+		date: parts[1] ?? "",
+		subject: parts.slice(2).join("\t").trim(),
+	};
 }
 
 function collectReleaseCommitLines() {

@@ -57,6 +57,8 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	hybrid: {
 		enabled: false,
 		autoShowResultsWhenLexicalEmpty: true,
+		autoTriggerOnInput: true,
+		autoTriggerDebounceMs: 400,
 		apiDomain: "",
 		apiKey: "",
 		weeklyTokenLimit: 3000000,
@@ -83,6 +85,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		entries: [],
 	},
 	quickSwitchHistory: {
+		enabled: true,
 		maxItems: 5000,
 		navigationEntries: [],
 		quickCommandEntries: [],
@@ -146,6 +149,8 @@ export function toLegacyWeakFilePruneMode(
 export type HybridSetting = {
 	enabled: boolean;
 	autoShowResultsWhenLexicalEmpty: boolean;
+	autoTriggerOnInput: boolean;
+	autoTriggerDebounceMs: number;
 	apiDomain: string;
 	apiKey: string;
 	weeklyTokenLimit: number; // 0 = unlimited
@@ -219,6 +224,7 @@ export type QuickSwitchHistoryEntry = {
 };
 
 export type QuickSwitchHistorySetting = {
+	enabled: boolean;
 	maxItems: SearchHistoryMaxItems;
 	navigationEntries: QuickSwitchHistoryEntry[];
 	quickCommandEntries: QuickSwitchHistoryEntry[];
