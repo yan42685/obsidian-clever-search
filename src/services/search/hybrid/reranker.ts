@@ -311,10 +311,10 @@ export class HybridReranker {
 		return {
 			model: getEmbeddingProviderSpec('openai').rerankModel,
 			input: [
-				'Rank the candidate texts by relevance to the search query.',
+				'Rank the candidate texts by relevance to the search query, balancing response speed with ranking accuracy.',
 				'Return only JSON: {"results":[{"index":0,"score":1}]}',
 				`Return at most ${Math.min(documents.length, topK)} results.`,
-				'Score should be a finite number where larger is more relevant.',
+				'Score must be a normalized finite number from 0 to 1, where 1 is most relevant.',
 				`Query: ${JSON.stringify(query)}`,
 				`Candidates: ${JSON.stringify(candidates)}`,
 			].join('\n'),
