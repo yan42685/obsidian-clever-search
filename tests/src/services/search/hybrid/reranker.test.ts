@@ -26,10 +26,30 @@ jest.mock("src/utils/logger", () => ({
 }));
 
 jest.mock("src/services/search/hybrid/embedder", () => ({
-	buildDashScopeApiUrl: jest.fn(() => "https://example.com/rerank"),
+	buildProviderApiUrl: jest.fn((provider: string) =>
+		provider === "openai"
+			? "https://api.openai.com/v1/responses"
+			: "https://example.com/rerank",
+	),
+	getEmbeddingProviderSpec: jest.fn((provider: string) => ({
+		id: provider === "openai" ? "openai" : "qwen",
+		label:
+			provider === "openai"
+				? "OpenAI text-embedding-3-large"
+				: "Qwen text-embedding-v4",
+		embeddingModel:
+			provider === "openai"
+				? "text-embedding-3-large"
+				: "text-embedding-v4",
+		rerankModel: provider === "openai" ? "gpt-5.4-nano" : "qwen3-rerank",
+		defaultDomain: provider === "openai" ? "api.openai.com" : "dashscope.aliyuncs.com",
+	})),
+	normalizeEmbeddingProvider: jest.fn((provider: string) =>
+		provider === "openai" ? "openai" : "qwen",
+	),
 	NoApiKeyError: class NoApiKeyError extends Error {
 		constructor() {
-			super("No Qwen API key configured");
+			super("No embedding provider API key configured");
 			this.name = "NoApiKeyError";
 		}
 	},
@@ -214,6 +234,74 @@ describe("HybridReranker", () => {
 		).rejects.toMatchObject<InstanceType<typeof HybridRerankError>>({
 			kind: "network",
 		});
+	});
+
+	test("uses OpenAI Responses API with gpt-5.4-nano when OpenAI provider is selected", async () => {
+		const { HybridReranker } = require("src/services/search/hybrid/reranker");
+		mockInstanceMap.set(require("src/globals/plugin-setting").OuterSetting, {
+			hybrid: {
+				apiKey: "test-key",
+				apiDomain: "api.openai.com",
+				embeddingProvider: "openai",
+			},
+		});
+		(global as any).fetch = jest.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			headers: {
+				get: jest.fn(() => null),
+			},
+			json: jest.fn().mockResolvedValue({
+				output_text: JSON.stringify({
+					results: [
+						{ index: 1, score: 0.99 },
+						{ index: 0, score: 0.5 },
+					],
+				}),
+				usage: { total_tokens: 12 },
+			}),
+		});
+
+		const reranker = new HybridReranker();
+
+		await expect(
+			reranker.rerank(
+				"alpha",
+				[
+					{
+						id: 1,
+						filePath: "notes/a.md",
+						text: "less relevant",
+						startLine: 0,
+						startCol: 0,
+						endLine: 0,
+						recallScore: 0.8,
+					},
+					{
+						id: 2,
+						filePath: "notes/b.md",
+						text: "more relevant alpha",
+						startLine: 0,
+						startCol: 0,
+						endLine: 0,
+						recallScore: 0.7,
+					},
+				],
+				2,
+			),
+		).resolves.toEqual([
+			{ id: 2, score: 0.99 },
+			{ id: 1, score: 0.5 },
+		]);
+		const [, init] = (global as any).fetch.mock.calls[0];
+		expect(JSON.parse(init.body)).toMatchObject({
+			model: "gpt-5.4-nano",
+			text: { format: { type: "json_object" } },
+		});
+		expect(mockRecordTokenUsage).toHaveBeenCalledWith(
+			"[search] gpt-5.4-nano",
+			12,
+		);
 	});
 
 	test("throws when rerank is requested without an API key", async () => {

@@ -59,18 +59,24 @@ export default {
 	"autocompleteSource.path": "\u8def\u5f84",
 	"autocompleteSource.recent": "\u6700\u8fd1",
 	"autocompleteSource.quickCommand": "QuickCommand",
+	"hybridModal.embeddingModel": "\u5d4c\u5165\u6a21\u578b",
+	"hybridModal.embeddingModel.descPrefix":
+		"Qwen \u6548\u679c\u660e\u663e\u66f4\u597d\uff0c\u9ed8\u8ba4\u63a8\u8350 Qwen\u3002API Key \u65e0\u6cd5\u4e91\u7aef\u63a7\u5236\u9650\u989d\u3002\u672c\u63d2\u4ef6\u4e0d\u5bf9 API Key \u6cc4\u9732\u3001\u914d\u7f6e\u9519\u8bef\u3001\u670d\u52a1\u5546\u8ba1\u8d39\u53d8\u5316\u7b49",
+	"hybridModal.embeddingModel.descBold": "\u4efb\u4f55\u60c5\u51b5",
+	"hybridModal.embeddingModel.descSuffix":
+		"\u5bfc\u81f4\u7684 token/\u8d39\u7528\u5de8\u91cf\u6d88\u8017\u8d1f\u8d23\u3002",
 	"hybridModal.desc":
-		"混合搜索结合了词法搜索与千问语义检索。索引阶段使用 text-embedding-v4，搜索阶段使用 qwen3-rerank，接口返回的 token 用量会计入每周限额。当语义链路失败时，结果会自动降级为词法搜索。",
+		"混合搜索结合了词法搜索与服务商语义检索。Qwen 使用 text-embedding-v4 和 qwen3-rerank；OpenAI 使用 text-embedding-3-large 和 gpt-5.4-nano 重排。接口返回的 token 用量会计入每周限额。当语义链路失败时，结果会自动降级为词法搜索。",
 	"hybridModal.apiDomain": "API 域名",
 	"hybridModal.apiDomain.desc":
-		"目前只支持 Qwen 的 API。",
+		"服务商 API 域名。除非使用兼容代理端点，否则建议保持默认值。",
 	"hybridModal.apiKey": "API Key",
 	"hybridModal.testConnection": "检测",
 	"hybridModal.connectivityOk": "连通性检测成功。",
 	"hybridModal.connectivityFailed": "连通性检测失败",
 	"hybridModal.connectivityMissingApiKey": "请先填写 API Key。",
 	"hybridModal.apiKeyNotice":
-		"这里显示的 token 以千问接口返回的 usage 为准。当前混合搜索会使用 text-embedding-v4 和 qwen3-rerank，请确认 API Key 已开通这两个模型。",
+		"这里显示的 token 以服务商接口返回的 usage 为准。请确认 API Key 已开通所选的 embedding 和 rerank 模型。",
 	"hybridModal.autoShowResultsWhenLexicalEmpty": "词法无结果时自动展示 hybrid",
 	"hybridModal.weeklyTokenLimit": "每周 token 限额",
 	"hybridModal.weeklyTokenLimit.desc":

@@ -1,4 +1,4 @@
-import { OuterSetting } from 'src/globals/plugin-setting';
+import { OuterSetting, type HybridEmbeddingProvider } from 'src/globals/plugin-setting';
 import { Database } from 'src/services/database/database';
 import { MyNotice } from 'src/services/obsidian/transformed-api';
 import { estimateTokenCount } from 'src/services/search/hybrid/chunker';
@@ -7,6 +7,7 @@ import { getInstance } from 'src/utils/my-lib';
 import { throttle } from 'throttle-debounce';
 import { EMBED_DIM, type StoredVector, type VectorPrecision } from './hybrid-types';
 import {
+	buildHybridProviderErrorDetails,
 	NoApiKeyError,
 	WeeklyTokenLimitExceededError,
 } from './provider-error';
@@ -17,7 +18,9 @@ import {
 import { AsyncRateGate, retryAsync } from './runtime-control';
 
 const DEFAULT_DASHSCOPE_DOMAIN = 'dashscope.aliyuncs.com';
-const EMBED_MODEL = 'text-embedding-v4';
+const DEFAULT_OPENAI_DOMAIN = 'api.openai.com';
+const QWEN_EMBED_MODEL = 'text-embedding-v4';
+const OPENAI_EMBED_MODEL = 'text-embedding-3-large';
 const BATCH_SIZE = 10;
 const CACHE_MAX = 50;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
@@ -31,6 +34,31 @@ let lastKnownCurrentWeekTokenUsage: { weekKey: string; tokens: number } | null =
 
 type EmbedBatchOptions = {
 	maxAttempts?: number;
+};
+
+export type EmbeddingProviderSpec = Readonly<{
+	id: HybridEmbeddingProvider;
+	label: string;
+	embeddingModel: string;
+	rerankModel: string;
+	defaultDomain: string;
+}>;
+
+export const EMBEDDING_PROVIDER_SPECS: Record<HybridEmbeddingProvider, EmbeddingProviderSpec> = {
+	qwen: {
+		id: 'qwen',
+		label: 'Qwen text-embedding-v4',
+		embeddingModel: QWEN_EMBED_MODEL,
+		rerankModel: 'qwen3-rerank',
+		defaultDomain: DEFAULT_DASHSCOPE_DOMAIN,
+	},
+	openai: {
+		id: 'openai',
+		label: 'OpenAI text-embedding-3-large',
+		embeddingModel: OPENAI_EMBED_MODEL,
+		rerankModel: 'gpt-5.4-nano',
+		defaultDomain: DEFAULT_OPENAI_DOMAIN,
+	},
 };
 
 export { NoApiKeyError, WeeklyTokenLimitExceededError } from './provider-error';
@@ -122,8 +150,15 @@ export class Embedder {
 		return this.setting.hybrid?.apiKey?.trim() ?? '';
 	}
 
-	private get apiDomain(): string {
-		return buildDashScopeApiUrl(this.setting.hybrid?.apiDomain, 'embedding');
+	private get provider(): HybridEmbeddingProvider {
+		return normalizeEmbeddingProvider(this.setting.hybrid?.embeddingProvider);
+	}
+
+	private get apiUrl(): string {
+		return buildEmbeddingApiUrl(
+			this.provider,
+			this.setting.hybrid?.apiDomain,
+		);
 	}
 
 	async embedQuery(
@@ -242,33 +277,46 @@ export class Embedder {
 					if (externalSignal?.aborted) {
 						throw createEmbedAbortError();
 					}
-					const resp = await fetch(this.apiDomain, {
+					const provider = this.provider;
+					const apiUrl = this.apiUrl;
+					const resp = await fetch(apiUrl, {
 						method: 'POST',
 						headers: {
 							'Content-Type': 'application/json',
 							Authorization: `Bearer ${this.apiKey}`,
 						},
-						body: JSON.stringify({
-							model: EMBED_MODEL,
-							input: texts,
-							dimensions: EMBED_DIM,
-							encoding_format: 'float',
-						}),
+						body: JSON.stringify(buildEmbeddingRequestBody(provider, texts)),
 						signal: controller.signal,
 					});
 
 					if (!resp.ok) {
 						const body = await resp.text();
+						const details = buildHybridProviderErrorDetails({
+							provider,
+							status: resp.status,
+							body,
+							retryAfterHeader: resp.headers.get('retry-after'),
+							requestIdHeader:
+								resp.headers.get('x-request-id') ??
+								resp.headers.get('request-id'),
+						});
 						logger.error(
-							`Qwen embedding request failed: status=${resp.status}, url=${this.apiDomain}, body=${body}`,
+							`${getEmbeddingProviderSpec(provider).label} embedding request failed: status=${resp.status}, url=${apiUrl}, body=${body}`,
 						);
+						const detail = details.providerMessage || body.trim() || `status ${resp.status}`;
+						const requestSuffix = details.requestId
+							? ` (request_id: ${details.requestId})`
+							: '';
+						const error = new Error(
+							`${getEmbeddingProviderSpec(provider).label} embedding API error ${resp.status}: ${detail}${requestSuffix}`,
+						);
+						Object.assign(error, details);
 						if (this.isRetryableStatus(resp.status)) {
-							const error = new Error(`Qwen embedding API error ${resp.status}: ${body}`);
 							(error as Error & { retryAfterHeader?: string | null }).retryAfterHeader =
 								resp.headers.get('retry-after');
 							throw error;
 						}
-						throw new Error(`Qwen embedding API error ${resp.status}: ${body}`);
+						throw error;
 					}
 
 					const body = await resp.text();
@@ -276,7 +324,8 @@ export class Embedder {
 						body,
 						contentType: resp.headers.get('content-type'),
 						status: resp.status,
-						url: this.apiDomain,
+						url: apiUrl,
+						providerLabel: getEmbeddingProviderSpec(provider).label,
 					});
 					const tokensUsed = json.usage?.total_tokens ?? json.usage?.input_tokens ?? 0;
 					return {
@@ -303,7 +352,7 @@ export class Embedder {
 					),
 				onRetry: (error, attempt, delayMs) => {
 					logger.warn(
-						`Qwen embedding request retrying: attempt=${attempt}/${maxAttempts}, delay=${delayMs} ms`,
+						`${getEmbeddingProviderSpec(this.provider).label} embedding request retrying: attempt=${attempt}/${maxAttempts}, delay=${delayMs} ms`,
 						error,
 					);
 				},
@@ -316,11 +365,11 @@ export class Embedder {
 		json: ProviderEmbeddingResponse,
 	): number[][] {
 		if (!Array.isArray(json.data)) {
-			throw new Error('Qwen embedding response missing data array');
+			throw new Error('Embedding response missing data array');
 		}
 		if (json.data.length !== texts.length) {
 			throw new Error(
-				`Qwen embedding response count mismatch: expected ${texts.length}, received ${json.data.length}`,
+				`Embedding response count mismatch: expected ${texts.length}, received ${json.data.length}`,
 			);
 		}
 
@@ -334,27 +383,27 @@ export class Embedder {
 				rawIndex < 0 ||
 				rawIndex >= texts.length
 			) {
-				throw new Error(`Qwen embedding response index out of range: ${String(rawIndex)}`);
+				throw new Error(`Embedding response index out of range: ${String(rawIndex)}`);
 			}
 			const index = rawIndex;
 			if (seenIndexes.has(index)) {
-				throw new Error(`Qwen embedding response repeated index: ${index}`);
+				throw new Error(`Embedding response repeated index: ${index}`);
 			}
 			seenIndexes.add(index);
 
 			const embedding = item?.embedding;
 			if (!Array.isArray(embedding)) {
-				throw new Error(`Qwen embedding response missing embedding array at index ${index}`);
+				throw new Error(`Embedding response missing embedding array at index ${index}`);
 			}
 			if (embedding.length !== EMBED_DIM) {
 				throw new Error(
-					`Qwen embedding response dimension mismatch at index ${index}: expected ${EMBED_DIM}, received ${embedding.length}`,
+					`Embedding response dimension mismatch at index ${index}: expected ${EMBED_DIM}, received ${embedding.length}`,
 				);
 			}
 			for (let valueIndex = 0; valueIndex < embedding.length; valueIndex++) {
 				if (!Number.isFinite(embedding[valueIndex])) {
 					throw new Error(
-						`Qwen embedding response contains non-finite value at index ${index}, offset ${valueIndex}`,
+						`Embedding response contains non-finite value at index ${index}, offset ${valueIndex}`,
 					);
 				}
 			}
@@ -363,7 +412,7 @@ export class Embedder {
 
 		for (let index = 0; index < embeddings.length; index++) {
 			if (!embeddings[index]) {
-				throw new Error(`Qwen embedding response missing item for index ${index}`);
+				throw new Error(`Embedding response missing item for index ${index}`);
 			}
 		}
 
@@ -681,20 +730,43 @@ async function getTotalTokensStrict(fromDate: string, toDate: string): Promise<n
 	return records.reduce((sum, r) => sum + r.tokens, 0);
 }
 
+export function normalizeEmbeddingProvider(
+	provider: unknown,
+): HybridEmbeddingProvider {
+	return provider === 'openai' ? 'openai' : 'qwen';
+}
+
+export function getEmbeddingProviderSpec(
+	provider: unknown,
+): EmbeddingProviderSpec {
+	return EMBEDDING_PROVIDER_SPECS[normalizeEmbeddingProvider(provider)];
+}
+
 export function normalizeApiDomain(domain?: string): string {
+	return normalizeProviderApiDomain('qwen', domain);
+}
+
+export function normalizeProviderApiDomain(
+	provider: unknown,
+	domain?: string,
+): string {
+	const spec = getEmbeddingProviderSpec(provider);
 	const raw = domain?.trim();
 	if (!raw) {
-		return DEFAULT_DASHSCOPE_DOMAIN;
+		return spec.defaultDomain;
 	}
 
 	const withoutProtocol = raw.replace(/^https?:\/\//, '').replace(/\/+$/, '');
 	const compatibleIndex = withoutProtocol.search(/\/compatible-(mode|api)\b/i);
+	const openAiV1Index = withoutProtocol.search(/\/v1\b/i);
 	const hostAndMaybePath =
 		compatibleIndex >= 0
 			? withoutProtocol.slice(0, compatibleIndex)
+			: openAiV1Index >= 0
+				? withoutProtocol.slice(0, openAiV1Index)
 			: withoutProtocol;
 
-	return hostAndMaybePath.split('/')[0] || DEFAULT_DASHSCOPE_DOMAIN;
+	return hostAndMaybePath.split('/')[0] || spec.defaultDomain;
 }
 
 export function buildDashScopeApiUrl(
@@ -709,17 +781,63 @@ export function buildDashScopeApiUrl(
 	return `https://${host}${path}`;
 }
 
+export function buildEmbeddingApiUrl(
+	provider: unknown,
+	domain: string | undefined,
+): string {
+	const normalizedProvider = normalizeEmbeddingProvider(provider);
+	if (normalizedProvider === 'openai') {
+		const host = normalizeProviderApiDomain('openai', domain);
+		return `https://${host}/v1/embeddings`;
+	}
+	return buildDashScopeApiUrl(domain, 'embedding');
+}
+
+export function buildProviderApiUrl(
+	provider: unknown,
+	domain: string | undefined,
+	apiType: 'embedding' | 'rerank',
+): string {
+	const normalizedProvider = normalizeEmbeddingProvider(provider);
+	if (apiType === 'embedding') {
+		return buildEmbeddingApiUrl(normalizedProvider, domain);
+	}
+	if (normalizedProvider === 'openai') {
+		const host = normalizeProviderApiDomain('openai', domain);
+		return `https://${host}/v1/responses`;
+	}
+	return buildDashScopeApiUrl(domain, 'rerank');
+}
+
+export function buildEmbeddingRequestBody(
+	provider: unknown,
+	texts: string[],
+): {
+	model: string;
+	input: string[];
+	dimensions: number;
+	encoding_format: 'float';
+} {
+	return {
+		model: getEmbeddingProviderSpec(provider).embeddingModel,
+		input: texts,
+		dimensions: EMBED_DIM,
+		encoding_format: 'float',
+	};
+}
+
 function parseEmbeddingJsonResponse(params: Readonly<{
 	body: string;
 	contentType: string | null;
 	status: number;
 	url: string;
+	providerLabel: string;
 }>): ProviderEmbeddingResponse {
-	const { body, contentType, status, url } = params;
+	const { body, contentType, status, url, providerLabel } = params;
 	const trimmed = body.trim();
 	if (!trimmed) {
 		throw new Error(
-			`Qwen embedding API returned an empty response: status=${status}, url=${url}, contentType=${contentType ?? '<missing>'}`,
+			`${providerLabel} embedding API returned an empty response: status=${status}, url=${url}, contentType=${contentType ?? '<missing>'}`,
 		);
 	}
 	try {
@@ -727,7 +845,7 @@ function parseEmbeddingJsonResponse(params: Readonly<{
 	} catch (error) {
 		const preview = trimmed.slice(0, 240).replace(/\s+/g, ' ');
 		throw new Error(
-			`Qwen embedding API returned non-JSON response: status=${status}, url=${url}, contentType=${contentType ?? '<missing>'}, bodyPreview=${preview}`,
+			`${providerLabel} embedding API returned non-JSON response: status=${status}, url=${url}, contentType=${contentType ?? '<missing>'}, bodyPreview=${preview}`,
 		);
 	}
 }

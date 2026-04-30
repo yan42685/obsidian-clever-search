@@ -59,6 +59,7 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 		autoShowResultsWhenLexicalEmpty: true,
 		autoTriggerOnInput: true,
 		autoTriggerDebounceMs: 400,
+		embeddingProvider: "qwen",
 		apiDomain: "",
 		apiKey: "",
 		weeklyTokenLimit: 3000000,
@@ -151,6 +152,7 @@ export type HybridSetting = {
 	autoShowResultsWhenLexicalEmpty: boolean;
 	autoTriggerOnInput: boolean;
 	autoTriggerDebounceMs: number;
+	embeddingProvider: HybridEmbeddingProvider;
 	apiDomain: string;
 	apiKey: string;
 	weeklyTokenLimit: number; // 0 = unlimited
@@ -165,6 +167,8 @@ export type HybridSetting = {
 export type ReleaseAnnouncementSetting = {
 	seenVersions: string[];
 };
+
+export type HybridEmbeddingProvider = "qwen" | "openai";
 
 export type HybridVectorCompression = "int8" | "float16";
 

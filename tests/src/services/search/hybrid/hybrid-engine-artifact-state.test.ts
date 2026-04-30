@@ -106,6 +106,16 @@ jest.mock("src/services/search/hybrid/hnsw", () => ({
         totalBytes: 0,
       };
     }
+    getRuntimeStats() {
+      return {
+        nodeCount: 0,
+        liveNodeCount: 0,
+        deletedNodeCount: 0,
+        vectorCount: 0,
+        precision: "int8",
+        maxLevel: 0,
+      };
+    }
   },
 }));
 
@@ -410,6 +420,14 @@ describe("HybridEngine artifact state", () => {
         vectorBytes: 0,
         graphBytes: 0,
         totalBytes: 0,
+      })),
+      getRuntimeStats: jest.fn(() => ({
+        nodeCount: denseIds.size,
+        liveNodeCount: denseIds.size,
+        deletedNodeCount: 0,
+        vectorCount: hasVectors ? denseIds.size : 0,
+        precision: "int8",
+        maxLevel: 0,
       })),
     };
 

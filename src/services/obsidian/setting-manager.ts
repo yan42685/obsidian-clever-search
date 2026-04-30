@@ -21,20 +21,24 @@ import {
 import { ChinesePatch } from "src/integrations/languages/chinese-patch";
 import type CleverSearch from "src/main";
 import {
-	buildDashScopeApiUrl,
+	EMBEDDING_PROVIDER_SPECS,
+	buildEmbeddingApiUrl,
+	buildEmbeddingRequestBody,
 	getCurrentWeekDateRange,
 	getCurrentWeekTokenUsage,
+	getEmbeddingProviderSpec,
 	getEstimatedTokenSavingsSummary,
 	getTopTokenFiles,
 	getTotalTokens,
-	normalizeApiDomain,
+	normalizeEmbeddingProvider,
+	normalizeProviderApiDomain,
 	resetCurrentWeekTokenUsage,
 } from "src/services/search/hybrid/embedder";
 import {
 	buildHybridProviderErrorDetails,
 	buildHybridSearchIssue,
 } from "src/services/search/hybrid/provider-error";
-import { SEARCH_RERANK_TOKEN_KEY } from "src/services/search/hybrid/reranker";
+import { SEARCH_RERANK_TOKEN_KEYS } from "src/services/search/hybrid/reranker";
 import { FloatingWindowManager } from "src/ui/floating-window";
 import { eventBus, type EventCallback } from "src/utils/event-bus";
 import { logger, type LogLevel } from "src/utils/logger";
@@ -977,6 +981,7 @@ class HybridSearchModal extends Modal {
 	private statsEl: HTMLElement;
 	private openedApiDomain = "";
 	private openedApiKey = "";
+	private openedEmbeddingProvider: "qwen" | "openai" = "qwen";
 	private currentFailedEmbeddingSummary: HybridFailedEmbeddingSummary | null = null;
 	private currentDeferredEmbeddingSummary: HybridDeferredEmbeddingSummary | null = null;
 	private failedEmbeddingStatusTimer: number | null = null;
@@ -999,6 +1004,10 @@ class HybridSearchModal extends Modal {
 		this.modalEl.style.width = "52vw";
 		this.modalEl.style.marginBottom = "5em";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
+		this.setting.hybrid.embeddingProvider = normalizeEmbeddingProvider(
+			this.setting.hybrid.embeddingProvider,
+		);
+		this.openedEmbeddingProvider = this.setting.hybrid.embeddingProvider;
 		this.openedApiDomain = this.setting.hybrid.apiDomain ?? "";
 		this.openedApiKey = this.setting.hybrid.apiKey ?? "";
 		eventBus.on(
@@ -1040,7 +1049,29 @@ class HybridSearchModal extends Modal {
 					}),
 			);
 
-		const defaultApiDomain = "dashscope.aliyuncs.com";
+		new Setting(contentEl)
+			.setName(t("hybridModal.embeddingModel"))
+			.setDesc(this.createEmbeddingModelDescription())
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({
+						qwen: EMBEDDING_PROVIDER_SPECS.qwen.label,
+						openai: EMBEDDING_PROVIDER_SPECS.openai.label,
+					})
+					.setValue(this.setting.hybrid.embeddingProvider)
+					.onChange(async (value) => {
+						const previousProvider = this.setting.hybrid.embeddingProvider;
+						const nextProvider = normalizeEmbeddingProvider(value);
+						this.setting.hybrid.embeddingProvider = nextProvider;
+						this.updateApiDomainForProviderChange(previousProvider, nextProvider);
+						this.settingManager.requestHybridFullReindex();
+						await this.settingManager.saveSettings();
+					}),
+			);
+
+		const defaultApiDomain = getEmbeddingProviderSpec(
+			this.setting.hybrid.embeddingProvider,
+		).defaultDomain;
 		new Setting(contentEl)
 			.setName(t("hybridModal.apiDomain"))
 			.setDesc(t("hybridModal.apiDomain.desc"))
@@ -1051,13 +1082,22 @@ class HybridSearchModal extends Modal {
 					.setPlaceholder(defaultApiDomain)
 					.setValue(
 						this.setting.hybrid.apiDomain
-							? normalizeApiDomain(this.setting.hybrid.apiDomain)
+							? normalizeProviderApiDomain(
+								this.setting.hybrid.embeddingProvider,
+								this.setting.hybrid.apiDomain,
+							)
 							: defaultApiDomain,
 					)
 					.onChange((v) => {
-						const normalized = normalizeApiDomain(v);
+						const normalized = normalizeProviderApiDomain(
+							this.setting.hybrid.embeddingProvider,
+							v,
+						);
+						const currentDefault = getEmbeddingProviderSpec(
+							this.setting.hybrid.embeddingProvider,
+						).defaultDomain;
 						this.setting.hybrid.apiDomain =
-							normalized === defaultApiDomain ? "" : normalized;
+							normalized === currentDefault ? "" : normalized;
 						this.settingManager.saveSettings();
 					});
 			});
@@ -1279,6 +1319,8 @@ class HybridSearchModal extends Modal {
 			this.failedEmbeddingStatusTimer = null;
 		}
 		const providerChanged =
+			this.openedEmbeddingProvider !==
+				normalizeEmbeddingProvider(this.setting.hybrid.embeddingProvider) ||
 			(this.openedApiDomain ?? "") !== (this.setting.hybrid.apiDomain ?? "") ||
 			(this.openedApiKey ?? "") !== (this.setting.hybrid.apiKey ?? "");
 		if (providerChanged) {
@@ -1352,6 +1394,48 @@ class HybridSearchModal extends Modal {
 			);
 	}
 
+	private createEmbeddingModelDescription(): DocumentFragment {
+		const fragment = document.createDocumentFragment();
+		fragment.append(document.createTextNode(t("hybridModal.embeddingModel.descPrefix")));
+		const strong = document.createElement("strong");
+		strong.setText(t("hybridModal.embeddingModel.descBold"));
+		fragment.append(strong);
+		fragment.append(document.createTextNode(t("hybridModal.embeddingModel.descSuffix")));
+		return fragment;
+	}
+
+	private updateApiDomainForProviderChange(
+		previousProvider: "qwen" | "openai",
+		nextProvider: "qwen" | "openai",
+	): void {
+		const currentDomain = this.hybridApiDomainInputEl?.value?.trim() ??
+			this.setting.hybrid.apiDomain ??
+			"";
+		const normalizedCurrent = normalizeProviderApiDomain(
+			previousProvider,
+			currentDomain,
+		);
+		const previousDefault = getEmbeddingProviderSpec(previousProvider).defaultDomain;
+		const nextDefault = getEmbeddingProviderSpec(nextProvider).defaultDomain;
+		if (!currentDomain || normalizedCurrent === previousDefault) {
+			this.setting.hybrid.apiDomain = "";
+			if (this.hybridApiDomainInputEl) {
+				this.hybridApiDomainInputEl.placeholder = nextDefault;
+				this.hybridApiDomainInputEl.value = nextDefault;
+			}
+			return;
+		}
+
+		const normalizedNext = normalizeProviderApiDomain(nextProvider, currentDomain);
+		this.setting.hybrid.apiDomain =
+			normalizedNext === nextDefault ? "" : normalizedNext;
+		if (this.hybridApiDomainInputEl) {
+			this.hybridApiDomainInputEl.placeholder = nextDefault;
+			this.hybridApiDomainInputEl.value =
+				this.setting.hybrid.apiDomain || nextDefault;
+		}
+	}
+
 	private normalizeAutoTriggerDebounceMs(): number {
 		const value = this.setting.hybrid.autoTriggerDebounceMs ?? 400;
 		if (!Number.isFinite(value)) {
@@ -1391,17 +1475,20 @@ class HybridSearchModal extends Modal {
 	}
 
 	private async checkHybridApiConnectivity() {
+		const provider = normalizeEmbeddingProvider(
+			this.setting.hybrid.embeddingProvider,
+		);
 		const rawDomain =
 			this.hybridApiDomainInputEl?.value?.trim() ||
 			this.setting.hybrid.apiDomain ||
-			"dashscope.aliyuncs.com";
+			getEmbeddingProviderSpec(provider).defaultDomain;
 		const apiKey =
 			this.hybridApiKeyInputEl?.value?.trim() || this.setting.hybrid.apiKey;
 		if (!apiKey) {
 			new MyNotice(t("hybridModal.connectivityMissingApiKey"), 5000);
 			return;
 		}
-		const url = buildDashScopeApiUrl(rawDomain, "embedding");
+		const url = buildEmbeddingApiUrl(provider, rawDomain);
 		const controller = new AbortController();
 		const timeoutId = window.setTimeout(() => controller.abort(), 10_000);
 		try {
@@ -1411,21 +1498,22 @@ class HybridSearchModal extends Modal {
 					"Content-Type": "application/json",
 					Authorization: `Bearer ${apiKey}`,
 				},
-				body: JSON.stringify({
-					model: "text-embedding-v4",
-					input: ["connectivity-check"],
-					dimensions: 1024,
-					encoding_format: "float",
-				}),
+				body: JSON.stringify(
+					buildEmbeddingRequestBody(provider, ["connectivity-check"]),
+				),
 				signal: controller.signal,
 			});
 			if (!response.ok) {
 				const body = await response.text();
-				const details = buildHybridProviderErrorDetails(
-					response.status,
+				const details = buildHybridProviderErrorDetails({
+					provider,
+					status: response.status,
 					body,
-					response.headers.get("Retry-After"),
-				);
+					retryAfterHeader: response.headers.get("Retry-After"),
+					requestIdHeader:
+						response.headers.get("x-request-id") ??
+						response.headers.get("request-id"),
+				});
 				const reason = details.providerMessage ?? `${response.status} ${body}`.trim();
 				new MyNotice(
 					`${t("hybridModal.connectivityFailed")}: ${
@@ -1735,7 +1823,9 @@ class HybridSearchModal extends Modal {
 	}
 
 	private isPinnedTokenStat(filePath: string): boolean {
-		return filePath === SEARCH_RERANK_TOKEN_KEY;
+		return SEARCH_RERANK_TOKEN_KEYS.includes(
+			filePath as (typeof SEARCH_RERANK_TOKEN_KEYS)[number],
+		);
 	}
 
 	private renderTokenTabs(

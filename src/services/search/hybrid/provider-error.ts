@@ -12,6 +12,7 @@ export type HybridProviderFailureKind =
 
 export type HybridProviderErrorDetails = {
 	kind: HybridProviderFailureKind;
+	provider?: 'qwen' | 'openai';
 	status?: number;
 	providerCode?: string | null;
 	providerType?: string | null;
@@ -37,9 +38,17 @@ type DashScopeErrorEnvelope = {
 	};
 };
 
+type HybridProviderErrorDetailsOptions = {
+	provider?: 'qwen' | 'openai';
+	status: number;
+	body: string;
+	retryAfterHeader?: string | null;
+	requestIdHeader?: string | null;
+};
+
 export class NoApiKeyError extends Error {
 	constructor() {
-		super('No Qwen API key configured; falling back to lexical-only search');
+		super('No embedding provider API key configured; falling back to lexical-only search');
 		this.name = 'NoApiKeyError';
 	}
 }
@@ -59,14 +68,31 @@ export class WeeklyTokenLimitExceededError extends Error {
 }
 
 export function buildHybridProviderErrorDetails(
-	status: number,
-	body: string,
-	retryAfterHeader?: string | null,
+	statusOrOptions: number | HybridProviderErrorDetailsOptions,
+	bodyArg?: string,
+	retryAfterHeaderArg?: string | null,
 ): HybridProviderErrorDetails {
-	const parsed = parseHybridProviderErrorBody(body);
+	const options =
+		typeof statusOrOptions === 'number'
+			? {
+				provider: 'qwen' as const,
+				status: statusOrOptions,
+				body: bodyArg ?? '',
+				retryAfterHeader: retryAfterHeaderArg,
+				requestIdHeader: null,
+			}
+			: {
+				provider: statusOrOptions.provider ?? 'qwen',
+				status: statusOrOptions.status,
+				body: statusOrOptions.body,
+				retryAfterHeader: statusOrOptions.retryAfterHeader,
+				requestIdHeader: statusOrOptions.requestIdHeader,
+			};
+	const parsed = parseHybridProviderErrorBody(options.body, options.provider);
 	return {
+		provider: options.provider,
 		kind: classifyHybridProviderFailureFromHttp(
-			status,
+			options.status,
 			[
 				parsed.providerMessage,
 				parsed.providerCode,
@@ -75,12 +101,12 @@ export function buildHybridProviderErrorDetails(
 				.filter((value): value is string => Boolean(value))
 				.join(' '),
 		),
-		status,
+		status: options.status,
 		providerCode: parsed.providerCode,
 		providerType: parsed.providerType,
 		providerMessage: parsed.providerMessage,
-		requestId: parsed.requestId,
-		retryAfterHeader,
+		requestId: parsed.requestId ?? options.requestIdHeader ?? null,
+		retryAfterHeader: options.retryAfterHeader ?? null,
 	};
 }
 
@@ -145,7 +171,7 @@ export function classifyHybridProviderFailureFromHttp(
 	return 'unknown';
 }
 
-export function parseHybridProviderErrorBody(body: string): {
+export function parseHybridProviderErrorBody(body: string, provider: 'qwen' | 'openai' = 'qwen'): {
 	providerMessage: string | null;
 	providerCode: string | null;
 	providerType: string | null;
@@ -165,6 +191,16 @@ export function parseHybridProviderErrorBody(body: string): {
 		const parsed = JSON.parse(trimmed) as DashScopeErrorEnvelope;
 		const errorObject =
 			parsed.error && typeof parsed.error === 'object' ? parsed.error : null;
+		if (provider === 'openai') {
+			return {
+				providerMessage: readProviderString(
+					errorObject?.message ?? parsed.message,
+				),
+				providerCode: readProviderString(errorObject?.code ?? parsed.code),
+				providerType: readProviderString(errorObject?.type),
+				requestId: readProviderString(parsed.request_id ?? parsed.requestId),
+			};
+		}
 		return {
 			providerMessage: readProviderString(
 				errorObject?.message ?? parsed.message,
@@ -209,7 +245,7 @@ export function isQuotaFailureMessage(message: string): boolean {
 
 export function buildHybridFallbackNoticeMessage(error: unknown): string | null {
 	if (error instanceof NoApiKeyError) {
-		return 'Qwen API key is not configured.';
+		return 'Embedding provider API key is not configured.';
 	}
 	if (error instanceof WeeklyTokenLimitExceededError) {
 		return `Weekly token limit exceeded before sending provider request (limit: ${error.limit}, used: ${error.used}, estimated: ${error.estimated}).`;

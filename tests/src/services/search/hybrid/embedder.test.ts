@@ -161,6 +161,33 @@ describe("DashScope API domain normalization", () => {
 			buildDashScopeApiUrl("dashscope.aliyuncs.com/compatible-mode/", "embedding"),
 		).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings");
 	});
+
+	test("builds provider-specific embedding URLs and request bodies", () => {
+		const {
+			buildEmbeddingApiUrl,
+			buildEmbeddingRequestBody,
+		} = require("src/services/search/hybrid/embedder");
+		const { EMBED_DIM } = require("src/services/search/hybrid/hybrid-types");
+
+		expect(buildEmbeddingApiUrl("qwen", undefined)).toBe(
+			"https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings",
+		);
+		expect(buildEmbeddingApiUrl("openai", undefined)).toBe(
+			"https://api.openai.com/v1/embeddings",
+		);
+		expect(buildEmbeddingRequestBody("qwen", ["alpha"])).toEqual({
+			model: "text-embedding-v4",
+			input: ["alpha"],
+			dimensions: EMBED_DIM,
+			encoding_format: "float",
+		});
+		expect(buildEmbeddingRequestBody("openai", ["alpha"])).toEqual({
+			model: "text-embedding-3-large",
+			input: ["alpha"],
+			dimensions: EMBED_DIM,
+			encoding_format: "float",
+		});
+	});
 });
 
 type MockTokenRecord = {

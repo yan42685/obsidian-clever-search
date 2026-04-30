@@ -72,6 +72,54 @@ describe("hybrid provider error helpers", () => {
 		});
 	});
 
+	test("parses OpenAI response bodies and request id headers into shared metadata", () => {
+		expect(
+			buildHybridProviderErrorDetails({
+				provider: "openai",
+				status: 401,
+				body: JSON.stringify({
+					error: {
+						message: "Incorrect API key provided.",
+						type: "invalid_request_error",
+						code: "invalid_api_key",
+						param: null,
+					},
+				}),
+				requestIdHeader: "req-openai-401",
+			}),
+		).toMatchObject({
+			provider: "openai",
+			kind: "auth_401",
+			status: 401,
+			providerCode: "invalid_api_key",
+			providerType: "invalid_request_error",
+			providerMessage: "Incorrect API key provided.",
+			requestId: "req-openai-401",
+		});
+	});
+
+	test("classifies OpenAI insufficient quota responses as quota exhaustion", () => {
+		expect(
+			buildHybridProviderErrorDetails({
+				provider: "openai",
+				status: 429,
+				body: JSON.stringify({
+					error: {
+						message: "You exceeded your current quota.",
+						type: "insufficient_quota",
+						code: "insufficient_quota",
+					},
+				}),
+				retryAfterHeader: "30",
+			}),
+		).toMatchObject({
+			kind: "quota_exhausted",
+			providerCode: "insufficient_quota",
+			providerType: "insufficient_quota",
+			retryAfterHeader: "30",
+		});
+	});
+
 	test("prefers provider message when building a fallback notice message", () => {
 		const error = new Error("Qwen rerank API error 403");
 		Object.assign(error, {
