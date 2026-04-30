@@ -404,6 +404,38 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		]);
 	});
 
+	test("preserves lexical subitem readiness when hybrid fallback returns lexical results", async () => {
+		mockHybridEngine.prepareRecall.mockResolvedValue({
+			query: "alpha",
+			topK: 10,
+			displayCandidates: [],
+			fallbackNoticeKey: "hybridNotice.searchFallbackToLexical",
+			fallbackNoticeMessage: null,
+			fallbackToLexicalSearch: true,
+		});
+		const { service } = createHarness();
+		const { LexicalEngine } = require("src/services/search/lexical-engine");
+		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
+		lexicalEngine.searchFiles.mockResolvedValue([
+			{
+				path: "notes/lazy-subitems.md",
+				queryTerms: ["alpha"],
+				matchedTerms: ["alpha"],
+				score: 7,
+				directSubItems: [],
+				nativeSubItemsReady: false,
+			},
+		]);
+
+		const result = await service.searchInVaultHybrid("alpha");
+		const item = result.items[0];
+
+		expect(item.path).toBe("notes/lazy-subitems.md");
+		expect(item.freshnessState).toBe("lexical_only");
+		expect(item.nativeSubItemsReady).toBe(false);
+		expect(item.subItems).toEqual([]);
+	});
+
 	test("uses mapped notice text for known issue kinds without provider-specific messages", async () => {
 		const { NoApiKeyError } = require("src/services/search/hybrid/provider-error");
 		mockHybridEngine.prepareRecall.mockRejectedValue(new NoApiKeyError());

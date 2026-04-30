@@ -115,7 +115,7 @@ describe("HybridReranker", () => {
 		);
 		const timeoutExpectation = expect(promise).rejects.toBeInstanceOf(HybridRerankTimeoutError);
 
-		await jest.advanceTimersByTimeAsync(2_800);
+		await jest.advanceTimersByTimeAsync(5_000);
 
 		await timeoutExpectation;
 		expect((global as any).fetch).toHaveBeenCalledTimes(1);

@@ -207,7 +207,7 @@ export default {
 	"hybridModal.maxResultCount.desc": "How many reranked hybrid results to return and display per search.",
 	"hybridModal.weeklyUsed": "This week used",
 	"hybridModal.indexConcurrency": "Index concurrency",
-	"hybridModal.indexConcurrency.desc": "How many files to embed in parallel during hybrid indexing. Higher values may be faster but can increase rate limits, timeouts, and UI pressure.",
+	"hybridModal.indexConcurrency.desc": "Preferred file parallelism during hybrid indexing. The plugin may raise the effective value by provider to fill embedding batches while still keeping HTTP embedding requests serialized.",
 	"hybridModal.minIncrementalEmbedInterval": "Min incremental embed interval",
 	"hybridModal.minIncrementalEmbedInterval.desc": "Minimum minutes between incremental embedding retries for the same file.",
 	"hybridModal.failedEmbeddingRetryInterval": "Failed embedding retry interval",

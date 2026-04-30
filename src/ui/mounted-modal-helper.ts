@@ -335,9 +335,9 @@ export class HybridQuerySessionController {
 				return;
 			}
 			session.prepared = preparedResult.prepared;
-			this.searchService.notifyHybridFallback(preparedResult.result);
-			await this.onResultApplied(session.query, preparedResult.result);
 			if (!preparedResult.prepared) {
+				this.searchService.notifyHybridFallback(preparedResult.result);
+				await this.onResultApplied(session.query, preparedResult.result);
 				if (this.shouldCacheResult(preparedResult.result)) {
 					this.setCachedResult(session.query, preparedResult.result);
 				}

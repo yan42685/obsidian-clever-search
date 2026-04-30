@@ -79,7 +79,11 @@ export class HybridDisabledError extends Error {
 
 type ProviderEmbeddingResponse = {
 	data?: Array<{ index?: number; embedding?: number[] }>;
-	usage?: { total_tokens?: number; input_tokens?: number };
+	usage?: {
+		total_tokens?: number;
+		input_tokens?: number;
+		prompt_tokens?: number;
+	};
 };
 
 export type WeeklyTokenReservation = {
@@ -159,14 +163,14 @@ export function getEmbeddingRequestProfile(
 		return {
 			maxBatchSize: 100,
 			minSpacingMs: 0,
-			flushDelayMs: 50,
+			flushDelayMs: 300,
 			concurrency: 1,
 		};
 	}
 	return {
 		maxBatchSize: 10,
 		minSpacingMs: 250,
-		flushDelayMs: 50,
+		flushDelayMs: 300,
 		concurrency: 1,
 	};
 }
@@ -285,6 +289,7 @@ class EmbeddingQueue {
 		}
 
 		const requestStart = Date.now();
+		const batchAbort = this.createBatchAbortController(liveBatch);
 		const estimatedTokens = liveBatch.reduce(
 			(sum, item) => sum + item.estimatedTokens,
 			0,
@@ -296,17 +301,23 @@ class EmbeddingQueue {
 				'embed.ensure_weekly_budget',
 				async () => await reserveWeeklyTokenBudget(estimatedTokens),
 			);
-			const { embeddings: floats, tokensUsed } = await profileHybridStage(
+			const { embeddings: floats, tokensUsed: reportedTokensUsed } = await profileHybridStage(
 				'embed.fetch_embeddings',
 				async () =>
 					await liveBatch[0].owner.fetchQueuedEmbeddings(
 						liveBatch.map((item) => item.text),
 						this.provider,
 						maxAttempts,
+						batchAbort.signal,
 					),
 			);
+			const tokensUsed =
+				reportedTokensUsed > 0 ? reportedTokensUsed : estimatedTokens;
+			const fileCount = new Set(
+				liveBatch.map((item) => item.filePath || '<query>'),
+			).size;
 			logger.debug(
-				`embed queue request: provider=${this.provider}, size=${liveBatch.length}, tokens=${tokensUsed}, elapsed=${Date.now() - requestStart} ms`,
+				`embed queue request: provider=${this.provider}, size=${liveBatch.length}, files=${fileCount}, tokens=${tokensUsed}, reportedTokens=${reportedTokensUsed}, elapsed=${Date.now() - requestStart} ms`,
 			);
 			if (tokensUsed > 0) {
 				recordHybridProfileMetric('provider_tokens', tokensUsed);
@@ -324,8 +335,40 @@ class EmbeddingQueue {
 				this.settleItem(item, 'reject', error);
 			}
 		} finally {
+			batchAbort.dispose();
 			reservation?.release();
 		}
+	}
+
+	private createBatchAbortController(batch: EmbeddingQueueItem[]): {
+		signal: AbortSignal;
+		dispose: () => void;
+	} {
+		const controller = new AbortController();
+		const listeners: Array<{
+			signal: AbortSignal;
+			listener: () => void;
+		}> = [];
+		const abort = () => controller.abort();
+		for (const item of batch) {
+			if (!item.signal) {
+				continue;
+			}
+			if (item.signal.aborted) {
+				controller.abort();
+				continue;
+			}
+			item.signal.addEventListener('abort', abort, { once: true });
+			listeners.push({ signal: item.signal, listener: abort });
+		}
+		return {
+			signal: controller.signal,
+			dispose: () => {
+				for (const { signal, listener } of listeners) {
+					signal.removeEventListener('abort', listener);
+				}
+			},
+		};
 	}
 
 	private async recordTokenUsageForBatch(
@@ -558,8 +601,9 @@ export class Embedder {
 		texts: string[],
 		provider: HybridEmbeddingProvider,
 		maxAttempts: number,
+		externalSignal?: AbortSignal,
 	): Promise<{ embeddings: number[][]; tokensUsed: number }> {
-		return await this.fetchEmbeddings(texts, undefined, {
+		return await this.fetchEmbeddings(texts, externalSignal, {
 			maxAttempts,
 			provider,
 		});
@@ -645,7 +689,11 @@ export class Embedder {
 						url: apiUrl,
 						providerLabel: getEmbeddingProviderSpec(provider).label,
 					});
-					const tokensUsed = json.usage?.total_tokens ?? json.usage?.input_tokens ?? 0;
+					const tokensUsed =
+						json.usage?.total_tokens ??
+						json.usage?.input_tokens ??
+						json.usage?.prompt_tokens ??
+						0;
 					return {
 						embeddings: this.validateEmbeddingResponse(texts, json),
 						tokensUsed,

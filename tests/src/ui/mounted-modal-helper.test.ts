@@ -82,7 +82,7 @@ describe("mounted modal helper", () => {
 		expect(usesDirectFileSubItems(item)).toBe(true);
 	});
 
-	test("hybrid query session waits for rerank gate after early prepare result", async () => {
+	test("hybrid query session waits for rerank gate without applying early prepare result", async () => {
 		const { SearchResult, SearchType } = require("src/globals/search-types");
 		const { HybridQuerySessionController } = require("src/ui/mounted-modal-helper");
 		const prepareResult = {
@@ -121,15 +121,15 @@ describe("mounted modal helper", () => {
 		await jest.advanceTimersByTimeAsync(100);
 		expect(searchService.prepareSearchInVaultHybrid).toHaveBeenCalledTimes(1);
 		expect(searchService.finalizePreparedSearchInVaultHybrid).not.toHaveBeenCalled();
-		expect(applied).toEqual(["prepare"]);
+		expect(applied).toEqual([]);
 
 		await jest.advanceTimersByTimeAsync(299);
 		expect(searchService.finalizePreparedSearchInVaultHybrid).not.toHaveBeenCalled();
-		expect(applied).toEqual(["prepare"]);
+		expect(applied).toEqual([]);
 
 		await jest.advanceTimersByTimeAsync(1);
 		expect(searchService.finalizePreparedSearchInVaultHybrid).toHaveBeenCalledTimes(1);
-		expect(applied).toEqual(["prepare", "final"]);
+		expect(applied).toEqual(["final"]);
 	});
 
 	test("hybrid query session starts finalize immediately when prepare completes after the rerank gate", async () => {
@@ -186,7 +186,7 @@ describe("mounted modal helper", () => {
 		await Promise.resolve();
 		await Promise.resolve();
 
-		expect(applied).toEqual(["prepare-after-gate", "final-after-slow-prepare"]);
+		expect(applied).toEqual(["final-after-slow-prepare"]);
 		expect(searchService.finalizePreparedSearchInVaultHybrid).toHaveBeenCalledTimes(1);
 	});
 
@@ -255,7 +255,7 @@ describe("mounted modal helper", () => {
 		expect(applied).toEqual(["beta-prepare"]);
 	});
 
-	test("hybrid query session keeps prepared results and surfaces rerank fallback notice when finalize degrades", async () => {
+	test("hybrid query session only applies final results and surfaces rerank fallback notice when finalize degrades", async () => {
 		const { SearchResult, SearchType } = require("src/globals/search-types");
 		const { HybridQuerySessionController } = require("src/ui/mounted-modal-helper");
 		const prepareResult = {
@@ -301,9 +301,9 @@ describe("mounted modal helper", () => {
 		await jest.advanceTimersByTimeAsync(100);
 		await jest.advanceTimersByTimeAsync(300);
 
-		expect(applied).toEqual(["prepared-order", "prepared-order"]);
-		expect(searchService.notifyHybridFallback).toHaveBeenNthCalledWith(1, prepareResult.result);
-		expect(searchService.notifyHybridFallback).toHaveBeenNthCalledWith(2, finalResult);
+		expect(applied).toEqual(["prepared-order"]);
+		expect(searchService.notifyHybridFallback).toHaveBeenCalledTimes(1);
+		expect(searchService.notifyHybridFallback).toHaveBeenCalledWith(finalResult);
 		expect(setCachedResult).not.toHaveBeenCalled();
 	});
 

@@ -36,6 +36,7 @@ export type HybridBootstrapMove = {
 };
 
 export type HybridBootstrapPlan = {
+  runGeneration: number;
   currFiles: Map<string, TFile>;
   repairReport: HybridStorageRepairReport;
   docsToAdd: TFile[];
@@ -57,6 +58,7 @@ export type HybridIndexProgress = {
   totalFiles: number;
   processedBytes: number;
   processedFiles: number;
+  activeFiles?: number;
   repairedPaths: number;
   failedFiles: number;
   sessionTokens: number;
@@ -84,6 +86,8 @@ type HybridBootstrapCoordinatorOptions = {
   dataProvider: DataProvider;
   hybridEngine: HybridBootstrapEngine;
   shouldForceRefresh: () => boolean;
+  getRunGeneration: () => number;
+  throwIfRunCancelled: (runGeneration: number) => void;
   blockRuntimeQueryGate: () => void;
   syncRuntimeQueryGate: () => void;
   repairStoredState: (
@@ -108,6 +112,7 @@ type HybridBootstrapCoordinatorOptions = {
     progressNotice: HybridProgressReporter | null,
     repairedPaths: number,
     failures: HybridIndexFailure[],
+    runGeneration: number,
   ) => Promise<void>;
   enqueuePersistedRecoveryStates: (skipPaths: ReadonlySet<string>) => Promise<void>;
   noticeHybridIndexFailures: (failures: HybridIndexFailure[]) => void;
@@ -125,29 +130,36 @@ export class HybridBootstrapCoordinator {
     beginHybridProfile("hybrid-init", {
       forceRefresh: this.options.shouldForceRefresh() ? 1 : 0,
     });
+    const runGeneration = this.options.getRunGeneration();
 
     try {
+      this.options.throwIfRunCancelled(runGeneration);
       if (this.options.shouldForceRefresh()) {
         await profileHybridStage("startup.clear_all", async () => {
           await this.options.hybridEngine.clearAll();
         });
       }
+      this.options.throwIfRunCancelled(runGeneration);
       await profileHybridStage("startup.load_engine", async () => {
         await this.options.hybridEngine.load();
       });
+      this.options.throwIfRunCancelled(runGeneration);
       const currFiles = await profileHybridStage(
         "startup.scan_indexable_files",
         async () => this.collectCurrentFiles(),
       );
+      this.options.throwIfRunCancelled(runGeneration);
       const repairReport = await profileHybridStage(
         "startup.repair_stored_state",
         async () => await this.options.repairStoredState(currFiles),
       );
+      this.options.throwIfRunCancelled(runGeneration);
       const previousIndexedFileRefs = repairReport.previousIndexedFileRefs;
       await this.options.restorePersistedRecoveryState(
         currFiles,
         previousIndexedFileRefs,
       );
+      this.options.throwIfRunCancelled(runGeneration);
       const { docsToAdd, docsToDelete, docsToMove } = await this.planFileSetChanges(
         currFiles,
         previousIndexedFileRefs,
@@ -159,6 +171,7 @@ export class HybridBootstrapCoordinator {
       logger.trace(`hybrid docs to add: ${docsToAdd.length}`);
       logger.trace(`hybrid docs to move: ${docsToMove.length}`);
       return {
+        runGeneration,
         currFiles,
         repairReport,
         docsToAdd,
@@ -182,6 +195,7 @@ export class HybridBootstrapCoordinator {
     }
 
     const { currFiles, repairReport, docsToAdd, docsToDelete, docsToMove } = plan;
+    const runGeneration = plan.runGeneration;
     const hybridIndexStart = Date.now();
     const concurrency = this.options.getHybridIndexConcurrency();
     setHybridProfileMeta("concurrency", concurrency);
@@ -191,12 +205,14 @@ export class HybridBootstrapCoordinator {
     logger.debug(
       `hybrid batch start: delete=${docsToDelete.length}, add=${docsToAdd.length}, move=${docsToMove.length}, concurrency=${concurrency}`,
     );
+    this.options.throwIfRunCancelled(runGeneration);
     await this.options.runPreflight(
       currFiles,
       docsToAdd,
       docsToDelete,
       repairReport.previousIndexedFileRefs,
     );
+    this.options.throwIfRunCancelled(runGeneration);
     const progressNotice = this.options.createProgressNotice(
       docsToAdd,
       repairReport.repairedPaths.length,
@@ -206,6 +222,7 @@ export class HybridBootstrapCoordinator {
     const pendingDeletes = new Set<string>(docsToDelete);
 
     for (const move of docsToMove) {
+      this.options.throwIfRunCancelled(runGeneration);
       const moved = await this.options.hybridEngine
         .moveFile(move.oldPath, move.newPath, move.sourceGeneration)
         .catch((error) => {
@@ -236,6 +253,7 @@ export class HybridBootstrapCoordinator {
     try {
       await profileHybridStage("startup.delete_stale_paths", async () => {
         for (const path of pendingDeletes) {
+          this.options.throwIfRunCancelled(runGeneration);
           await this.options.hybridEngine
             .deleteFile(path, { persistIndices: false })
             .catch((error) =>
@@ -249,8 +267,10 @@ export class HybridBootstrapCoordinator {
           progressNotice,
           repairReport.repairedPaths.length,
           failures,
+          runGeneration,
         );
       });
+      this.options.throwIfRunCancelled(runGeneration);
       const fallbackNoticeKey =
         this.options.hybridEngine.consumeIndexingFallbackNoticeKey();
       if (failures.length > 0) {

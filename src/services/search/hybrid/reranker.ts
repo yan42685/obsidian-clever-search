@@ -16,7 +16,7 @@ import {
 	WeeklyTokenLimitExceededError,
 } from './provider-error';
 
-const RERANK_TIMEOUT_MS = 2_800;
+const RERANK_TIMEOUT_MS = 5_000;
 export const SEARCH_QWEN_RERANK_TOKEN_KEY = '[search] qwen3-rerank';
 export const SEARCH_OPENAI_RERANK_TOKEN_KEY = '[search] gpt-5.4-nano';
 export const SEARCH_RERANK_TOKEN_KEY = SEARCH_QWEN_RERANK_TOKEN_KEY;

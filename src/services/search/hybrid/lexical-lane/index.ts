@@ -93,11 +93,13 @@ export function runHybridLexicalLaneFileItemPipeline(params: {
 	snapshotTextByRequestKey: ReadonlyMap<string, string>;
 	rerankTopK?: number;
 	displayTopK?: number;
+	maxDisplayFiles?: number;
 	globalPoolMax?: number;
 }) {
 	return buildHybridLexicalLaneFileItems(
 		params.queryText,
 		runHybridLexicalLaneCandidatePipeline(params),
+		{ maxDisplayFiles: params.maxDisplayFiles ?? params.displayTopK },
 	);
 }
 
@@ -108,11 +110,13 @@ export async function runHybridLexicalLaneSearch(params: {
 	maxBlocksPerFile?: number;
 	rerankTopK?: number;
 	displayTopK?: number;
+	maxDisplayFiles?: number;
 	globalPoolMax?: number;
 }) {
 	return buildHybridLexicalLaneFileItems(
 		params.queryText,
 		await prepareHybridLexicalLaneSearch(params),
+		{ maxDisplayFiles: params.maxDisplayFiles ?? params.displayTopK },
 	);
 }
 

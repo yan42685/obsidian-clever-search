@@ -199,6 +199,11 @@ type DataManagerInitOptions = {
   suppressCompletionNotice?: boolean;
 };
 
+type FileBatchLimit = {
+  maxFiles: number;
+  maxBytes: number;
+};
+
 type HybridRefreshResult = {
   hadWork: boolean;
   failedFiles: number;
@@ -288,12 +293,16 @@ function hasStoredHybridPathData(summary: HybridStoredPathSummary): boolean {
 class HybridIndexProgressNotice {
   private readonly notice: MyNotice;
   private lastRenderAt = 0;
+  private hidden = false;
 
-  constructor() {
+  constructor(private readonly onHide?: (notice: HybridIndexProgressNotice) => void) {
     this.notice = new MyNotice("Hybrid indexing...", 0);
   }
 
   update(progress: HybridIndexProgress, force = false) {
+    if (this.hidden) {
+      return;
+    }
     const now = Date.now();
     if (!force && now - this.lastRenderAt < 400) {
       return;
@@ -303,13 +312,22 @@ class HybridIndexProgressNotice {
   }
 
   hide() {
+    if (this.hidden) {
+      return;
+    }
+    this.hidden = true;
     this.notice.hide();
+    this.onHide?.(this);
   }
 
   private buildMessage(progress: HybridIndexProgress): string {
     const repairLabel = progress.repairedPaths > 0
       ? `, stored repairs ${progress.repairedPaths}`
       : "";
+    const fileProgressLabel =
+      progress.stage === "index"
+        ? `done ${progress.processedFiles}, running ${progress.activeFiles ?? 0}, total ${progress.totalFiles}`
+        : `${progress.processedFiles}/${progress.totalFiles} files`;
     if (progress.stage === "repair") {
       return `Hybrid self-healing: repaired ${progress.repairedPaths} stored file state(s). Preparing reindex... ${this.buildTokenLabel(progress.sessionTokens)}`;
     }
@@ -317,9 +335,9 @@ class HybridIndexProgressNotice {
       if (progress.totalFiles === 0) {
         return `Hybrid self-healing finished: repaired ${progress.repairedPaths} stored file state(s), semantic failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
       }
-      return `Hybrid indexing finished: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} processed (${progress.processedFiles}/${progress.totalFiles} attempted)${repairLabel}, semantic failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
+      return `Hybrid indexing finished: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} processed (${progress.processedFiles}/${progress.totalFiles} files)${repairLabel}, semantic failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
     }
-    return `Hybrid indexing: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} processed (${progress.processedFiles}/${progress.totalFiles} attempted)${repairLabel}, semantic failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
+    return `Hybrid indexing: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} processed (${fileProgressLabel})${repairLabel}, semantic failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
   }
 
   private buildTokenLabel(tokens: number): string {
@@ -409,7 +427,12 @@ export class DataManager {
   private static readonly HYBRID_STORAGE_RATIO_FALLBACK = 1.6;
   private static readonly HYBRID_STORAGE_RATIO_MIN = 0.8;
   private static readonly HYBRID_STORAGE_RATIO_MAX = 4.0;
-  private static readonly HYBRID_IN_FLIGHT_BYTES_BUDGET = 4 * 1024 * 1024;
+  private static readonly HYBRID_QWEN_IN_FLIGHT_BYTES_BUDGET = 2 * 1024 * 1024;
+  private static readonly HYBRID_OPENAI_IN_FLIGHT_BYTES_BUDGET = 4 * 1024 * 1024;
+  private static readonly HYBRID_QWEN_INDEX_CONCURRENCY_FLOOR = 10;
+  private static readonly HYBRID_QWEN_INDEX_CONCURRENCY_MAX = 16;
+  private static readonly HYBRID_OPENAI_INDEX_CONCURRENCY_FLOOR = 32;
+  private static readonly HYBRID_OPENAI_INDEX_CONCURRENCY_MAX = 48;
   private static readonly LEXICAL_SNAPSHOT_FLUSH_DEBOUNCE_MS = 10_000;
   private static readonly LEXICAL_SNAPSHOT_FLUSH_MAX_AGE_MS = 60_000;
   private static readonly LEXICAL_SNAPSHOT_FLUSH_PATH_THRESHOLD = 24;
@@ -452,6 +475,9 @@ export class DataManager {
   private readonly hybridRepairPendingPersistPaths = new Set<string>();
   private hybridRepairFlushTimer: NodeJS.Timeout | null = null;
   private hybridRepairWorker: Promise<void> | null = null;
+  private hybridRepairAbortController: AbortController | null = null;
+  private hybridRepairGeneration = 0;
+  private readonly activeHybridProgressNotices = new Set<HybridIndexProgressNotice>();
   private lastHybridStaleWarnSignature: string | null = null;
   private readonly recentlyVerifiedHybridIndexedRefs = new Map<
     string,
@@ -481,6 +507,9 @@ export class DataManager {
     dataProvider: this.dataProvider,
     hybridEngine: this.hybridEngine,
     shouldForceRefresh: () => this.shouldForceRefresh,
+    getRunGeneration: () => this.hybridRepairGeneration,
+    throwIfRunCancelled: (runGeneration) =>
+      this.throwIfHybridRepairRunCancelled(runGeneration),
     blockRuntimeQueryGate: () => this.blockHybridRuntimeQueryGate(),
     syncRuntimeQueryGate: () => this.syncHybridRuntimeQueryGateFromEngine(),
     repairStoredState: (currFiles) => this.repairHybridStoredState(currFiles),
@@ -503,8 +532,20 @@ export class DataManager {
       ),
     createProgressNotice: (docsToAdd, repairedPaths) =>
       this.createHybridIndexProgressNotice(docsToAdd, repairedPaths),
-    runRepairTasks: (tasks, progressNotice, repairedPaths, failures) =>
-      this.runHybridRepairTasks(tasks, progressNotice, repairedPaths, failures),
+    runRepairTasks: (
+      tasks,
+      progressNotice,
+      repairedPaths,
+      failures,
+      runGeneration,
+    ) =>
+      this.runHybridRepairTasks(
+        tasks,
+        progressNotice,
+        repairedPaths,
+        failures,
+        runGeneration,
+      ),
     enqueuePersistedRecoveryStates: (skipPaths) =>
       this.enqueuePersistedHybridRecoveryStates(skipPaths),
     noticeHybridIndexFailures: (failures) =>
@@ -1236,6 +1277,7 @@ export class DataManager {
 
   async refreshAllAsync() {
     this.shouldForceRefresh = true;
+    this.cancelActiveHybridRepairs("force-refresh-all");
     this.clearHybridFailedEmbeddingState();
     this.setHybridRuntimeQueryGate("blocked");
     getInstance(FileWatcher).stop();
@@ -1277,6 +1319,9 @@ export class DataManager {
   }
 
   async refreshHybridStateAsync(options: HybridRefreshOptions = {}) {
+    if (options.forceRefresh) {
+      this.cancelActiveHybridRepairs("force-refresh");
+    }
     this.clearHybridFailedEmbeddingState();
     this.setHybridRuntimeQueryGate("blocked");
     const previousForceRefresh = this.shouldForceRefresh;
@@ -1286,6 +1331,10 @@ export class DataManager {
       if (options.forceRefresh) {
         this.shouldForceRefresh = true;
         refreshResult = await this.initHybridEngine().catch((e) => {
+          if (this.isHybridAbortError(e)) {
+            logger.debug("hybrid engine init cancelled by force refresh");
+            return null;
+          }
           logger.warn("hybrid engine init failed:", e);
           new MyNotice(t("hybridNotice.indexFallbackToLexical"), 7000);
           return null;
@@ -1297,6 +1346,10 @@ export class DataManager {
         });
       } else {
         refreshResult = await this.initHybridEngine().catch((e) => {
+          if (this.isHybridAbortError(e)) {
+            logger.debug("hybrid engine init cancelled");
+            return null;
+          }
           logger.warn("hybrid engine init failed:", e);
           new MyNotice(t("hybridNotice.indexFallbackToLexical"), 7000);
           return null;
@@ -2594,7 +2647,62 @@ export class DataManager {
     this.hybridRepairQueue.clear();
     this.hybridRepairInFlightPaths.clear();
     this.hybridRepairPendingPersistPaths.clear();
+    this.hybridRepairAbortController?.abort();
+    this.hybridRepairAbortController = null;
+    this.hybridRepairGeneration += 1;
     this.notifyHybridRuntimeStatusChanged();
+  }
+
+  private cancelActiveHybridRepairs(reason: string): void {
+    const queuedCount = this.hybridRepairQueue.size;
+    const inFlightCount = this.hybridRepairInFlightPaths.size;
+    const pendingPersistCount = this.hybridRepairPendingPersistPaths.size;
+    if (this.hybridRepairFlushTimer) {
+      clearTimeout(this.hybridRepairFlushTimer);
+      this.hybridRepairFlushTimer = null;
+    }
+    this.hybridRepairQueue.clear();
+    this.hybridRepairPendingPersistPaths.clear();
+    this.hybridRepairAbortController?.abort();
+    this.hybridRepairAbortController = null;
+    this.hybridRepairGeneration += 1;
+    this.hideActiveHybridProgressNotices();
+    if (queuedCount > 0 || inFlightCount > 0 || pendingPersistCount > 0) {
+      logger.debug(
+        `cancelled active hybrid repairs for ${reason}: queued=${queuedCount}, inFlight=${inFlightCount}, pendingPersist=${pendingPersistCount}`,
+      );
+      this.notifyHybridRuntimeStatusChanged();
+    }
+  }
+
+  private isHybridRepairRunCancelled(
+    runGeneration: number,
+    signal?: AbortSignal,
+  ): boolean {
+    return signal?.aborted === true || runGeneration !== this.hybridRepairGeneration;
+  }
+
+  private throwIfHybridRepairRunCancelled(
+    runGeneration: number,
+    signal?: AbortSignal,
+  ): void {
+    if (!this.isHybridRepairRunCancelled(runGeneration, signal)) {
+      return;
+    }
+    const error = new Error("Hybrid repair cancelled");
+    error.name = "AbortError";
+    throw error;
+  }
+
+  private isHybridAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === "AbortError";
+  }
+
+  private hideActiveHybridProgressNotices(): void {
+    for (const notice of this.activeHybridProgressNotices) {
+      notice.hide();
+    }
+    this.activeHybridProgressNotices.clear();
   }
 
   private clearHybridFailedEmbeddingState(): void {
@@ -2947,21 +3055,18 @@ export class DataManager {
 
 
   private buildLexicalReindexBatches(files: readonly TFile[]): TFile[][] {
-    return this.buildFileBatches(
-      files,
-      DataManager.LEXICAL_REINDEX_BATCH_SIZE,
-      DataManager.LEXICAL_REINDEX_MAX_BYTES,
-    );
+    return this.buildFileBatches(files, this.getLexicalReindexBatchLimit());
   }
 
   private buildFileBatches(
     files: readonly TFile[],
-    maxFilesPerBatch: number,
-    maxBytesPerBatch: number,
+    limit: FileBatchLimit,
   ): TFile[][] {
     const batches: TFile[][] = [];
     let currentBatch: TFile[] = [];
     let currentBatchBytes = 0;
+    const maxFilesPerBatch = Math.max(1, limit.maxFiles);
+    const maxBytesPerBatch = Math.max(1, limit.maxBytes);
 
     for (const file of files) {
       const fileBytes = Math.max(0, file.stat.size ?? 0);
@@ -2994,6 +3099,13 @@ export class DataManager {
     }
 
     return batches;
+  }
+
+  private getLexicalReindexBatchLimit(): FileBatchLimit {
+    return {
+      maxFiles: DataManager.LEXICAL_REINDEX_BATCH_SIZE,
+      maxBytes: DataManager.LEXICAL_REINDEX_MAX_BYTES,
+    };
   }
   private buildCurrentLexicalIndexedFileRefs(): BaseIndexedFileRef[] {
     return this.dataProvider.allFilesToBeIndexed().map((file) => ({
@@ -3494,6 +3606,7 @@ export class DataManager {
     progressNotice: HybridProgressReporter | null,
     repairedPaths: number,
     failures: HybridIndexFailure[],
+    runGeneration = this.hybridRepairGeneration,
   ) {
     if (tasks.length === 0) {
       progressNotice?.update(
@@ -3512,119 +3625,138 @@ export class DataManager {
       return;
     }
 
-    const concurrency = this.getHybridIndexConcurrency();
-    const files = tasks
-      .map((task) => {
-        const file = this.dataProvider.getFileByPath(task.path);
-        return file ? { task, file } : null;
-      })
-      .filter(
-        (item): item is { task: HybridRepairTask; file: TFile } =>
-          item !== null,
-      );
-    const taskInspections = await inspectHybridStoredPaths({
-      database: this.database,
-      paths: files.map((item) => item.task.path),
-      existingPaths: new Set(files.map((item) => item.task.path)),
-      currentPrecision:
-        this.setting.hybrid.vectorCompression === "float16" ? "float16" : "int8",
-      batchSize: DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE,
-    });
-    for (const item of files) {
-      const inspection = taskInspections.get(item.task.path);
-      if (!inspection || inspection.consistency.repairReasons.length === 0) {
-        continue;
-      }
-      logger.debug(
-        `hybrid repair clearing inconsistent local state for ${item.task.path}: ${inspection.consistency.repairReasons.join(", ")}`,
-      );
-      await this.hybridEngine
-        .deleteFile(item.task.path, { persistIndices: false })
-        .catch((error) =>
-          logger.warn(
-            `hybrid repair pre-clean failed for ${item.task.path}:`,
-            error,
-          ),
+    const controller = new AbortController();
+    this.hybridRepairAbortController = controller;
+    const signal = controller.signal;
+    try {
+      const batchLimit = this.getHybridIndexBatchLimit();
+      const files = tasks
+        .map((task) => {
+          const file = this.dataProvider.getFileByPath(task.path);
+          return file ? { task, file } : null;
+        })
+        .filter(
+          (item): item is { task: HybridRepairTask; file: TFile } =>
+            item !== null,
         );
-    }
-    const largeFiles: Array<{ task: HybridRepairTask; file: TFile }> = [];
-    const normalFiles: Array<{ task: HybridRepairTask; file: TFile }> = [];
-    for (const item of files) {
-      const file = item.file;
-      if (file.stat.size >= DataManager.HYBRID_LARGE_FILE_BYTES) {
-        largeFiles.push(item);
-      } else {
-        normalFiles.push(item);
+      const taskInspections = await inspectHybridStoredPaths({
+        database: this.database,
+        paths: files.map((item) => item.task.path),
+        existingPaths: new Set(files.map((item) => item.task.path)),
+        currentPrecision:
+          this.setting.hybrid.vectorCompression === "float16" ? "float16" : "int8",
+        batchSize: DataManager.HYBRID_TABLE_SCAN_BATCH_SIZE,
+      });
+      this.throwIfHybridRepairRunCancelled(runGeneration, signal);
+      for (const item of files) {
+        this.throwIfHybridRepairRunCancelled(runGeneration, signal);
+        const inspection = taskInspections.get(item.task.path);
+        if (!inspection || inspection.consistency.repairReasons.length === 0) {
+          continue;
+        }
+        logger.debug(
+          `hybrid repair clearing inconsistent local state for ${item.task.path}: ${inspection.consistency.repairReasons.join(", ")}`,
+        );
+        await this.hybridEngine
+          .deleteFile(item.task.path, { persistIndices: false })
+          .catch((error) =>
+            logger.warn(
+              `hybrid repair pre-clean failed for ${item.task.path}:`,
+              error,
+            ),
+          );
       }
-    }
-
-    largeFiles.sort(
-      (left, right) => right.file.stat.size - left.file.stat.size,
-    );
-    normalFiles.sort(
-      (left, right) => right.file.stat.size - left.file.stat.size,
-    );
-    logger.debug(
-      `hybrid batch tiers: large=${largeFiles.length}, normal=${normalFiles.length}, normalConcurrency=${concurrency}`,
-    );
-    let processedBytes = 0;
-    let processedFiles = 0;
-    let failedFiles = 0;
-    const totalBytes = files.reduce(
-      (sum, item) => sum + item.file.stat.size,
-      0,
-    );
-    const totalFiles = files.length;
-    progressNotice?.update(
-      {
-        stage: "index",
-        totalBytes,
-        totalFiles,
-        processedBytes: 0,
-        processedFiles: 0,
-        repairedPaths,
-        failedFiles: 0,
-        sessionTokens: getHybridProfileMetric("provider_tokens"),
-      },
-      true,
-    );
-
-    await runWeightedTasks(
-      [...largeFiles, ...normalFiles],
-      {
-        maxConcurrent: concurrency,
-        maxWeight: DataManager.HYBRID_IN_FLIGHT_BYTES_BUDGET,
-        getWeight: (item) => item.file.stat.size,
-        isExclusive: (item) =>
-          item.file.stat.size >= DataManager.HYBRID_LARGE_FILE_BYTES,
-      },
-      async (item) => {
-        const failure = await this.runHybridRepairTask(item.task, item.file);
-        if (failure) {
-          failures.push(failure);
+      const largeFiles: Array<{ task: HybridRepairTask; file: TFile }> = [];
+      const normalFiles: Array<{ task: HybridRepairTask; file: TFile }> = [];
+      for (const item of files) {
+        const file = item.file;
+        if (file.stat.size >= DataManager.HYBRID_LARGE_FILE_BYTES) {
+          largeFiles.push(item);
+        } else {
+          normalFiles.push(item);
         }
-        processedBytes += item.file.stat.size;
-        processedFiles += 1;
-        if (failure) {
-          failedFiles += 1;
-        }
+      }
+
+      largeFiles.sort(
+        (left, right) => right.file.stat.size - left.file.stat.size,
+      );
+      normalFiles.sort(
+        (left, right) => right.file.stat.size - left.file.stat.size,
+      );
+      logger.debug(
+        `hybrid batch tiers: large=${largeFiles.length}, normal=${normalFiles.length}, normalMaxFiles=${batchLimit.maxFiles}, normalMaxBytes=${this.formatBytes(batchLimit.maxBytes)}`,
+      );
+      let processedBytes = 0;
+      let processedFiles = 0;
+      let failedFiles = 0;
+      let activeFiles = 0;
+      const totalBytes = files.reduce(
+        (sum, item) => sum + item.file.stat.size,
+        0,
+      );
+      const totalFiles = files.length;
+      const updateProgressNotice = (force = false) => {
         progressNotice?.update({
           stage: "index",
           totalBytes,
           totalFiles,
           processedBytes,
           processedFiles,
+          activeFiles,
           repairedPaths,
           failedFiles,
           sessionTokens: getHybridProfileMetric("provider_tokens"),
-        });
-      },
-    );
+        }, force);
+      };
+      updateProgressNotice(true);
+
+      await runWeightedTasks(
+        [...largeFiles, ...normalFiles],
+        {
+          maxConcurrent: batchLimit.maxFiles,
+          maxWeight: batchLimit.maxBytes,
+          getWeight: (item) => item.file.stat.size,
+          isExclusive: (item) =>
+            item.file.stat.size >= DataManager.HYBRID_LARGE_FILE_BYTES,
+        },
+        async (item) => {
+          this.throwIfHybridRepairRunCancelled(runGeneration, signal);
+          activeFiles += 1;
+          updateProgressNotice(true);
+          try {
+            const failure = await this.runHybridRepairTask(
+              item.task,
+              item.file,
+              signal,
+              runGeneration,
+            );
+            this.throwIfHybridRepairRunCancelled(runGeneration, signal);
+            if (failure) {
+              failures.push(failure);
+            }
+            processedBytes += item.file.stat.size;
+            processedFiles += 1;
+            if (failure) {
+              failedFiles += 1;
+            }
+          } finally {
+            activeFiles = Math.max(0, activeFiles - 1);
+            updateProgressNotice(true);
+          }
+        },
+      );
+    } finally {
+      if (this.hybridRepairAbortController === controller) {
+        this.hybridRepairAbortController = null;
+      }
+    }
   }
 
   private async runHybridRepairTask(
     task: HybridRepairTask,
     file: TFile,
+    signal?: AbortSignal,
+    runGeneration = this.hybridRepairGeneration,
   ): Promise<HybridIndexFailure | null> {
     this.hybridRepairInFlightPaths.add(task.path);
     this.notifyHybridRuntimeStatusChanged();
@@ -3632,6 +3764,7 @@ export class DataManager {
       `hybrid repair task ${task.mode} for ${task.path} (${task.reason})`,
     );
     try {
+      this.throwIfHybridRepairRunCancelled(runGeneration, signal);
       if (
         !this.dataProvider.isIndexable(file) ||
         !this.hybridEngine.isEnabled() ||
@@ -3663,7 +3796,7 @@ export class DataManager {
       }
 
       if (task.mode === "full") {
-        const failure = await this.indexHybridFileWithRetry(file, "full");
+        const failure = await this.indexHybridFileWithRetry(file, "full", signal);
         if (failure === null) {
           this.notifyHybridRuntimeStatusChanged();
         }
@@ -3696,11 +3829,21 @@ export class DataManager {
         return null;
       }
 
-      const failure = await this.indexHybridFileWithRetry(file, "incremental");
+      const failure = await this.indexHybridFileWithRetry(
+        file,
+        "incremental",
+        signal,
+      );
       if (failure === null) {
         this.notifyHybridRuntimeStatusChanged();
       }
       return failure;
+    } catch (error) {
+      if (this.isHybridAbortError(error)) {
+        logger.debug(`hybrid repair cancelled for ${task.path}`);
+        return null;
+      }
+      throw error;
     } finally {
       this.hybridRepairInFlightPaths.delete(task.path);
       this.notifyHybridRuntimeStatusChanged();
@@ -3710,6 +3853,7 @@ export class DataManager {
   private async indexHybridFileWithRetry(
     file: TFile,
     mode: HybridRepairMode,
+    signal?: AbortSignal,
   ): Promise<HybridIndexFailure | null> {
     const fileIndexStart = Date.now();
     const text = await this.dataProvider.readPlainText(file.path);
@@ -3727,7 +3871,7 @@ export class DataManager {
             file.path,
             text,
             file.stat.mtime,
-            { persistIndices: false },
+            { persistIndices: false, signal },
             headingOutline,
           );
         },
@@ -3774,6 +3918,10 @@ export class DataManager {
       return null;
     } catch (error) {
       lastError = error;
+    }
+
+    if (this.isHybridAbortError(lastError)) {
+      throw lastError;
     }
 
     let fallbackIndexed = false;
@@ -4140,8 +4288,33 @@ export class DataManager {
   }
 
   private getHybridIndexConcurrency(): number {
-    const configured = this.setting.hybrid.indexConcurrency ?? 3;
-    return Math.max(1, Math.min(configured, 8));
+    return this.getHybridIndexBatchLimit().maxFiles;
+  }
+
+  private getHybridIndexBatchLimit(): FileBatchLimit {
+    const configured = Math.max(
+      1,
+      Math.round(this.setting.hybrid.indexConcurrency ?? 3),
+    );
+    if (this.setting.hybrid.embeddingProvider === "openai") {
+      return {
+        maxFiles: Math.min(
+          DataManager.HYBRID_OPENAI_INDEX_CONCURRENCY_MAX,
+          Math.max(
+            configured,
+            DataManager.HYBRID_OPENAI_INDEX_CONCURRENCY_FLOOR,
+          ),
+        ),
+        maxBytes: DataManager.HYBRID_OPENAI_IN_FLIGHT_BYTES_BUDGET,
+      };
+    }
+    return {
+      maxFiles: Math.min(
+        DataManager.HYBRID_QWEN_INDEX_CONCURRENCY_MAX,
+        Math.max(configured, DataManager.HYBRID_QWEN_INDEX_CONCURRENCY_FLOOR),
+      ),
+      maxBytes: DataManager.HYBRID_QWEN_IN_FLIGHT_BYTES_BUDGET,
+    };
   }
 
   private getHybridRetryDelayMs(error: unknown, attempt: number): number {
@@ -4288,7 +4461,10 @@ export class DataManager {
     if (!isDevEnvironment || (docsToAdd.length === 0 && repairedPaths === 0)) {
       return null;
     }
-    const progressNotice = new HybridIndexProgressNotice();
+    const progressNotice = new HybridIndexProgressNotice((notice) => {
+      this.activeHybridProgressNotices.delete(notice);
+    });
+    this.activeHybridProgressNotices.add(progressNotice);
     if (repairedPaths > 0) {
       progressNotice.update(
         {
@@ -4333,6 +4509,8 @@ export class DataManager {
       (await this.database.listDocRegistryEntries()).map((row) => [row.path, row]),
     );
     const repairedPaths = new Set<string>();
+    const cleanupCandidatePaths = new Set<string>();
+    const cleanedPaths = new Set<string>();
     const reindexedPaths = new Set<string>();
 
     for (const [path, summary] of summaries) {
@@ -4348,6 +4526,9 @@ export class DataManager {
           this.setting.hybrid.vectorCompression === "float16" ? "float16" : "int8",
       });
       if (consistency.repairReasons.length === 0) {
+        if (consistency.cleanupReasons.length > 0) {
+          cleanupCandidatePaths.add(path);
+        }
         continue;
       }
 
@@ -4357,14 +4538,26 @@ export class DataManager {
       }
     }
 
-    if (repairedPaths.size === 0) {
-        return {
-          repairedPaths: [],
-          reindexedPaths: Array.from(reindexedPaths),
-          previousIndexedFileRefs,
-          previousDocRegistryEntries,
-        };
+    for (const path of cleanupCandidatePaths) {
+      try {
+        await this.hybridEngine.deleteDenseArtifactsForFile(path, {
+          persistIndices: false,
+        });
+        cleanedPaths.add(path);
+      } catch (error) {
+        logger.warn(`hybrid self-healing dense cleanup failed for ${path}:`, error);
       }
+    }
+
+    if (repairedPaths.size === 0) {
+      return {
+        repairedPaths: [],
+        cleanedPaths: Array.from(cleanedPaths),
+        reindexedPaths: Array.from(reindexedPaths),
+        previousIndexedFileRefs,
+        previousDocRegistryEntries,
+      };
+    }
 
     const repairedPathList = Array.from(repairedPaths);
     console.groupCollapsed(
@@ -4403,13 +4596,14 @@ export class DataManager {
         );
     }
 
-      return {
-        repairedPaths: repairedPathList,
-        reindexedPaths: Array.from(reindexedPaths),
-        previousIndexedFileRefs,
-        previousDocRegistryEntries,
-      };
-    }
+    return {
+      repairedPaths: repairedPathList,
+      cleanedPaths: Array.from(cleanedPaths),
+      reindexedPaths: Array.from(reindexedPaths),
+      previousIndexedFileRefs,
+      previousDocRegistryEntries,
+    };
+  }
 
   private isRetryableHybridIndexError(error: unknown): boolean {
     if (

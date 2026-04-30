@@ -75,7 +75,9 @@ import { buildLexicalOnlyFreshness } from "./freshness";
 const DEFAULT_MAX_FILE_RESULTS = 10;
 const MIN_FILE_RESULTS = 1;
 const MAX_FILE_RESULTS = 50;
-const INDEX_CHUNK_BATCH_SIZE = 24;
+const QWEN_INDEX_EMBED_BATCH_SIZE = 10;
+const OPENAI_INDEX_EMBED_BATCH_SIZE = 100;
+const INDEX_CHUNK_PERSIST_BATCH_SIZE = 24;
 const HNSW_HYDRATE_SHARD_BATCH_SIZE = 8;
 const HYBRID_DIRTY_ARTIFACTS = ["hnsw"] as const;
 const HYBRID_RERANK_LEXICAL_CANDIDATE_LIMIT = 10;
@@ -88,6 +90,7 @@ type HybridArtifactName = (typeof HYBRID_DIRTY_ARTIFACTS)[number];
 type HybridWriteOption = {
   persistIndices?: boolean;
   deleteIndexedFileRef?: boolean;
+  signal?: AbortSignal;
 };
 
 type HybridIndexMode = "full" | "without-embedding";
@@ -168,15 +171,23 @@ function ensureHybridFallbackMetadata<T extends {
 }
 
 function createHybridAbortError(): Error {
-  const error = new Error("Hybrid query aborted");
+  const error = new Error("Hybrid operation aborted");
   error.name = "AbortError";
   return error;
 }
 
-function throwIfHybridQueryAborted(signal?: AbortSignal): void {
+function throwIfHybridAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw createHybridAbortError();
   }
+}
+
+function isHybridAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function throwIfHybridQueryAborted(signal?: AbortSignal): void {
+  throwIfHybridAborted(signal);
 }
 
 function formatMemoryBytes(bytes: number): string {
@@ -250,6 +261,12 @@ export class HybridEngine {
       MAX_FILE_RESULTS,
       Math.max(MIN_FILE_RESULTS, Math.round(configured)),
     );
+  }
+
+  private get indexEmbedBatchSize(): number {
+    return this.setting.hybrid.embeddingProvider === "openai"
+      ? OPENAI_INDEX_EMBED_BATCH_SIZE
+      : QWEN_INDEX_EMBED_BATCH_SIZE;
   }
 
   getEffectiveResultCount(): number {
@@ -355,6 +372,7 @@ export class HybridEngine {
       {},
       false,
       headingOutline,
+      "full",
     );
   }
 
@@ -365,6 +383,7 @@ export class HybridEngine {
     option: HybridWriteOption = {},
     headingOutline: HeadingOutlineEntry[] = [],
   ): Promise<void> {
+    const signal = option.signal;
     await this.indexInternal(
       filePath,
       plainText,
@@ -373,6 +392,7 @@ export class HybridEngine {
       true,
       headingOutline,
       "full",
+      signal,
     );
   }
 
@@ -383,6 +403,7 @@ export class HybridEngine {
     option: HybridWriteOption = {},
     headingOutline: HeadingOutlineEntry[] = [],
   ): Promise<void> {
+    const signal = option.signal;
     await this.indexInternal(
       filePath,
       plainText,
@@ -391,6 +412,7 @@ export class HybridEngine {
       false,
       headingOutline,
       "without-embedding",
+      signal,
     );
   }
 
@@ -402,6 +424,69 @@ export class HybridEngine {
       await this.deleteStoredHybridPrivateData(filePath, option);
       await this.fileSnapshotStore.markDocRegistryDeleted(filePath);
     });
+  }
+
+  async deleteDenseArtifactsForFile(
+    filePath: string,
+    option: Pick<HybridWriteOption, "persistIndices"> = {},
+  ): Promise<void> {
+    await this.withFileWriteLock(filePath, async () => {
+      await this.deleteStoredDenseVectors(filePath, option);
+      await this.fileSnapshotStore.notifyHybridIndexedRefsChanged([filePath]);
+    });
+  }
+
+  private async deleteStoredDenseVectors(
+    filePath: string,
+    option: Pick<HybridWriteOption, "persistIndices"> = {},
+  ): Promise<void> {
+    const docRegistryEntry = await this.fileSnapshotStore.getDocRegistryEntry(filePath);
+    const rows = docRegistryEntry == null
+      ? []
+      : await this.db.db.hybridChunks
+          .where("docRef")
+          .equals(docRegistryEntry.docRef)
+          .toArray();
+    const vectorRows =
+      docRegistryEntry == null
+        ? []
+        : await this.db.db.hybridChunkVectors
+            .where("docRef")
+            .equals(docRegistryEntry.docRef)
+            .toArray();
+    const ids = rows.map((row) => row.id!).filter((id) => id !== undefined);
+    const vectorIds = vectorRows.map((row) => row.id);
+    const vectorChunkCount = vectorRows.reduce(
+      (sum, row) => sum + row.chunkCount,
+      0,
+    );
+    const mustRebuildHnsw = vectorChunkCount !== ids.length;
+
+    if (ids.length > 0 || vectorIds.length > 0 || mustRebuildHnsw) {
+      await this.markHybridArtifactsDirty("runtime-dense-cleanup-write");
+    }
+
+    if (vectorIds.length > 0) {
+      await this.db.db.hybridChunkVectors.bulkDelete(vectorIds);
+    }
+
+    if (mustRebuildHnsw) {
+      await this.rebuildHnswFromStore(option.persistIndices ?? true);
+      this.updateSearchCapabilityFromDenseState();
+      return;
+    }
+
+    for (const id of ids) {
+      this.hnswSmall.delete(id);
+    }
+
+    if (this.hnswSmall.needsRebuild()) {
+      this.hnswSmall.rebuild();
+    }
+    this.updateSearchCapabilityFromDenseState();
+    if ((option.persistIndices ?? true) && ids.length > 0) {
+      await this.persistIndices();
+    }
   }
 
   async moveFile(
@@ -632,6 +717,7 @@ export class HybridEngine {
     return buildHybridLexicalLaneFileItems(
       prepared.query,
       prepared.displayCandidates.slice(0, topK),
+      { maxDisplayFiles: topK },
     );
   }
 
@@ -683,7 +769,9 @@ export class HybridEngine {
       const issue = buildHybridSearchIssue(error);
       return {
         items: markHybridItemsLexicalOnly(
-          buildHybridLexicalLaneFileItems(prepared.query, lexicalCandidates),
+          buildHybridLexicalLaneFileItems(prepared.query, lexicalCandidates, {
+            maxDisplayFiles: topK,
+          }),
         ),
         fallbackNoticeKey:
           prepared.fallbackNoticeKey ?? "hybridNotice.searchFallbackToLexical",
@@ -699,6 +787,7 @@ export class HybridEngine {
     const baseItems = buildHybridLexicalLaneFileItems(
       prepared.query,
       rerankCandidates.slice(0, topK),
+      { maxDisplayFiles: topK },
     );
     if (rerankCandidates.length === 0) {
       return {
@@ -734,6 +823,7 @@ export class HybridEngine {
         items: buildHybridLexicalLaneFileItems(
           prepared.query,
           rerankedCandidates.slice(0, topK),
+          { maxDisplayFiles: topK },
         ),
         fallbackNoticeKey: prepared.fallbackNoticeKey,
         fallbackNoticeMessage: prepared.fallbackNoticeMessage,
@@ -1075,8 +1165,10 @@ export class HybridEngine {
     strict: boolean,
     headingOutline: HeadingOutlineEntry[],
     mode: HybridIndexMode = "full",
+    signal?: AbortSignal,
   ): Promise<void> {
     await this.withFileWriteLock(filePath, async () => {
+      throwIfHybridAborted(signal);
       if (!this.shouldIndexPath(filePath)) {
         await this.deleteStoredHybridPrivateData(filePath, option);
         await this.fileSnapshotStore.markDocRegistryDeleted(filePath, generation);
@@ -1084,6 +1176,7 @@ export class HybridEngine {
       }
 
       const pendingIndexedAt = Date.now();
+      throwIfHybridAborted(signal);
       const contentFingerprint = hashStableText(plainText);
       const docRegistryEntry = await this.fileSnapshotStore.ensureDocRegistryEntry({
         path: filePath,
@@ -1117,6 +1210,7 @@ export class HybridEngine {
         generation,
         option,
       );
+      throwIfHybridAborted(signal);
 
       const { chunks: rawChunks } = await profileHybridStage(
         "index.chunk_file",
@@ -1199,20 +1293,23 @@ export class HybridEngine {
           this.precision,
           EMBED_DIM,
         );
+        const embedBatchSize = this.indexEmbedBatchSize;
         for (
           let chunkStart = 0;
           chunkStart < plannedChunks.length;
-          chunkStart += INDEX_CHUNK_BATCH_SIZE
+          chunkStart += embedBatchSize
         ) {
           const batchChunks = plannedChunks.slice(
             chunkStart,
-            chunkStart + INDEX_CHUNK_BATCH_SIZE,
+            chunkStart + embedBatchSize,
           );
           const batchVectors = await this.resolveBatchVectors(
             filePath,
             batchChunks,
             buildEmbedInput,
+            signal,
           );
+          throwIfHybridAborted(signal);
           const batchChunkIds = await profileHybridStage(
             "index.persist_chunks",
             async () =>
@@ -1245,15 +1342,20 @@ export class HybridEngine {
         this._canSearch = true;
         this.lastIndexingFallbackNoticeKey = null;
       } catch (error) {
+        const aborted = isHybridAbortError(error);
         await this.deleteStoredHybridGenerationArtifacts(
           docRegistryEntry.docRef,
           generation,
           {
-          persistIndices: false,
+            persistIndices: false,
           },
         );
         this._canSearch = false;
         this.lastIndexingFallbackNoticeKey = null;
+        if (aborted) {
+          logger.debug(`hybrid indexing cancelled for ${filePath}`);
+          throw error;
+        }
         if (strict) {
           const failedIndexedAt = Date.now();
           await this.putHybridIndexedFileRef({
@@ -1636,6 +1738,7 @@ export class HybridEngine {
     filePath: string,
     batchChunks: PlannedChunk[],
     buildEmbedInput: (chunk: RawChunk) => string,
+    signal?: AbortSignal,
   ): Promise<StoredVector[]> {
     const vectors: Array<StoredVector | undefined> = new Array(
       batchChunks.length,
@@ -1657,6 +1760,7 @@ export class HybridEngine {
     }
 
     if (pendingInputs.length > 0) {
+      throwIfHybridAborted(signal);
       const embedded = await profileHybridStage(
         "index.embed_batch",
         async () =>
@@ -1664,8 +1768,10 @@ export class HybridEngine {
             pendingInputs,
             this.precision,
             filePath,
+            signal,
           ),
       );
+      throwIfHybridAborted(signal);
       if (embedded.length !== pendingInputs.length) {
         throw new Error(
           `Hybrid embed batch size mismatch for ${filePath}: expected ${pendingInputs.length}, received ${embedded.length}`,
@@ -1761,11 +1867,11 @@ export class HybridEngine {
     for (
       let chunkStart = 0;
       chunkStart < plannedChunks.length;
-      chunkStart += INDEX_CHUNK_BATCH_SIZE
+      chunkStart += INDEX_CHUNK_PERSIST_BATCH_SIZE
     ) {
       const batchChunks = plannedChunks.slice(
         chunkStart,
-        chunkStart + INDEX_CHUNK_BATCH_SIZE,
+        chunkStart + INDEX_CHUNK_PERSIST_BATCH_SIZE,
       );
       await profileHybridStage(
         "index.persist_chunks_lexical_only",

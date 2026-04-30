@@ -55,6 +55,28 @@ describe("hybrid lexical lane result mapper", () => {
 		expect(items.every((item) => item.engineType === EngineType.HYBRID)).toBe(true);
 	});
 
+	test("uses caller display file limit when provided", () => {
+		const candidates = [
+			createDisplayCandidate({ filePath: "notes/a.md", score: 100 }),
+			createDisplayCandidate({ filePath: "notes/b.md", score: 90 }),
+			createDisplayCandidate({ filePath: "notes/c.md", score: 80 }),
+			createDisplayCandidate({ filePath: "notes/d.md", score: 70 }),
+			createDisplayCandidate({ filePath: "notes/e.md", score: 60 }),
+		];
+
+		const items = buildHybridLexicalLaneFileItems("cache restore", candidates, {
+			maxDisplayFiles: 5,
+		});
+
+		expect(items.map((item) => item.path)).toEqual([
+			"notes/a.md",
+			"notes/b.md",
+			"notes/c.md",
+			"notes/d.md",
+			"notes/e.md",
+		]);
+	});
+
 	test("propagates shadow snapshot freshness to file items", () => {
 		const items = buildHybridLexicalLaneFileItems("cache restore", [
 			createDisplayCandidate({

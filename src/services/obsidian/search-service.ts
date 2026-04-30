@@ -367,12 +367,16 @@ export class SearchService {
 			if (!(item instanceof FileItem)) {
 				continue;
 			}
+			const nativeSubItemsReady = item.nativeSubItemsReady;
 			this.applyHybridFileItemFreshness(
 				item,
 				buildLexicalOnlyFreshness(reason, {
 					snapshotGeneration: item.snapshotGeneration,
 				}),
 			);
+			if (item.engineType === EngineType.LEXICAL) {
+				item.nativeSubItemsReady = nativeSubItemsReady;
+			}
 		}
 	}
 

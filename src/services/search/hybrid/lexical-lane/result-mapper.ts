@@ -13,7 +13,12 @@ import { buildHybridLexicalLaneSnapshotKey } from "./candidate-key";
 export function buildHybridLexicalLaneFileItems(
 	queryText: string,
 	candidates: readonly HybridLexicalLaneDisplayCandidate[],
+	options: Readonly<{ maxDisplayFiles?: number }> = {},
 ): FileItem[] {
+	const maxDisplayFiles = Math.max(
+		0,
+		Math.floor(options.maxDisplayFiles ?? HYBRID_LEXICAL_LANE_MAX_DISPLAY_FILES),
+	);
 	const bySnapshot = new Map<
 		string,
 		{
@@ -31,6 +36,7 @@ export function buildHybridLexicalLaneFileItems(
 			!shouldAcceptDisplayCandidateForFileQuota(
 				bySnapshot,
 				buildHybridLexicalLaneSnapshotKey(candidate),
+				maxDisplayFiles,
 			)
 		) {
 			continue;
@@ -104,12 +110,13 @@ function shouldAcceptDisplayCandidateForFileQuota(
 		}
 	>,
 	snapshotKey: string,
+	maxDisplayFiles: number,
 ): boolean {
 	const existing = bySnapshot.get(snapshotKey);
 	if (existing) {
 		return existing.subItems.length < HYBRID_LEXICAL_LANE_MAX_SUBITEMS_PER_FILE;
 	}
-	return bySnapshot.size < HYBRID_LEXICAL_LANE_MAX_DISPLAY_FILES;
+	return bySnapshot.size < maxDisplayFiles;
 }
 
 function computeHybridLexicalLaneFileAggregateScore(

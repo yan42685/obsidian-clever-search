@@ -470,6 +470,7 @@ function createMockHybridEngine(overrides: Record<string, unknown> = {}) {
     clearAll: jest.fn(async () => {}),
     moveFile: jest.fn(async () => true),
     deleteFile: jest.fn(async () => {}),
+    deleteDenseArtifactsForFile: jest.fn(async () => {}),
     indexFileStrict: jest.fn(async () => {}),
     indexFile: jest.fn(async () => {}),
     canSearch: jest.fn(() => false),
@@ -2775,10 +2776,83 @@ describe("DataManager integration", () => {
       file.path,
       "fresh body",
       file.stat.mtime,
-      { persistIndices: false },
+      expect.objectContaining({ persistIndices: false }),
       [],
     );
     expect(hybridEngine.persistIndicesForBatch).toHaveBeenCalled();
+
+    manager.onunload();
+  });
+
+  test("startup self-heal cleans lexical-only dense residue without re-embedding", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = true;
+
+    const file = createFile("docs/lexical-only-residue.md", "lexical body", 120);
+    const files = new Map<string, TFile>([[file.path, file]]);
+    const texts = new Map<string, string>([[file.path, "lexical body"]]);
+    const database = createMockDatabase();
+    database.__hybridIndexedFileRefs.push({
+      path: file.path,
+      generation: file.stat.mtime,
+      state: "lexical_only",
+      chunkCount: 1,
+      indexedAt: file.stat.mtime,
+    });
+    database.__hybridChunks.push({
+      id: 1,
+      filePath: file.path,
+      chunkIndex: 0,
+      startOffset: 0,
+      endOffset: 12,
+      startLine: 1,
+      startCol: 1,
+      endLine: 1,
+      embedKey: "chunk-0",
+      generation: file.stat.mtime,
+    });
+    database.__hybridChunkVectors.push({
+      filePath: file.path,
+      precision: "int8",
+      dim: 2,
+      chunkCount: 1,
+      generation: file.stat.mtime,
+      chunkIds: new Blob([Uint32Array.from([1]).buffer]),
+      vectorData: new Blob([Int8Array.from([1, 2]).buffer]),
+    });
+    database.__fileSnapshots.push({
+      filePath: file.path,
+      plainText: "lexical body",
+      generation: file.stat.mtime,
+    });
+    const dataProvider = createMockDataProvider({ files, texts });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine({
+      canServeQuery: jest.fn(() => true),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [file],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+
+    await manager.initAsync();
+    await (manager as any).searchBootstrapCommitTask;
+
+    expect(hybridEngine.deleteDenseArtifactsForFile).toHaveBeenCalledWith(
+      file.path,
+      expect.objectContaining({ persistIndices: false }),
+    );
+    expect(hybridEngine.deleteFile).not.toHaveBeenCalled();
+    expect(hybridEngine.indexFileStrict).not.toHaveBeenCalled();
 
     manager.onunload();
   });
@@ -3438,7 +3512,7 @@ describe("DataManager integration", () => {
       file.path,
       "fresh body",
       file.stat.mtime,
-      { persistIndices: false },
+      expect.objectContaining({ persistIndices: false }),
       [],
     );
 
@@ -3520,7 +3594,7 @@ describe("DataManager integration", () => {
       file.path,
       "fresh body",
       file.stat.mtime,
-      { persistIndices: false },
+      expect.objectContaining({ persistIndices: false }),
       [],
     );
 
@@ -3569,7 +3643,7 @@ describe("DataManager integration", () => {
       file.path,
       "orphan body",
       file.stat.mtime,
-      { persistIndices: false },
+      expect.objectContaining({ persistIndices: false }),
       [],
     );
 

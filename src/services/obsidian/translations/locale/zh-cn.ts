@@ -98,7 +98,7 @@ export default {
 		"本周 token 用量已超过限制，本周剩余额度为 0。",
 	"hybridModal.indexConcurrency": "索引并发数",
 	"hybridModal.indexConcurrency.desc":
-		"混合索引时并行调用 embedding 的文件数量。更高的值可能更快，但也更容易触发限流、超时或增加 UI 压力。",
+		"混合索引时偏好的文件并行度。插件会按服务商适当提高实际并发以填满 embedding batch，但 embedding HTTP 请求仍会串行发送。",
 	"hybridModal.vectorCompression": "向量量化",
 	"hybridModal.vectorCompression.desc":
 		"选择混合搜索向量的量化与存储方式。Int8 占用更小、搜索更快；Float16 占用更大，但在纯语义匹配时通常更稳定。修改后需要重建 hybrid 索引。",

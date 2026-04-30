@@ -81,6 +81,22 @@ describe("Hybrid stored file consistency", () => {
     });
 
     expect(result.reuseBlockedReasons).toContain("lexical_only_shape_mismatch");
+    expect(result.repairReasons).not.toContain("lexical_only_shape_mismatch");
+    expect(result.cleanupReasons).toContain("lexical_only_dense_artifact_residue");
+  });
+
+  test("keeps orphan lexical-only shadow states startup-repairable", () => {
+    const result = analyzeHybridStoredFileConsistency({
+      existsInVault: true,
+      hasChunks: false,
+      chunkCount: 0,
+      shadowSnapshot: { generation: 23 },
+      currentPrecision: "int8",
+    });
+
+    expect(result.reuseBlockedReasons).toContain("lexical_only_shape_mismatch");
+    expect(result.repairReasons).toContain("lexical_only_shape_mismatch");
+    expect(result.cleanupReasons).toEqual([]);
   });
 
   test("blocks reuse on generation and precision mismatch", () => {

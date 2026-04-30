@@ -43,6 +43,9 @@ function createCoordinatorHarness(params?: {
   previousDocRegistryEntries?: Map<string, DocRegistryRow>;
   readPlainText?: (file: TestFile) => Promise<string>;
   moveFileResult?: boolean;
+  runRepairTasks?: () => Promise<void>;
+  runGeneration?: number;
+  isRunCancelled?: (runGeneration: number) => boolean;
 }) {
   const currentFiles = params?.currentFiles ?? [];
   const previousIndexedFileRefs =
@@ -56,10 +59,18 @@ function createCoordinatorHarness(params?: {
     });
   const moveFile = jest.fn(async () => params?.moveFileResult ?? false);
   const deleteFile = jest.fn(async () => undefined);
-  const runRepairTasks = jest.fn(async () => undefined);
+  const runRepairTasks = jest.fn(params?.runRepairTasks ?? (async () => undefined));
   const restorePersistedRecoveryState = jest.fn(async () => undefined);
   const enqueuePersistedRecoveryStates = jest.fn(async () => undefined);
   const runPreflight = jest.fn(async () => undefined);
+  const runGeneration = params?.runGeneration ?? 1;
+  const throwIfRunCancelled = jest.fn((generation: number) => {
+    if (params?.isRunCancelled?.(generation)) {
+      const error = new Error("Hybrid repair cancelled");
+      error.name = "AbortError";
+      throw error;
+    }
+  });
 
   const coordinator = new HybridBootstrapCoordinator({
     dataProvider: {
@@ -76,10 +87,13 @@ function createCoordinatorHarness(params?: {
       consumeIndexingFallbackNoticeKey: () => null,
     },
     shouldForceRefresh: () => false,
+    getRunGeneration: () => runGeneration,
+    throwIfRunCancelled,
     blockRuntimeQueryGate: jest.fn(),
     syncRuntimeQueryGate: jest.fn(),
     repairStoredState: jest.fn(async () => ({
       repairedPaths: [],
+      cleanedPaths: [],
       reindexedPaths: [],
       previousIndexedFileRefs,
       previousDocRegistryEntries,
@@ -101,6 +115,7 @@ function createCoordinatorHarness(params?: {
     restorePersistedRecoveryState,
     enqueuePersistedRecoveryStates,
     runPreflight,
+    throwIfRunCancelled,
   };
 }
 
@@ -148,6 +163,7 @@ describe("HybridBootstrapCoordinator", () => {
     const plan = await coordinator.preparePlan();
 
     expect(plan).not.toBeNull();
+    expect(plan?.runGeneration).toBe(1);
     expect(plan?.docsToAdd).toEqual([]);
     expect(plan?.docsToDelete).toEqual([]);
     expect(plan?.docsToMove).toEqual([
@@ -178,9 +194,11 @@ describe("HybridBootstrapCoordinator", () => {
         moveFileResult: true,
       });
     const plan: HybridBootstrapPlan = {
+      runGeneration: 1,
       currFiles: new Map([["docs/new.md", newFile as any]]),
       repairReport: {
         repairedPaths: [],
+        cleanedPaths: [],
         reindexedPaths: [],
         previousIndexedFileRefs: new Map(),
         previousDocRegistryEntries: new Map(),
@@ -201,7 +219,7 @@ describe("HybridBootstrapCoordinator", () => {
 
     expect(moveFile).toHaveBeenCalledWith("docs/old.md", "docs/new.md", 220);
     expect(deleteFile).not.toHaveBeenCalled();
-    expect(runRepairTasks).toHaveBeenCalledWith([], null, 0, []);
+    expect(runRepairTasks).toHaveBeenCalledWith([], null, 0, [], 1);
     expect(enqueuePersistedRecoveryStates).toHaveBeenCalledWith(
       new Set(["docs/old.md", "docs/new.md"]),
     );
@@ -212,5 +230,87 @@ describe("HybridBootstrapCoordinator", () => {
       failedFiles: 0,
       fallbackNoticeKey: null,
     });
+  });
+
+  test("healPlan aborts startup self-heal without marking it complete", async () => {
+    const file: TestFile = {
+      path: "docs/rebuild.md",
+      stat: {
+        mtime: 300,
+        size: 12,
+      },
+    };
+    const abortError = new Error("Hybrid repair cancelled");
+    abortError.name = "AbortError";
+    const {
+      coordinator,
+      runRepairTasks,
+      enqueuePersistedRecoveryStates,
+      runPreflight,
+    } = createCoordinatorHarness({
+      currentFiles: [file],
+      runRepairTasks: async () => {
+        throw abortError;
+      },
+    });
+    const plan: HybridBootstrapPlan = {
+      runGeneration: 1,
+      currFiles: new Map([["docs/rebuild.md", file as any]]),
+      repairReport: {
+        repairedPaths: [],
+        cleanedPaths: [],
+        reindexedPaths: [],
+        previousIndexedFileRefs: new Map(),
+        previousDocRegistryEntries: new Map(),
+      },
+      docsToAdd: [file as any],
+      docsToDelete: [],
+      docsToMove: [],
+    };
+
+    await expect(coordinator.healPlan(plan)).rejects.toBe(abortError);
+
+    expect(runPreflight).toHaveBeenCalled();
+    expect(runRepairTasks).toHaveBeenCalled();
+    expect(enqueuePersistedRecoveryStates).not.toHaveBeenCalled();
+  });
+
+  test("healPlan stops before preflight when its startup run was cancelled", async () => {
+    const file: TestFile = {
+      path: "docs/cancelled.md",
+      stat: {
+        mtime: 400,
+        size: 12,
+      },
+    };
+    const {
+      coordinator,
+      runRepairTasks,
+      enqueuePersistedRecoveryStates,
+      runPreflight,
+    } = createCoordinatorHarness({
+      currentFiles: [file],
+      isRunCancelled: (runGeneration) => runGeneration === 7,
+    });
+    const plan: HybridBootstrapPlan = {
+      runGeneration: 7,
+      currFiles: new Map([["docs/cancelled.md", file as any]]),
+      repairReport: {
+        repairedPaths: [],
+        cleanedPaths: [],
+        reindexedPaths: [],
+        previousIndexedFileRefs: new Map(),
+        previousDocRegistryEntries: new Map(),
+      },
+      docsToAdd: [file as any],
+      docsToDelete: [],
+      docsToMove: [],
+    };
+
+    await expect(coordinator.healPlan(plan)).rejects.toThrow("cancelled");
+
+    expect(runPreflight).not.toHaveBeenCalled();
+    expect(runRepairTasks).not.toHaveBeenCalled();
+    expect(enqueuePersistedRecoveryStates).not.toHaveBeenCalled();
   });
 });

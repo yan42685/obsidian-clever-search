@@ -232,7 +232,7 @@ function shouldKeepVector(
   const ref = indexedRefsByDocRef.get(row.docRef);
   return (
     ref !== undefined &&
-    ref.state === "ready" &&
+    (ref.state === "ready" || ref.state === "lexical_only") &&
     row.generation === ref.generation
   );
 }

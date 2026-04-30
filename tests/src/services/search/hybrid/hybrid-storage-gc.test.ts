@@ -126,7 +126,7 @@ describe("runHybridStorageGc", () => {
 
     expect(metrics).toMatchObject({
       chunksRemoved: 4,
-      vectorsRemoved: 5,
+      vectorsRemoved: 4,
       indexedRefsRemoved: 2,
       snapshotsRemoved: 2,
       shadowsRemoved: 3,
@@ -140,6 +140,7 @@ describe("runHybridStorageGc", () => {
     ]);
     await expect(db.hybridChunkVectors.orderBy(":id").keys()).resolves.toEqual([
       "1:2",
+      "3:10",
       "4:20",
       "5:30",
     ]);

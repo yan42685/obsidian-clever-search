@@ -4,6 +4,7 @@ import type { HybridRepairMode } from "./index-recovery-state";
 
 export type HybridStorageRepairReport = {
   repairedPaths: string[];
+  cleanedPaths: string[];
   reindexedPaths: string[];
   previousIndexedFileRefs: Map<string, HybridIndexedFileRef>;
   previousDocRegistryEntries: Map<string, DocRegistryRow>;

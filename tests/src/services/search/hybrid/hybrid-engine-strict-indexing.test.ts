@@ -51,15 +51,21 @@ jest.mock("src/utils/logger", () => ({
 import { HybridEngine } from "src/services/search/hybrid/hybrid-engine";
 
 describe("HybridEngine strict indexing", () => {
-  function createEngineWithFailingEmbedding() {
-    const embeddingError = new Error("embedding unavailable");
+  function createEngineWithProvider(provider?: "qwen" | "openai") {
     const engine = Object.create(HybridEngine.prototype) as any;
-
     engine.setting = {
       hybrid: {
+        embeddingProvider: provider,
         vectorCompression: "int8",
       },
     };
+    return engine;
+  }
+
+  function createEngineWithFailingEmbedding(error?: Error) {
+    const embeddingError = error ?? new Error("embedding unavailable");
+    const engine = createEngineWithProvider();
+
     engine._canSearch = true;
     engine.lastIndexingFallbackNoticeKey = "hybridNotice.indexingFallbackToLexical";
     engine.withFileWriteLock = jest.fn(
@@ -103,6 +109,11 @@ describe("HybridEngine strict indexing", () => {
     return { engine, embeddingError };
   }
 
+  test("uses provider-aware indexing embedding batch sizes", () => {
+    expect(createEngineWithProvider("qwen").indexEmbedBatchSize).toBe(10);
+    expect(createEngineWithProvider("openai").indexEmbedBatchSize).toBe(100);
+  });
+
   test("indexFileStrict rejects embedding failures instead of committing lexical-only success", async () => {
     const { engine, embeddingError } = createEngineWithFailingEmbedding();
 
@@ -124,6 +135,26 @@ describe("HybridEngine strict indexing", () => {
       }),
     );
     expect(engine._canSearch).toBe(false);
+    expect(engine.lastIndexingFallbackNoticeKey).toBeNull();
+  });
+
+  test("indexFileStrict does not record a failed embedding state when cancelled", async () => {
+    const abortError = new Error("Hybrid operation aborted");
+    abortError.name = "AbortError";
+    const { engine } = createEngineWithFailingEmbedding(abortError);
+
+    await expect(
+      engine.indexFileStrict("notes/cancelled.md", "alpha beta", 7, {
+        persistIndices: false,
+      }),
+    ).rejects.toBe(abortError);
+
+    expect(engine.indexLexicalOnly).not.toHaveBeenCalled();
+    expect(engine.putHybridIndexedFileRef).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: "failed",
+      }),
+    );
     expect(engine.lastIndexingFallbackNoticeKey).toBeNull();
   });
 

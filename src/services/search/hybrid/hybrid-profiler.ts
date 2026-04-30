@@ -102,7 +102,8 @@ export async function profileHybridStage<T>(
 	stage: string,
 	work: () => Promise<T>,
 ): Promise<T> {
-	if (!currentSession) {
+	const session = currentSession;
+	if (!session) {
 		return await work();
 	}
 	const startedAt = Date.now();
@@ -110,7 +111,7 @@ export async function profileHybridStage<T>(
 		return await work();
 	} finally {
 		const elapsedMs = Date.now() - startedAt;
-		const prev = currentSession.stages.get(stage) ?? {
+		const prev = session.stages.get(stage) ?? {
 			count: 0,
 			totalMs: 0,
 			maxMs: 0,
@@ -118,7 +119,7 @@ export async function profileHybridStage<T>(
 		prev.count += 1;
 		prev.totalMs += elapsedMs;
 		prev.maxMs = Math.max(prev.maxMs, elapsedMs);
-		currentSession.stages.set(stage, prev);
+		session.stages.set(stage, prev);
 	}
 }
 

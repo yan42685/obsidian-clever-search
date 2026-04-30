@@ -80,7 +80,7 @@ function createEmbeddingFetchMock() {
 }
 
 async function waitForEmbeddingQueue(): Promise<void> {
-	await new Promise((resolve) => setTimeout(resolve, 80));
+	await new Promise((resolve) => setTimeout(resolve, 340));
 	await Promise.resolve();
 }
 
@@ -370,6 +370,11 @@ describe("Embedder chunk queue", () => {
 		await waitForEmbeddingQueue();
 
 		expect((global as any).fetch).toHaveBeenCalledTimes(1);
+		const [, init] = (global as any).fetch.mock.calls[0] as [
+			string,
+			{ signal?: AbortSignal },
+		];
+		expect(init.signal?.aborted).toBe(true);
 	});
 });
 

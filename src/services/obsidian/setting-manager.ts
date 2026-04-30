@@ -1064,7 +1064,6 @@ class HybridSearchModal extends Modal {
 						const nextProvider = normalizeEmbeddingProvider(value);
 						this.setting.hybrid.embeddingProvider = nextProvider;
 						this.updateApiDomainForProviderChange(previousProvider, nextProvider);
-						this.settingManager.requestHybridFullReindex();
 						await this.settingManager.saveSettings();
 					}),
 			);
@@ -1318,12 +1317,16 @@ class HybridSearchModal extends Modal {
 			window.clearInterval(this.failedEmbeddingStatusTimer);
 			this.failedEmbeddingStatusTimer = null;
 		}
-		const providerChanged =
+		const embeddingProviderChanged =
 			this.openedEmbeddingProvider !==
-				normalizeEmbeddingProvider(this.setting.hybrid.embeddingProvider) ||
+				normalizeEmbeddingProvider(this.setting.hybrid.embeddingProvider);
+		const providerConfigChanged =
+			embeddingProviderChanged ||
 			(this.openedApiDomain ?? "") !== (this.setting.hybrid.apiDomain ?? "") ||
 			(this.openedApiKey ?? "") !== (this.setting.hybrid.apiKey ?? "");
-		if (providerChanged) {
+		if (embeddingProviderChanged) {
+			this.settingManager.requestHybridFullReindex();
+		} else if (providerConfigChanged) {
 			void getInstance(DataManager).retryFailedEmbeddingsOnConfigChange(
 				"provider-config-changed",
 			);

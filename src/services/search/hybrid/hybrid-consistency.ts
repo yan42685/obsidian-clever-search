@@ -30,6 +30,7 @@ export type HybridStoredFileConsistency = {
 	hasIndexedFileRef: boolean;
 	reuseBlockedReasons: string[];
 	repairReasons: string[];
+	cleanupReasons: string[];
 };
 
 export function normalizeHybridIndexedFileState(
@@ -146,7 +147,15 @@ export function analyzeHybridStoredFileConsistency(
 		pushReuseReason("vector_precision_mismatch");
 	}
 
-	const repairReasons = [...reuseBlockedReasons];
+	const lexicalOnlyDenseResidue =
+		indexedFileState === "lexical_only" && hasIndexedFileRef && hasVector;
+	const repairReasons = reuseBlockedReasons.filter(
+		(reason) =>
+			reason !== "lexical_only_shape_mismatch" || !lexicalOnlyDenseResidue,
+	);
+	const cleanupReasons = lexicalOnlyDenseResidue
+		? ["lexical_only_dense_artifact_residue"]
+		: [];
 	if (!input.existsInVault && anyStoredData) {
 		repairReasons.push("stale_missing_vault_file");
 	}
@@ -159,5 +168,6 @@ export function analyzeHybridStoredFileConsistency(
 		hasIndexedFileRef,
 		reuseBlockedReasons,
 		repairReasons,
+		cleanupReasons,
 	};
 }
