@@ -115,7 +115,7 @@ describe("HybridReranker", () => {
 		);
 		const timeoutExpectation = expect(promise).rejects.toBeInstanceOf(HybridRerankTimeoutError);
 
-		await jest.advanceTimersByTimeAsync(5_000);
+		await jest.advanceTimersByTimeAsync(15_000);
 
 		await timeoutExpectation;
 		expect((global as any).fetch).toHaveBeenCalledTimes(1);
@@ -298,6 +298,9 @@ describe("HybridReranker", () => {
 			model: "gpt-5.4-nano",
 			text: { format: { type: "json_object" } },
 		});
+		expect(JSON.parse(init.body).input).toContain(
+			"Prioritize response speed as long as relevance quality is barely acceptable.",
+		);
 		expect(mockRecordTokenUsage).toHaveBeenCalledWith(
 			"[search] gpt-5.4-nano",
 			12,

@@ -50,6 +50,7 @@ export type SearchAutocompleteCandidate = {
 	pathPositions: number[];
 	secondaryPositions: number[];
 	score: number;
+	memoryTimestamp?: number;
 	confidence: "high" | "medium" | "low";
 };
 
@@ -192,6 +193,7 @@ export class SearchAutocompleteService {
 					navigationHabitSignals,
 				),
 				limit,
+				{ preferMemoryTimestamp: true },
 			);
 		}
 
@@ -234,7 +236,9 @@ export class SearchAutocompleteService {
 			);
 		}
 
-		return this.sortAndTrimCandidates(candidates, limit);
+		return this.sortAndTrimCandidates(candidates, limit, {
+			preferMemoryTimestamp: true,
+		});
 	}
 
 	private buildMatchedCandidate(
@@ -448,6 +452,7 @@ export class SearchAutocompleteService {
 			pathPositions: [],
 			secondaryPositions: [],
 			score,
+			memoryTimestamp: selection.timestamp,
 			confidence,
 		};
 	}
@@ -487,6 +492,7 @@ export class SearchAutocompleteService {
 						240,
 						1000 * 60 * 60 * 24 * 5,
 					),
+				memoryTimestamp: selection.timestamp,
 				confidence:
 					habitSignal &&
 					(habitSignal.dayStreak >= 3 || habitSignal.totalSelectionCount >= 4)
@@ -560,6 +566,10 @@ export class SearchAutocompleteService {
 					pathPositions: pathMatch?.positions ?? [],
 					secondaryPositions: [],
 					score,
+					memoryTimestamp: this.getNavigationHabitTimestamp(
+						navigationHabitSignals.get(path),
+						normalizedQuery.length > 0,
+					),
 					confidence: this.getConfidenceLevel(
 						{
 							insertText: file.basename,
@@ -724,10 +734,18 @@ export class SearchAutocompleteService {
 	private sortAndTrimCandidates(
 		candidates: SearchAutocompleteCandidate[],
 		limit: number,
+		options: Readonly<{ preferMemoryTimestamp?: boolean }> = {},
 	): SearchAutocompleteCandidate[] {
 		const sorted = [...candidates].sort((left, right) => {
 			if (left.section !== right.section) {
 				return this.getSectionPriority(right.section) - this.getSectionPriority(left.section);
+			}
+			if (options.preferMemoryTimestamp) {
+				const memoryTimestampDiff =
+					(right.memoryTimestamp ?? 0) - (left.memoryTimestamp ?? 0);
+				if (memoryTimestampDiff !== 0) {
+					return memoryTimestampDiff;
+				}
 			}
 			if (left.score !== right.score) {
 				return right.score - left.score;
@@ -988,6 +1006,20 @@ export class SearchAutocompleteService {
 		}
 
 		return boost;
+	}
+
+	private getNavigationHabitTimestamp(
+		signal: NavigationHabitSignal | undefined,
+		preferQuerySignals: boolean,
+	): number | undefined {
+		if (!signal) {
+			return undefined;
+		}
+		const timestamp =
+			preferQuerySignals && signal.queryLastTimestamp > 0
+				? signal.queryLastTimestamp
+				: signal.lastTimestamp;
+		return timestamp > 0 ? timestamp : undefined;
 	}
 
 	private getTimestampRecencyBoost(

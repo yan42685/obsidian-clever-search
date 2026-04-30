@@ -126,6 +126,9 @@ function computeHybridLexicalLaneFileAggregateScore(
 		return 0;
 	}
 	const primary = subItems[0]?.score ?? 0;
+	if (usesNormalizedRerankScores(subItems)) {
+		return primary;
+	}
 	const secondary = subItems
 		.slice(1, 4)
 		.reduce((sum, subItem, index) => {
@@ -133,4 +136,11 @@ function computeHybridLexicalLaneFileAggregateScore(
 			return sum + (subItem.score ?? 0) * weight;
 		}, 0);
 	return primary + secondary + Math.min(6, Math.max(0, subItems.length - 1) * 1.5);
+}
+
+function usesNormalizedRerankScores(subItems: readonly FileSubItem[]): boolean {
+	return subItems.every((subItem) => {
+		const score = subItem.score ?? 0;
+		return Number.isFinite(score) && score >= 0 && score <= 1;
+	});
 }

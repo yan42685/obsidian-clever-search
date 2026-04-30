@@ -256,6 +256,29 @@ describe("HybridEngine search fallback notices", () => {
 		]);
 	});
 
+	test("rerankDisplayCandidates applies normalized rerank scores to displayed candidates", async () => {
+		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
+		const engine = new HybridEngine() as any;
+		engine.reranker = {
+			rerank: jest.fn(async () => [
+				{ id: 1, score: 1.7 },
+				{ id: 0, score: 0.25 },
+			]),
+		};
+
+		const reranked = await engine.rerankDisplayCandidates(
+			"alpha",
+			createPreparedRecall().displayCandidates,
+			2,
+		);
+
+		expect(reranked.map((candidate: any) => candidate.filePath)).toEqual([
+			"notes/b.md",
+			"notes/a.md",
+		]);
+		expect(reranked.map((candidate: any) => candidate.score)).toEqual([1, 0.25]);
+	});
+
 	test("dense display candidates preserve snapshot generation and source", () => {
 		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
 		const engine = new HybridEngine() as any;

@@ -16,7 +16,7 @@ import {
 	WeeklyTokenLimitExceededError,
 } from './provider-error';
 
-const RERANK_TIMEOUT_MS = 5_000;
+const RERANK_TIMEOUT_MS = 15_000;
 export const SEARCH_QWEN_RERANK_TOKEN_KEY = '[search] qwen3-rerank';
 export const SEARCH_OPENAI_RERANK_TOKEN_KEY = '[search] gpt-5.4-nano';
 export const SEARCH_RERANK_TOKEN_KEY = SEARCH_QWEN_RERANK_TOKEN_KEY;
@@ -311,7 +311,7 @@ export class HybridReranker {
 		return {
 			model: getEmbeddingProviderSpec('openai').rerankModel,
 			input: [
-				'Rank the candidate texts by relevance to the search query, balancing response speed with ranking accuracy.',
+				'Rank the candidate texts by relevance to the search query. Prioritize response speed as long as relevance quality is barely acceptable.',
 				'Return only JSON: {"results":[{"index":0,"score":1}]}',
 				`Return at most ${Math.min(documents.length, topK)} results.`,
 				'Score must be a normalized finite number from 0 to 1, where 1 is most relevant.',

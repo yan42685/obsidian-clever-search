@@ -54,6 +54,7 @@ describe("SearchAutocompleteService", () => {
 		app.commands = {
 			commands: {
 				"app:open": { id: "app:open", name: "Open file" },
+				"app:new": { id: "app:new", name: "New note" },
 			},
 		};
 		app.plugins = {
@@ -149,4 +150,62 @@ describe("SearchAutocompleteService", () => {
 				.map((candidate: any) => candidate.openLinkText),
 		).toEqual(["plugin:beta"]);
 	});
+
+	test("orders QuickCommand memory by recency before old high-frequency selections", () => {
+		const { service } = createServiceHarness();
+		const searchHistoryService = service.searchHistoryService;
+		searchHistoryService.getRecentQuickCommandSelections = jest.fn(() => [
+			{
+				queryText: "",
+				path: "app:open",
+				openLinkText: "app:open",
+				primaryText: "Open file",
+				kind: "quickCommand",
+				timestamp: 1_000,
+			},
+			{
+				queryText: "",
+				path: "app:new",
+				openLinkText: "app:new",
+				primaryText: "New note",
+				kind: "quickCommand",
+				timestamp: 10_000,
+			},
+		]);
+		searchHistoryService.getQuickCommandHabitSignals = jest.fn(() =>
+			new Map([
+				[
+					"app:new",
+					{
+						querySelectionCount: 1,
+						totalSelectionCount: 1,
+						recentDayCount: 1,
+						dayStreak: 1,
+						lastTimestamp: 10_000,
+						queryLastTimestamp: 0,
+					},
+				],
+				[
+					"app:open",
+					{
+						querySelectionCount: 99,
+						totalSelectionCount: 99,
+						recentDayCount: 7,
+						dayStreak: 7,
+						lastTimestamp: 1_000,
+						queryLastTimestamp: 0,
+					},
+				],
+			]),
+		);
+		jest.spyOn(Date, "now").mockReturnValue(10_000);
+
+		const suggestions = service.getQuickCommandSuggestions("", 24);
+
+		expect(suggestions.map((candidate: any) => candidate.openLinkText)).toEqual([
+			"app:new",
+			"app:open",
+		]);
+	});
+
 });

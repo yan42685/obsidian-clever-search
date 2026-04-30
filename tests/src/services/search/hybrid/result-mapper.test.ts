@@ -77,6 +77,24 @@ describe("hybrid lexical lane result mapper", () => {
 		]);
 	});
 
+	test("orders normalized rerank results by the displayed best score", () => {
+		const candidates = [
+			createDisplayCandidate({ filePath: "notes/low.md", score: 0.28 }),
+			createDisplayCandidate({ filePath: "notes/low.md", score: 0.27 }),
+			createDisplayCandidate({ filePath: "notes/high.md", score: 0.72 }),
+		];
+
+		const items = buildHybridLexicalLaneFileItems("cache restore", candidates, {
+			maxDisplayFiles: 3,
+		});
+
+		expect(items.map((item) => item.path)).toEqual([
+			"notes/high.md",
+			"notes/low.md",
+		]);
+		expect(items.map((item) => item.subItems[0]?.score)).toEqual([0.72, 0.28]);
+	});
+
 	test("propagates shadow snapshot freshness to file items", () => {
 		const items = buildHybridLexicalLaneFileItems("cache restore", [
 			createDisplayCandidate({

@@ -385,6 +385,20 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		]);
 	});
 
+	test("propagates cancelled hybrid prepare without lexical fallback", async () => {
+		const abortError = new Error("Hybrid operation aborted");
+		abortError.name = "AbortError";
+		mockHybridEngine.prepareRecall.mockRejectedValue(abortError);
+		const { service } = createHarness();
+		const { LexicalEngine } = require("src/services/search/lexical-engine");
+		const lexicalEngine = mockInstanceMap.get(LexicalEngine);
+
+		await expect(service.prepareSearchInVaultHybrid("alpha")).rejects.toBe(abortError);
+
+		expect(lexicalEngine.searchFiles).not.toHaveBeenCalled();
+		expect(mockNotices).toEqual([]);
+	});
+
 	test("marks auto fallback failures with no lexical results as fallback_failed", async () => {
 		mockHybridEngine.prepareRecall.mockRejectedValue(
 			new Error("provider offline"),

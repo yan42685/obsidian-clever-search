@@ -80,10 +80,17 @@ const OPENAI_INDEX_EMBED_BATCH_SIZE = 100;
 const INDEX_CHUNK_PERSIST_BATCH_SIZE = 24;
 const HNSW_HYDRATE_SHARD_BATCH_SIZE = 8;
 const HYBRID_DIRTY_ARTIFACTS = ["hnsw"] as const;
-const HYBRID_RERANK_LEXICAL_CANDIDATE_LIMIT = 10;
-const HYBRID_RERANK_DENSE_CANDIDATE_LIMIT = 24;
+const HYBRID_RERANK_LEXICAL_CANDIDATE_LIMIT = 6;
+const HYBRID_RERANK_DENSE_CANDIDATE_LIMIT = 14;
 const HYBRID_DENSE_FETCH_MULTIPLIER = 2;
 const HYBRID_DENSE_DEDUPE_OVERLAP_RATIO = 0.7;
+
+function normalizeRerankDisplayScore(score: number): number {
+  if (!Number.isFinite(score)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(1, score));
+}
 
 type HybridArtifactName = (typeof HYBRID_DIRTY_ARTIFACTS)[number];
 
@@ -886,15 +893,25 @@ export class HybridEngine {
       rerankLimit,
     );
     const rerankedHead = reranked
-      .map((result) => candidates[result.id])
+      .map((result) => {
+        const candidate = candidates[result.id];
+        if (!candidate) {
+          return null;
+        }
+        return {
+          ...candidate,
+          score: normalizeRerankDisplayScore(result.score),
+        };
+      })
       .filter(
         (candidate): candidate is HybridLexicalLaneDisplayCandidate =>
-          candidate !== undefined,
+          candidate !== null,
       );
     const usedIds = new Set(reranked.map((result) => result.id));
     const remaining = candidates
       .slice(0, rerankLimit)
-      .filter((_, index) => !usedIds.has(index));
+      .filter((_, index) => !usedIds.has(index))
+      .map((candidate) => ({ ...candidate, score: 0 }));
     return [
       ...rerankedHead,
       ...remaining,

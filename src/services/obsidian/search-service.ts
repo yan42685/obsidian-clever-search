@@ -55,6 +55,15 @@ type HybridSearchExecutionOptions = {
 	noticeContext?: HybridNoticeContext;
 };
 
+function isAbortError(error: unknown): boolean {
+	return Boolean(
+		error &&
+			typeof error === "object" &&
+			"name" in error &&
+			error.name === "AbortError",
+	);
+}
+
 @singleton()
 export class SearchService {
 	private static readonly LEXICAL_FILE_CANDIDATE_CAP = 48;
@@ -535,6 +544,13 @@ export class SearchService {
 				signal,
 			);
 		} catch (error) {
+			if (isAbortError(error)) {
+				logger.debug(
+					"hybrid lexical-lane prepare cancelled by a newer query.",
+					error,
+				);
+				throw error;
+			}
 			const issue = buildHybridSearchIssue(error);
 			logger.error(
 				"hybrid lexical-lane prepare failed; falling back to lexical search.",
