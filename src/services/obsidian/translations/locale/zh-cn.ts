@@ -61,7 +61,7 @@ export default {
 	"autocompleteSource.quickCommand": "QuickCommand",
 	"hybridModal.embeddingModel": "\u5d4c\u5165\u6a21\u578b",
 	"hybridModal.embeddingModel.descPrefix":
-		"Qwen \u6548\u679c\u660e\u663e\u66f4\u597d\uff0c\u9ed8\u8ba4\u63a8\u8350 Qwen\u3002API Key \u65e0\u6cd5\u4e91\u7aef\u63a7\u5236\u9650\u989d\u3002\u672c\u63d2\u4ef6\u4e0d\u5bf9 API Key \u6cc4\u9732\u3001\u914d\u7f6e\u9519\u8bef\u3001\u670d\u52a1\u5546\u8ba1\u8d39\u53d8\u5316\u7b49",
+		"Qwen \u6548\u679c\u660e\u663e\u66f4\u597d\uff0c\u9ed8\u8ba4\u63a8\u8350 Qwen\uff0c\u4f46\u5176 API Key \u65e0\u6cd5\u4e91\u7aef\u63a7\u5236\u9650\u989d\u3002\u672c\u63d2\u4ef6\u4e0d\u5bf9 API Key \u6cc4\u9732\u3001\u914d\u7f6e\u9519\u8bef\u3001\u670d\u52a1\u5546\u8ba1\u8d39\u53d8\u5316\u7b49",
 	"hybridModal.embeddingModel.descBold": "\u4efb\u4f55\u60c5\u51b5",
 	"hybridModal.embeddingModel.descSuffix":
 		"\u5bfc\u81f4\u7684 token/\u8d39\u7528\u5de8\u91cf\u6d88\u8017\u8d1f\u8d23\u3002",
@@ -69,7 +69,7 @@ export default {
 		"混合搜索结合了词法搜索与服务商语义检索。Qwen 使用 text-embedding-v4 和 qwen3-rerank；OpenAI 使用 text-embedding-3-large 和 gpt-5.4-nano 重排。接口返回的 token 用量会计入每周限额。当语义链路失败时，结果会自动降级为词法搜索。",
 	"hybridModal.apiDomain": "API 域名",
 	"hybridModal.apiDomain.desc":
-		"服务商 API 域名。除非使用兼容代理端点，否则建议保持默认值。",
+		"如果使用代理商 API Key，请确认其提供了对应的模型接口，Rerank 阶段 Qwen 会调用 reranker 模型，OpenAI 会调用 gpt5.4-nano 模型。",
 	"hybridModal.apiKey": "API Key",
 	"hybridModal.testConnection": "检测",
 	"hybridModal.connectivityOk": "连通性检测成功。",

@@ -21,12 +21,10 @@ const DEFAULT_DASHSCOPE_DOMAIN = 'dashscope.aliyuncs.com';
 const DEFAULT_OPENAI_DOMAIN = 'api.openai.com';
 const QWEN_EMBED_MODEL = 'text-embedding-v4';
 const OPENAI_EMBED_MODEL = 'text-embedding-3-large';
-const BATCH_SIZE = 10;
 const CACHE_MAX = 50;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
 const REQUEST_TIMEOUT_MS = 45_000;
 const REQUEST_MAX_RETRIES = 4;
-const REQUEST_MIN_SPACING_MS = 250;
 const REQUEST_RETRY_BASE_MS = 1_200;
 const TOKEN_SAVINGS_TOTAL_KEY = 'all';
 let inFlightEstimatedTokens = 0;
@@ -34,7 +32,16 @@ let lastKnownCurrentWeekTokenUsage: { weekKey: string; tokens: number } | null =
 
 type EmbedBatchOptions = {
 	maxAttempts?: number;
+	interactive?: boolean;
+	provider?: HybridEmbeddingProvider;
 };
+
+type EmbeddingRequestProfile = Readonly<{
+	maxBatchSize: number;
+	minSpacingMs: number;
+	flushDelayMs: number;
+	concurrency: 1;
+}>;
 
 export type EmbeddingProviderSpec = Readonly<{
 	id: HybridEmbeddingProvider;
@@ -84,6 +91,28 @@ type CacheEntry = {
 	ts: number;
 };
 
+type EmbeddingQueueItem = {
+	id: number;
+	owner: Embedder;
+	provider: HybridEmbeddingProvider;
+	text: string;
+	precision: VectorPrecision;
+	filePath: string;
+	estimatedTokens: number;
+	maxAttempts: number;
+	interactive: boolean;
+	signal?: AbortSignal;
+	state: 'pending' | 'in-flight' | 'settled';
+	resolve: (vector: StoredVector) => void;
+	reject: (error: unknown) => void;
+	abortHandler?: () => void;
+};
+
+type EmbeddingQueueEnqueueItem = Omit<
+	EmbeddingQueueItem,
+	'id' | 'state' | 'resolve' | 'reject' | 'abortHandler'
+>;
+
 const noticeWeeklyLimitReached = throttle(
 	5000,
 	(text: string) => new MyNotice(text, 5000),
@@ -122,6 +151,274 @@ export function quantizeFloat16(v: number[]): Uint16Array {
 	return out;
 }
 
+export function getEmbeddingRequestProfile(
+	provider: unknown,
+): EmbeddingRequestProfile {
+	const normalizedProvider = normalizeEmbeddingProvider(provider);
+	if (normalizedProvider === 'openai') {
+		return {
+			maxBatchSize: 100,
+			minSpacingMs: 0,
+			flushDelayMs: 50,
+			concurrency: 1,
+		};
+	}
+	return {
+		maxBatchSize: 10,
+		minSpacingMs: 250,
+		flushDelayMs: 50,
+		concurrency: 1,
+	};
+}
+
+class EmbeddingQueue {
+	private pending: EmbeddingQueueItem[] = [];
+	private flushTimer: ReturnType<typeof setTimeout> | null = null;
+	private flushing = false;
+	private nextItemId = 1;
+
+	constructor(
+		private readonly provider: HybridEmbeddingProvider,
+		private readonly profile: EmbeddingRequestProfile,
+	) {}
+
+	enqueue(input: EmbeddingQueueEnqueueItem): Promise<StoredVector> {
+		return new Promise<StoredVector>((resolve, reject) => {
+			const item: EmbeddingQueueItem = {
+				...input,
+				id: this.nextItemId++,
+				state: 'pending',
+				resolve,
+				reject,
+			};
+
+			const abortHandler = () => {
+				if (item.state === 'settled') {
+					return;
+				}
+				if (item.state === 'pending') {
+					this.removePending(item);
+				}
+				this.settleItem(item, 'reject', createEmbedAbortError());
+			};
+
+			if (item.signal?.aborted) {
+				reject(createEmbedAbortError());
+				return;
+			}
+			if (item.signal) {
+				item.abortHandler = abortHandler;
+				item.signal.addEventListener('abort', abortHandler, { once: true });
+			}
+
+			this.pending.push(item);
+			if (item.interactive || this.pending.length >= this.profile.maxBatchSize) {
+				this.scheduleFlush(0);
+				return;
+			}
+			this.scheduleFlush(this.profile.flushDelayMs);
+		});
+	}
+
+	private scheduleFlush(delayMs: number): void {
+		if (this.flushTimer) {
+			if (delayMs > 0) {
+				return;
+			}
+			clearTimeout(this.flushTimer);
+			this.flushTimer = null;
+		}
+
+		this.flushTimer = setTimeout(() => {
+			this.flushTimer = null;
+			void this.flush();
+		}, Math.max(0, delayMs));
+	}
+
+	private async flush(): Promise<void> {
+		if (this.flushing) {
+			if (this.pending.length > 0) {
+				this.scheduleFlush(this.profile.flushDelayMs);
+			}
+			return;
+		}
+		this.flushing = true;
+		try {
+			while (this.pending.length > 0) {
+				const batch = this.takeNextBatch();
+				if (batch.length === 0) {
+					break;
+				}
+				await this.processBatch(batch);
+			}
+		} finally {
+			this.flushing = false;
+			if (this.pending.length > 0) {
+				this.scheduleFlush(this.profile.flushDelayMs);
+			}
+		}
+	}
+
+	private takeNextBatch(): EmbeddingQueueItem[] {
+		const prioritized = this.pending
+			.map((item, order) => ({ item, order }))
+			.sort((a, b) => {
+				if (a.item.interactive !== b.item.interactive) {
+					return a.item.interactive ? -1 : 1;
+				}
+				return a.order - b.order;
+			})
+			.slice(0, this.profile.maxBatchSize)
+			.map(({ item }) => item);
+		const selected = new Set(prioritized.map((item) => item.id));
+		this.pending = this.pending.filter((item) => !selected.has(item.id));
+		for (const item of prioritized) {
+			item.state = 'in-flight';
+		}
+		return prioritized;
+	}
+
+	private async processBatch(batch: EmbeddingQueueItem[]): Promise<void> {
+		const liveBatch = batch.filter((item) => item.state !== 'settled');
+		if (liveBatch.length === 0) {
+			return;
+		}
+
+		const requestStart = Date.now();
+		const estimatedTokens = liveBatch.reduce(
+			(sum, item) => sum + item.estimatedTokens,
+			0,
+		);
+		const maxAttempts = Math.min(...liveBatch.map((item) => item.maxAttempts));
+		let reservation: WeeklyTokenReservation | null = null;
+		try {
+			reservation = await profileHybridStage(
+				'embed.ensure_weekly_budget',
+				async () => await reserveWeeklyTokenBudget(estimatedTokens),
+			);
+			const { embeddings: floats, tokensUsed } = await profileHybridStage(
+				'embed.fetch_embeddings',
+				async () =>
+					await liveBatch[0].owner.fetchQueuedEmbeddings(
+						liveBatch.map((item) => item.text),
+						this.provider,
+						maxAttempts,
+					),
+			);
+			logger.debug(
+				`embed queue request: provider=${this.provider}, size=${liveBatch.length}, tokens=${tokensUsed}, elapsed=${Date.now() - requestStart} ms`,
+			);
+			if (tokensUsed > 0) {
+				recordHybridProfileMetric('provider_tokens', tokensUsed);
+				await this.recordTokenUsageForBatch(liveBatch, tokensUsed, estimatedTokens);
+			}
+			const vectors = await profileHybridStage(
+				'embed.quantize_vectors',
+				async () => this.quantizeBatch(liveBatch, floats),
+			);
+			for (let i = 0; i < liveBatch.length; i++) {
+				this.settleItem(liveBatch[i], 'resolve', vectors[i]);
+			}
+		} catch (error) {
+			for (const item of liveBatch) {
+				this.settleItem(item, 'reject', error);
+			}
+		} finally {
+			reservation?.release();
+		}
+	}
+
+	private async recordTokenUsageForBatch(
+		batch: EmbeddingQueueItem[],
+		tokensUsed: number,
+		estimatedTokens: number,
+	): Promise<void> {
+		if (estimatedTokens <= 0) {
+			return;
+		}
+		const tokensByFilePath = new Map<string, number>();
+		let assignedTokens = 0;
+		for (let i = 0; i < batch.length; i++) {
+			const item = batch[i];
+			if (!item.filePath) {
+				continue;
+			}
+			const isLast = i === batch.length - 1;
+			const proportionalTokens = isLast
+				? Math.max(0, tokensUsed - assignedTokens)
+				: Math.max(
+					0,
+					Math.round((tokensUsed * item.estimatedTokens) / estimatedTokens),
+				);
+			assignedTokens += proportionalTokens;
+			tokensByFilePath.set(
+				item.filePath,
+				(tokensByFilePath.get(item.filePath) ?? 0) + proportionalTokens,
+			);
+		}
+		await Promise.all(
+			Array.from(tokensByFilePath, ([filePath, tokens]) =>
+				recordTokenUsage(filePath, tokens),
+			),
+		);
+	}
+
+	private quantizeBatch(
+		batch: EmbeddingQueueItem[],
+		floats: number[][],
+	): StoredVector[] {
+		if (floats.length !== batch.length) {
+			throw new Error(
+				`Embedding queue batch size mismatch: expected ${batch.length}, received ${floats.length}`,
+			);
+		}
+		return floats.map((floatVector, index) => {
+			l2Normalize(floatVector);
+			if (batch[index].precision === 'float16') {
+				return {
+					precision: 'float16',
+					vector: quantizeFloat16(floatVector),
+				};
+			}
+			const { vec, scale } = quantizeInt8(floatVector);
+			return {
+				precision: 'int8',
+				vector: vec,
+				scale,
+			};
+		});
+	}
+
+	private removePending(item: EmbeddingQueueItem): void {
+		this.pending = this.pending.filter((pendingItem) => pendingItem.id !== item.id);
+	}
+
+	private settleItem(
+		item: EmbeddingQueueItem,
+		mode: 'resolve',
+		value: StoredVector,
+	): void;
+	private settleItem(item: EmbeddingQueueItem, mode: 'reject', value: unknown): void;
+	private settleItem(
+		item: EmbeddingQueueItem,
+		mode: 'resolve' | 'reject',
+		value: StoredVector | unknown,
+	): void {
+		if (item.state === 'settled') {
+			return;
+		}
+		item.state = 'settled';
+		if (item.abortHandler && item.signal) {
+			item.signal.removeEventListener('abort', item.abortHandler);
+		}
+		if (mode === 'resolve') {
+			item.resolve(value as StoredVector);
+			return;
+		}
+		item.reject(value);
+	}
+}
+
 function float32ToFloat16(val: number): number {
 	const buf = new ArrayBuffer(4);
 	new Float32Array(buf)[0] = val;
@@ -144,7 +441,8 @@ function float32ToFloat16(val: number): number {
 export class Embedder {
 	private readonly setting = getInstance(OuterSetting);
 	private readonly cache = new Map<string, CacheEntry>();
-	private static requestGate = new AsyncRateGate(REQUEST_MIN_SPACING_MS);
+	private static readonly requestGates = new Map<string, AsyncRateGate>();
+	private static readonly queues = new Map<string, EmbeddingQueue>();
 
 	private get apiKey(): string {
 		return this.setting.hybrid?.apiKey?.trim() ?? '';
@@ -175,7 +473,7 @@ export class Embedder {
 			precision,
 			filePath,
 			signal,
-			{ maxAttempts: 1 },
+			{ maxAttempts: 1, interactive: true },
 		);
 		this.setCache(text, precision, result);
 		return result;
@@ -197,52 +495,13 @@ export class Embedder {
 			`embedBatch start: file=${filePath || '<query>'}, chunks=${texts.length}, precision=${precision}`,
 		);
 
-		for (let i = 0; i < texts.length; i += BATCH_SIZE) {
-			const batch = texts.slice(i, i + BATCH_SIZE);
-			const requestStart = Date.now();
-			const estimatedTokens = estimateTextsTokenUsage(batch);
-			const reservation = await profileHybridStage(
-				'embed.ensure_weekly_budget',
-				async () => await reserveWeeklyTokenBudget(estimatedTokens),
-			);
-			try {
-				const { embeddings: floats, tokensUsed } = await profileHybridStage(
-					'embed.fetch_embeddings',
-					async () =>
-						await this.fetchEmbeddings(batch, signal, {
-							maxAttempts: options.maxAttempts,
-						}),
-				);
-				logger.debug(
-					`embedBatch request: file=${filePath || '<query>'}, batch=${Math.floor(i / BATCH_SIZE) + 1}, size=${batch.length}, tokens=${tokensUsed}, elapsed=${Date.now() - requestStart} ms`,
-				);
-				if (tokensUsed > 0) {
-					recordHybridProfileMetric('provider_tokens', tokensUsed);
-					await recordTokenUsage(filePath, tokensUsed);
-				}
-				await profileHybridStage('embed.quantize_vectors', async () => {
-					for (const f of floats) {
-						l2Normalize(f);
-						if (precision === 'float16') {
-							results.push({
-								precision: 'float16',
-								vector: quantizeFloat16(f),
-							});
-							continue;
-						}
-						const { vec, scale } = quantizeInt8(f);
-						results.push({
-							precision: 'int8',
-							vector: vec,
-							scale,
-						});
-					}
-					return;
-				});
-			} finally {
-				reservation.release();
-			}
-		}
+		results.push(
+			...(await Promise.all(
+				texts.map((text) =>
+					this.enqueueEmbedding(text, precision, filePath, signal, options),
+				),
+			)),
+		);
 
 		logger.debug(
 			`embedBatch finished: file=${filePath || '<query>'}, chunks=${texts.length}, elapsed=${Date.now() - batchStart} ms`,
@@ -251,12 +510,68 @@ export class Embedder {
 		return results;
 	}
 
+	private enqueueEmbedding(
+		text: string,
+		precision: VectorPrecision,
+		filePath: string,
+		signal: AbortSignal | undefined,
+		options: EmbedBatchOptions,
+	): Promise<StoredVector> {
+		const provider = this.provider;
+		const queue = Embedder.getQueue(provider);
+		return queue.enqueue({
+			owner: this,
+			provider,
+			text,
+			precision,
+			filePath,
+			estimatedTokens: estimateTextTokenUsage(text),
+			maxAttempts: Math.max(1, options.maxAttempts ?? REQUEST_MAX_RETRIES),
+			interactive: options.interactive === true,
+			signal,
+		});
+	}
+
+	private static getQueue(provider: HybridEmbeddingProvider): EmbeddingQueue {
+		const profile = getEmbeddingRequestProfile(provider);
+		const key = provider;
+		let queue = this.queues.get(key);
+		if (!queue) {
+			queue = new EmbeddingQueue(provider, profile);
+			this.queues.set(key, queue);
+		}
+		return queue;
+	}
+
+	private static getRequestGate(provider: HybridEmbeddingProvider): AsyncRateGate {
+		const profile = getEmbeddingRequestProfile(provider);
+		const key = `${provider}:${profile.minSpacingMs}`;
+		let gate = this.requestGates.get(key);
+		if (!gate) {
+			gate = new AsyncRateGate(profile.minSpacingMs);
+			this.requestGates.set(key, gate);
+		}
+		return gate;
+	}
+
+	async fetchQueuedEmbeddings(
+		texts: string[],
+		provider: HybridEmbeddingProvider,
+		maxAttempts: number,
+	): Promise<{ embeddings: number[][]; tokensUsed: number }> {
+		return await this.fetchEmbeddings(texts, undefined, {
+			maxAttempts,
+			provider,
+		});
+	}
+
 	private async fetchEmbeddings(
 		texts: string[],
 		externalSignal?: AbortSignal,
 		options: EmbedBatchOptions = {},
 	): Promise<{ embeddings: number[][]; tokensUsed: number }> {
 		const maxAttempts = Math.max(1, options.maxAttempts ?? REQUEST_MAX_RETRIES);
+		const providerOverride = options.provider;
 		return retryAsync(
 			async (attempt) => {
 				const controller = new AbortController();
@@ -273,12 +588,15 @@ export class Embedder {
 					if (externalSignal?.aborted) {
 						throw createEmbedAbortError();
 					}
-					await Embedder.requestGate.wait();
+					const provider = providerOverride ?? this.provider;
+					await Embedder.getRequestGate(provider).wait();
 					if (externalSignal?.aborted) {
 						throw createEmbedAbortError();
 					}
-					const provider = this.provider;
-					const apiUrl = this.apiUrl;
+					const apiUrl = buildEmbeddingApiUrl(
+						provider,
+						this.setting.hybrid?.apiDomain,
+					);
 					const resp = await fetch(apiUrl, {
 						method: 'POST',
 						headers: {

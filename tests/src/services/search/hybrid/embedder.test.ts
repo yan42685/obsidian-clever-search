@@ -57,17 +57,58 @@ function createJsonFetchResponse(body: unknown) {
 	};
 }
 
+function createEmbedding(index: number, dim: number): number[] {
+	const vector = new Array(dim).fill(0);
+	vector[0] = 1;
+	vector[1] = index + 1;
+	return vector;
+}
+
+function createEmbeddingFetchMock() {
+	const { EMBED_DIM } = require("src/services/search/hybrid/hybrid-types");
+	return jest.fn(async (_url: string, init: { body?: string }) => {
+		const body = JSON.parse(init.body ?? "{}") as { input?: string[] };
+		const input = body.input ?? [];
+		return createJsonFetchResponse({
+			data: input.map((_text, index) => ({
+				index,
+				embedding: createEmbedding(index, EMBED_DIM),
+			})),
+			usage: { total_tokens: 0 },
+		});
+	});
+}
+
+async function waitForEmbeddingQueue(): Promise<void> {
+	await new Promise((resolve) => setTimeout(resolve, 80));
+	await Promise.resolve();
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+	for (let i = 0; i < 20; i++) {
+		if (predicate()) return;
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	throw new Error("Timed out waiting for condition");
+}
+
+function setHybridSetting(overrides: Record<string, unknown> = {}) {
+	mockInstanceMap.set(require("src/globals/plugin-setting").OuterSetting, {
+		hybrid: {
+			enabled: true,
+			apiKey: "test-key",
+			apiDomain: "example.com",
+			weeklyTokenLimit: 0,
+			...overrides,
+		},
+	});
+}
+
 describe("Embedder response validation", () => {
 	beforeEach(() => {
 		jest.clearAllMocks();
 		mockInstanceMap.clear();
-		mockInstanceMap.set(require("src/globals/plugin-setting").OuterSetting, {
-			hybrid: {
-				enabled: true,
-				apiKey: "test-key",
-				apiDomain: "example.com",
-			},
-		});
+		setHybridSetting();
 	});
 
 	afterEach(() => {
@@ -135,6 +176,200 @@ describe("Embedder response validation", () => {
 		await expect(
 			(embedder as any).fetchEmbeddings(["alpha"]),
 		).rejects.toThrow("contentType=text/html");
+	});
+});
+
+describe("Embedder chunk queue", () => {
+	beforeEach(() => {
+		jest.clearAllMocks();
+		mockInstanceMap.clear();
+		setHybridSetting();
+	});
+
+	afterEach(() => {
+		delete (global as any).fetch;
+	});
+
+	test("coalesces concurrent Qwen single-chunk calls and caps requests at ten inputs", async () => {
+		const { Embedder } = require("src/services/search/hybrid/embedder");
+		(global as any).fetch = createEmbeddingFetchMock();
+		const embedder = new Embedder();
+
+		const promises = Array.from({ length: 12 }, (_value, index) =>
+			embedder.embedBatch([`chunk-${index}`], "int8", `note-${index}.md`),
+		);
+		await waitForEmbeddingQueue();
+		await Promise.all(promises);
+
+		expect((global as any).fetch).toHaveBeenCalledTimes(2);
+		const requestInputs = (global as any).fetch.mock.calls.map(
+			([_url, init]: [string, { body: string }]) =>
+				(JSON.parse(init.body) as { input: string[] }).input,
+		);
+		expect(requestInputs.map((input: string[]) => input.length)).toEqual([10, 2]);
+		expect(requestInputs.flat()).toEqual(
+			Array.from({ length: 12 }, (_value, index) => `chunk-${index}`),
+		);
+	});
+
+	test("uses the larger OpenAI synchronous embedding batch cap", async () => {
+		setHybridSetting({ embeddingProvider: "openai" });
+		const { Embedder } = require("src/services/search/hybrid/embedder");
+		(global as any).fetch = createEmbeddingFetchMock();
+		const embedder = new Embedder();
+
+		const promises = Array.from({ length: 101 }, (_value, index) =>
+			embedder.embedBatch([`chunk-${index}`], "int8", `note-${index}.md`),
+		);
+		await waitForEmbeddingQueue();
+		await Promise.all(promises);
+
+		expect((global as any).fetch).toHaveBeenCalledTimes(2);
+		const requestInputs = (global as any).fetch.mock.calls.map(
+			([_url, init]: [string, { body: string }]) =>
+				(JSON.parse(init.body) as { input: string[] }).input,
+		);
+		expect(requestInputs.map((input: string[]) => input.length)).toEqual([100, 1]);
+	});
+
+	test("preserves each embedBatch caller order while interleaving queued work", async () => {
+		const { Embedder } = require("src/services/search/hybrid/embedder");
+		(global as any).fetch = createEmbeddingFetchMock();
+		const embedder = new Embedder();
+
+		const first = embedder.embedBatch(["a-0", "a-1"], "int8", "a.md");
+		const second = embedder.embedBatch(["b-0"], "float16", "b.md");
+		await waitForEmbeddingQueue();
+		const [firstVectors, secondVectors] = await Promise.all([first, second]);
+
+		expect(firstVectors).toHaveLength(2);
+		expect(firstVectors[0].precision).toBe("int8");
+		expect(firstVectors[1].precision).toBe("int8");
+		expect(secondVectors).toHaveLength(1);
+		expect(secondVectors[0].precision).toBe("float16");
+		const [, init] = (global as any).fetch.mock.calls[0];
+		expect((JSON.parse(init.body) as { input: string[] }).input).toEqual([
+			"a-0",
+			"a-1",
+			"b-0",
+		]);
+	});
+
+	test("serves repeated embedQuery calls from cache after the first request", async () => {
+		const { Embedder } = require("src/services/search/hybrid/embedder");
+		(global as any).fetch = createEmbeddingFetchMock();
+		const embedder = new Embedder();
+
+		const first = embedder.embedQuery("cached query", "int8", "<query>");
+		await waitForEmbeddingQueue();
+		await first;
+		await embedder.embedQuery("cached query", "int8", "<query>");
+
+		expect((global as any).fetch).toHaveBeenCalledTimes(1);
+	});
+
+	test("prioritizes embedQuery instead of waiting behind a full flush delay", async () => {
+		const { Embedder } = require("src/services/search/hybrid/embedder");
+		(global as any).fetch = createEmbeddingFetchMock();
+		const embedder = new Embedder();
+
+		const background = embedder.embedBatch(["background"], "int8", "note.md");
+		const query = embedder.embedQuery("query", "int8", "<query>");
+		await waitForEmbeddingQueue();
+		await Promise.all([background, query]);
+
+		const [, init] = (global as any).fetch.mock.calls[0];
+		expect((JSON.parse(init.body) as { input: string[] }).input[0]).toBe("query");
+	});
+
+	test("rejects every caller in a failed provider batch with provider details", async () => {
+		const { Embedder } = require("src/services/search/hybrid/embedder");
+		(global as any).fetch = jest.fn().mockResolvedValue({
+			ok: false,
+			status: 403,
+			headers: {
+				get: (name: string) =>
+					name.toLowerCase() === "content-type" ? "application/json" : null,
+			},
+			text: async () =>
+				JSON.stringify({
+					code: "Forbidden",
+					message: "denied",
+					request_id: "request-1",
+				}),
+		});
+		const embedder = new Embedder();
+
+		const first = embedder.embedBatch(["a"], "int8", "a.md");
+		const second = embedder.embedBatch(["b"], "int8", "b.md");
+		const firstExpectation = expect(first).rejects.toMatchObject({
+			kind: "auth_403",
+			status: 403,
+			requestId: "request-1",
+		});
+		const secondExpectation = expect(second).rejects.toMatchObject({
+			kind: "auth_403",
+			status: 403,
+			requestId: "request-1",
+		});
+		await waitForEmbeddingQueue();
+
+		await firstExpectation;
+		await secondExpectation;
+		expect((global as any).fetch).toHaveBeenCalledTimes(1);
+	});
+
+	test("rejects queued work when its abort signal fires before flush", async () => {
+		const { Embedder } = require("src/services/search/hybrid/embedder");
+		(global as any).fetch = createEmbeddingFetchMock();
+		const embedder = new Embedder();
+		const controller = new AbortController();
+
+		const promise = embedder.embedBatch(
+			["abort me"],
+			"int8",
+			"abort.md",
+			controller.signal,
+		);
+		controller.abort();
+		await expect(promise).rejects.toThrow("aborted");
+		await waitForEmbeddingQueue();
+
+		expect((global as any).fetch).not.toHaveBeenCalled();
+	});
+
+	test("rejects queued work when its abort signal fires during the provider request", async () => {
+		const { Embedder } = require("src/services/search/hybrid/embedder");
+		const { EMBED_DIM } = require("src/services/search/hybrid/hybrid-types");
+		let resolveFetch!: (value: unknown) => void;
+		(global as any).fetch = jest.fn(
+			() =>
+				new Promise((resolve) => {
+					resolveFetch = resolve;
+				}),
+		);
+		const embedder = new Embedder();
+		const controller = new AbortController();
+
+		const promise = embedder.embedQuery(
+			"abort during request",
+			"int8",
+			"<query>",
+			controller.signal,
+		);
+		const expectation = expect(promise).rejects.toThrow("aborted");
+		await waitUntil(() => (global as any).fetch.mock.calls.length === 1);
+		controller.abort();
+		await expectation;
+		resolveFetch(
+			createJsonFetchResponse({
+				data: [{ index: 0, embedding: createEmbedding(0, EMBED_DIM) }],
+				usage: { total_tokens: 0 },
+			}),
+		);
+		await waitForEmbeddingQueue();
+
+		expect((global as any).fetch).toHaveBeenCalledTimes(1);
 	});
 });
 

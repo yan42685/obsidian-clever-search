@@ -577,6 +577,52 @@ describe("mounted modal helper", () => {
 		}
 	});
 
+	test("hybrid freshness notice does not report zero processing files for repair-only state", async () => {
+		const { container } = require("tsyringe");
+		const { SearchResult, SearchType } = require("src/globals/search-types");
+		const { DataManager } = require("src/services/obsidian/user-data/data-manager");
+		const { HybridFreshnessNoticeController } = require("src/ui/mounted-modal-helper");
+		container.registerInstance(DataManager, {
+			flushPendingDocOperations: jest.fn(async () => undefined),
+			getHybridFreshnessSummary: jest.fn(async () => ({
+				processingFileCount: 0,
+				staleFileCount: 0,
+				repairFileCount: 2,
+				totalTrackedFiles: 2,
+				processingSamplePaths: [],
+				staleSamplePaths: [],
+				repairSamplePaths: ["docs/a.md", "docs/b.md"],
+				updatedAt: Date.now(),
+			})),
+		});
+		const states: Array<{ visible: boolean; message: string }> = [];
+		const controller = new HybridFreshnessNoticeController({
+			getSearchType: () => SearchType.IN_VAULT,
+			getIsHybrid: () => true,
+			onNoticeChange: (state: typeof states[number]) => {
+				states.push(state);
+			},
+		});
+
+		controller.syncFromResult(new SearchResult("freshness", []));
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(states.at(-1)?.visible).toBe(true);
+		expect(states.at(-1)?.message).toContain("2");
+		expect(states.at(-1)?.message).not.toContain("0 file");
+
+		controller.clear();
+		if (
+			"reset" in container &&
+			typeof (container as { reset?: () => void }).reset === "function"
+		) {
+			(container as { reset: () => void }).reset();
+		} else {
+			container.clearInstances();
+		}
+	});
+
 	test("hybrid freshness notice coalesces runtime-status refresh bursts", async () => {
 		const { container } = require("tsyringe");
 		const { SearchResult, SearchType } = require("src/globals/search-types");

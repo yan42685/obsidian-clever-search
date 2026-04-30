@@ -307,6 +307,9 @@ class HybridIndexProgressNotice {
   }
 
   private buildMessage(progress: HybridIndexProgress): string {
+    const repairLabel = progress.repairedPaths > 0
+      ? `, stored repairs ${progress.repairedPaths}`
+      : "";
     if (progress.stage === "repair") {
       return `Hybrid self-healing: repaired ${progress.repairedPaths} stored file state(s). Preparing reindex... ${this.buildTokenLabel(progress.sessionTokens)}`;
     }
@@ -314,9 +317,9 @@ class HybridIndexProgressNotice {
       if (progress.totalFiles === 0) {
         return `Hybrid self-healing finished: repaired ${progress.repairedPaths} stored file state(s), semantic failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
       }
-      return `Hybrid indexing finished: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} processed (${progress.processedFiles}/${progress.totalFiles} attempted), stored repairs ${progress.repairedPaths}, semantic failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
+      return `Hybrid indexing finished: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} processed (${progress.processedFiles}/${progress.totalFiles} attempted)${repairLabel}, semantic failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
     }
-    return `Hybrid indexing: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} processed (${progress.processedFiles}/${progress.totalFiles} attempted), stored repairs ${progress.repairedPaths}, semantic failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
+    return `Hybrid indexing: ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)} processed (${progress.processedFiles}/${progress.totalFiles} attempted)${repairLabel}, semantic failed ${progress.failedFiles}. ${this.buildTokenLabel(progress.sessionTokens)}`;
   }
 
   private buildTokenLabel(tokens: number): string {

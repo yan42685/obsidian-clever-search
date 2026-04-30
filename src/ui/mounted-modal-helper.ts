@@ -551,6 +551,14 @@ export class HybridFreshnessNoticeController {
 			].join("");
 		}
 		if (freshnessState === "processing") {
+			if (summary.processingFileCount <= 0 && summary.repairFileCount > 0) {
+				return [
+					t("hybridModal.freshnessNotice.messageStaleOnlyPrefix"),
+					String(summary.repairFileCount),
+					t("hybridModal.freshnessNotice.repairSuffix"),
+					t("hybridModal.freshnessNotice.detailTail"),
+				].join("");
+			}
 			return [
 				t("hybridModal.freshnessNotice.messageProcessingOnlyPrefix"),
 				String(summary.processingFileCount),
