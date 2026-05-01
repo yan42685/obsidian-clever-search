@@ -17,14 +17,19 @@ import {
 } from './provider-error';
 
 const RERANK_TIMEOUT_MS = 15_000;
+const MIN_RERANK_SCORE_RELATIVE_TO_TOP = 0.35;
+const LLM_RERANK_MAX_RESULTS = 3;
 export const SEARCH_QWEN_RERANK_TOKEN_KEY = '[search] qwen3-rerank';
 export const SEARCH_OPENAI_RERANK_TOKEN_KEY = '[search] gpt-5.4-nano';
+export const SEARCH_GEMINI_RERANK_TOKEN_KEY = '[search] gemini-3.1-flash-lite-preview';
 export const SEARCH_RERANK_TOKEN_KEY = SEARCH_QWEN_RERANK_TOKEN_KEY;
 export const SEARCH_RERANK_TOKEN_KEYS = [
 	SEARCH_QWEN_RERANK_TOKEN_KEY,
 	SEARCH_OPENAI_RERANK_TOKEN_KEY,
+	SEARCH_GEMINI_RERANK_TOKEN_KEY,
 ] as const;
 export const SEARCH_EMBED_TOKEN_KEY = '[search] embedding';
+type RerankProvider = 'qwen' | 'openai' | 'gemini';
 
 export type HybridRerankFailureKind = HybridProviderFailureKind;
 
@@ -86,6 +91,8 @@ export type RerankCandidate = {
 export type RerankResult = {
 	id: number;
 	score: number;
+	start?: number;
+	end?: number;
 };
 
 function createRerankAbortError(): Error {
@@ -101,7 +108,7 @@ export class HybridReranker {
 		return this.setting.hybrid?.apiKey?.trim() ?? '';
 	}
 
-	private get provider(): 'qwen' | 'openai' {
+	private get provider(): RerankProvider {
 		return normalizeEmbeddingProvider(this.setting.hybrid?.embeddingProvider);
 	}
 
@@ -151,7 +158,7 @@ export class HybridReranker {
 				throw error;
 			}
 
-			const json = await resp.json() as {
+		const json = await resp.json() as {
 				results?: Array<{ index: number; relevance_score?: number; score?: number }>;
 				data?: Array<{ index: number; relevance_score?: number; score?: number }>;
 				output?: {
@@ -160,13 +167,26 @@ export class HybridReranker {
 				};
 				output_text?: string;
 				usage?: { total_tokens?: number; input_tokens?: number };
+				usageMetadata?: { totalTokenCount?: number; promptTokenCount?: number };
+				candidates?: Array<{
+					content?: {
+						parts?: Array<{ text?: string }>;
+					};
+				}>;
 			};
-			const tokensUsed = json.usage?.total_tokens ?? json.usage?.input_tokens ?? 0;
+			const tokensUsed =
+				json.usage?.total_tokens ??
+				json.usage?.input_tokens ??
+				json.usageMetadata?.totalTokenCount ??
+				json.usageMetadata?.promptTokenCount ??
+				0;
 			if (tokensUsed > 0) {
 				await recordTokenUsage(getSearchRerankTokenKey(provider), tokensUsed);
 			}
 
-			const ranked = this.extractRankedItems(json, provider)
+			const ranked = this.filterRankedItemsByTopScore(
+				this.extractRankedItems(json, provider),
+			)
 				.map((item) => {
 					const candidate = candidates[item.index];
 					if (!candidate) {
@@ -175,6 +195,8 @@ export class HybridReranker {
 					return {
 						id: candidate.id,
 						score: item.score,
+						start: item.start,
+						end: item.end,
 					} as RerankResult;
 				})
 				.filter((item): item is RerankResult => item !== null);
@@ -183,14 +205,29 @@ export class HybridReranker {
 				throw new HybridRerankError(`${getEmbeddingProviderSpec(provider).label} rerank returned no ranked items`);
 			}
 
-			return ranked.slice(0, topK);
+			return ranked.slice(0, this.getResultLimit(provider, topK));
 		} finally {
 			reservation.release();
 		}
 	}
 
+	private filterRankedItemsByTopScore(
+		items: Array<{ index: number; score: number; start?: number; end?: number }>,
+	): Array<{ index: number; score: number; start?: number; end?: number }> {
+		const topScore = items[0]?.score;
+		if (!Number.isFinite(topScore) || topScore <= 0) {
+			return items;
+		}
+		const minScore = topScore * MIN_RERANK_SCORE_RELATIVE_TO_TOP;
+		return items.filter((item) => item.score >= minScore);
+	}
+
+	private getResultLimit(provider: RerankProvider, topK: number): number {
+		return provider === 'qwen' ? topK : Math.min(topK, LLM_RERANK_MAX_RESULTS);
+	}
+
 	private async fetchRerankResponse(
-		provider: 'qwen' | 'openai',
+		provider: RerankProvider,
 		query: string,
 		documents: string[],
 		topK: number,
@@ -221,7 +258,9 @@ export class HybridReranker {
 				body: JSON.stringify(
 					provider === 'openai'
 						? this.buildOpenAIRerankRequest(query, documents, topK)
-						: this.buildQwenRerankRequest(query, documents, topK),
+						: provider === 'gemini'
+							? this.buildGeminiRerankRequest(query, documents, topK)
+							: this.buildQwenRerankRequest(query, documents, topK),
 				),
 				signal: controller.signal,
 			});
@@ -252,9 +291,17 @@ export class HybridReranker {
 					content?: Array<{ type?: string; text?: string }>;
 				} | Array<{ content?: Array<{ type?: string; text?: string }> }>;
 		output_text?: string;
-	}, provider: 'qwen' | 'openai' = this.provider): Array<{ index: number; score: number }> {
+		candidates?: Array<{
+			content?: {
+				parts?: Array<{ text?: string }>;
+			};
+		}>;
+	}, provider: RerankProvider = this.provider): Array<{ index: number; score: number; start?: number; end?: number }> {
 		if (provider === 'openai') {
 			return this.extractOpenAIRankedItems(json);
+		}
+		if (provider === 'gemini') {
+			return this.extractGeminiRankedItems(json);
 		}
 		const outputResults = !Array.isArray(json.output)
 			? json.output?.results
@@ -310,16 +357,59 @@ export class HybridReranker {
 		}));
 		return {
 			model: getEmbeddingProviderSpec('openai').rerankModel,
-			input: [
-				'Rank the candidate texts by relevance to the search query. Prioritize response speed as long as relevance quality is barely acceptable.',
-				'Return only JSON: {"results":[{"index":0,"score":1}]}',
-				`Return at most ${Math.min(documents.length, topK)} results.`,
-				'Score must be a normalized finite number from 0 to 1, where 1 is most relevant.',
-				`Query: ${JSON.stringify(query)}`,
-				`Candidates: ${JSON.stringify(candidates)}`,
-			].join('\n'),
+			input: this.buildLlmRerankPrompt(query, candidates, topK),
 			text: { format: { type: 'json_object' } },
 		};
+	}
+
+	private buildGeminiRerankRequest(
+		query: string,
+		documents: string[],
+		topK: number,
+	): {
+		contents: Array<{
+			parts: Array<{ text: string }>;
+		}>;
+		generationConfig: {
+			responseMimeType: 'application/json';
+		};
+	} {
+		const candidates = documents.map((text, index) => ({
+			index,
+			text,
+		}));
+		return {
+			contents: [
+				{
+					parts: [
+						{
+							text: this.buildLlmRerankPrompt(query, candidates, topK),
+						},
+					],
+				},
+			],
+			generationConfig: {
+				responseMimeType: 'application/json',
+			},
+		};
+	}
+
+	private buildLlmRerankPrompt(
+		query: string,
+		candidates: Array<{ index: number; text: string }>,
+		topK: number,
+	): string {
+		const maxResults = Math.min(candidates.length, topK, LLM_RERANK_MAX_RESULTS);
+		return [
+			'Rerank search chunks. Return within 10s if possible.',
+			'Return JSON only: {"results":[{"index":0,"score":1,"start":0,"end":120}]}',
+			`Return at most ${maxResults} results.`,
+			'Use normalized score 0-1. Drop clearly weak chunks.',
+			'start/end are character offsets in the candidate text for a short original excerpt with useful context.',
+			'Do not process useless chunks.',
+			`Query: ${JSON.stringify(query)}`,
+			`Candidates: ${JSON.stringify(candidates)}`,
+		].join('\n');
 	}
 
 	private extractOpenAIRankedItems(json: {
@@ -327,7 +417,7 @@ export class HybridReranker {
 		output?: {
 			content?: Array<{ type?: string; text?: string }>;
 		} | Array<{ content?: Array<{ type?: string; text?: string }> }>;
-	}): Array<{ index: number; score: number }> {
+	}): Array<{ index: number; score: number; start?: number; end?: number }> {
 		const text =
 			typeof json.output_text === 'string'
 				? json.output_text
@@ -337,7 +427,12 @@ export class HybridReranker {
 		}
 		try {
 			const parsed = JSON.parse(text.trim()) as {
-				results?: Array<{ index?: unknown; score?: unknown }>;
+				results?: Array<{
+					index?: unknown;
+					score?: unknown;
+					start?: unknown;
+					end?: unknown;
+				}>;
 			};
 			const results = Array.isArray(parsed.results) ? parsed.results : [];
 			return results
@@ -347,6 +442,58 @@ export class HybridReranker {
 						typeof item.score === 'number' && Number.isFinite(item.score)
 							? item.score
 							: -fallbackRank,
+					start: typeof item.start === 'number' && Number.isFinite(item.start)
+						? item.start
+						: undefined,
+					end: typeof item.end === 'number' && Number.isFinite(item.end)
+						? item.end
+						: undefined,
+				}))
+				.filter((item) => Number.isInteger(item.index) && Number.isFinite(item.score))
+				.sort((a, b) => b.score - a.score);
+		} catch {
+			return [];
+		}
+	}
+
+	private extractGeminiRankedItems(json: {
+		candidates?: Array<{
+			content?: {
+				parts?: Array<{ text?: string }>;
+			};
+		}>;
+	}): Array<{ index: number; score: number; start?: number; end?: number }> {
+		const text = (json.candidates ?? [])
+			.flatMap((candidate) => candidate.content?.parts ?? [])
+			.map((part) => part.text)
+			.filter((value): value is string => Boolean(value))
+			.join('\n');
+		if (!text.trim()) {
+			return [];
+		}
+		try {
+			const parsed = JSON.parse(text.trim()) as {
+				results?: Array<{
+					index?: unknown;
+					score?: unknown;
+					start?: unknown;
+					end?: unknown;
+				}>;
+			};
+			const results = Array.isArray(parsed.results) ? parsed.results : [];
+			return results
+				.map((item, fallbackRank) => ({
+					index: typeof item.index === 'number' ? item.index : Number.NaN,
+					score:
+						typeof item.score === 'number' && Number.isFinite(item.score)
+							? item.score
+							: -fallbackRank,
+					start: typeof item.start === 'number' && Number.isFinite(item.start)
+						? item.start
+						: undefined,
+					end: typeof item.end === 'number' && Number.isFinite(item.end)
+						? item.end
+						: undefined,
 				}))
 				.filter((item) => Number.isInteger(item.index) && Number.isFinite(item.score))
 				.sort((a, b) => b.score - a.score);
@@ -379,7 +526,7 @@ export class HybridReranker {
 	}
 
 	private buildHttpError(
-		provider: 'qwen' | 'openai',
+		provider: RerankProvider,
 		status: number,
 		body: string,
 		retryAfterHeader?: string | null,
@@ -431,8 +578,12 @@ export class HybridReranker {
 	}
 }
 
-function getSearchRerankTokenKey(provider: 'qwen' | 'openai'): string {
-	return provider === 'openai'
-		? SEARCH_OPENAI_RERANK_TOKEN_KEY
-		: SEARCH_QWEN_RERANK_TOKEN_KEY;
+function getSearchRerankTokenKey(provider: RerankProvider): string {
+	if (provider === 'openai') {
+		return SEARCH_OPENAI_RERANK_TOKEN_KEY;
+	}
+	if (provider === 'gemini') {
+		return SEARCH_GEMINI_RERANK_TOKEN_KEY;
+	}
+	return SEARCH_QWEN_RERANK_TOKEN_KEY;
 }

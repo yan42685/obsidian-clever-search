@@ -1,5 +1,4 @@
 import { EventEnum } from "src/globals/enums";
-import type { OuterSetting } from "src/globals/plugin-setting";
 import {
 	EngineType,
 	FileItem,
@@ -20,16 +19,6 @@ import { getInstance } from "src/utils/my-lib";
 export type HybridFreshnessNoticeState = {
 	visible: boolean;
 	message: string;
-};
-
-type AutoHybridFallbackControllerOptions = {
-	searchService: SearchService;
-	setting: OuterSetting;
-	searchType: SearchType;
-	isHybrid: boolean;
-	getLatestRequestId: () => number;
-	getCurrentQueryText: () => string;
-	onResultApplied: (query: string, result: SearchResult) => Promise<void>;
 };
 
 type HybridFreshnessNoticeControllerOptions = {
@@ -95,92 +84,6 @@ export function createHiddenHybridFreshnessNoticeState(): HybridFreshnessNoticeS
 
 function createAbortedSearchResult(): SearchResult {
 	return new SearchResult("no result", []);
-}
-
-export class AutoHybridFallbackController {
-	private static readonly DEBOUNCE_MS = 500;
-
-	private readonly searchService: SearchService;
-	private readonly setting: OuterSetting;
-	private readonly searchType: SearchType;
-	private readonly isHybrid: boolean;
-	private readonly getLatestRequestId: () => number;
-	private readonly getCurrentQueryText: () => string;
-	private readonly onResultApplied: (
-		query: string,
-		result: SearchResult,
-	) => Promise<void>;
-
-	private timer: ReturnType<typeof setTimeout> | null = null;
-	private lastTriggeredAt = 0;
-
-	constructor(options: AutoHybridFallbackControllerOptions) {
-		this.searchService = options.searchService;
-		this.setting = options.setting;
-		this.searchType = options.searchType;
-		this.isHybrid = options.isHybrid;
-		this.getLatestRequestId = options.getLatestRequestId;
-		this.getCurrentQueryText = options.getCurrentQueryText;
-		this.onResultApplied = options.onResultApplied;
-	}
-
-	clear(): void {
-		if (this.timer) {
-			clearTimeout(this.timer);
-			this.timer = null;
-		}
-	}
-
-	schedule(query: string, requestId: number): void {
-		if (!this.shouldAutoShow(query)) {
-			this.clear();
-			return;
-		}
-
-		const now = Date.now();
-		if (
-			this.lastTriggeredAt === 0 ||
-			now - this.lastTriggeredAt >= AutoHybridFallbackController.DEBOUNCE_MS
-		) {
-			this.clear();
-			this.lastTriggeredAt = now;
-			void this.apply(query, requestId);
-			return;
-		}
-
-		this.clear();
-		this.timer = setTimeout(() => {
-			this.timer = null;
-			this.lastTriggeredAt = Date.now();
-			void this.apply(query, requestId);
-		}, AutoHybridFallbackController.DEBOUNCE_MS);
-	}
-
-	private shouldAutoShow(query: string): boolean {
-		return (
-			this.searchType === SearchType.IN_VAULT &&
-			!this.isHybrid &&
-			this.searchService.hybridEngine.isEnabled() &&
-			(this.setting.hybrid.autoShowResultsWhenLexicalEmpty ?? false) &&
-			query.trim().length >= 3
-		);
-	}
-
-	private async apply(query: string, requestId: number): Promise<void> {
-		let hybridResult = await this.searchService.searchInVaultHybrid(query, {
-			preserveHybridFailureResult: true,
-			noticeContext: "lexical_auto_fallback",
-		});
-		if (
-			requestId !== this.getLatestRequestId() ||
-			query !== this.getCurrentQueryText()
-		) {
-			return;
-		}
-
-		this.searchService.notifyHybridFallback(hybridResult);
-		await this.onResultApplied(query, hybridResult);
-	}
 }
 
 export class HybridQuerySessionController {

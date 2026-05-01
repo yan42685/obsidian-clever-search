@@ -221,6 +221,20 @@ export class HybridEmbeddingRecoveryManager {
     }
   }
 
+  markAllReadyForImmediateRetry(): HybridRecoveryEntry[] {
+    const changedEntries: HybridRecoveryEntry[] = [];
+    for (const entry of this.recoveryEntries.values()) {
+      if (entry.nextRetryAt !== null) {
+        entry.nextRetryAt = null;
+      }
+      changedEntries.push({ ...entry });
+    }
+    if (changedEntries.length > 0) {
+      this.onChanged();
+    }
+    return changedEntries;
+  }
+
   getNextRetryAt(): number | null {
     let nextRetryAt = Number.POSITIVE_INFINITY;
     for (const entry of this.recoveryEntries.values()) {

@@ -237,6 +237,40 @@ function escapeSnippetHtml(text: string): string {
     .replace(/'/g, "&#39;");
 }
 
+function applyRerankSnippetToDisplayCandidate(
+  candidate: HybridLexicalLaneDisplayCandidate,
+  start: number | undefined,
+  end: number | undefined,
+): HybridLexicalLaneDisplayCandidate {
+  if (
+    !Number.isFinite(start) ||
+    !Number.isFinite(end) ||
+    start == null ||
+    end == null
+  ) {
+    return candidate;
+  }
+  const bodyStart = Math.max(0, Math.floor(start));
+  const bodyEnd = Math.min(candidate.bodyText.length, Math.ceil(end));
+  if (bodyEnd <= bodyStart) {
+    return candidate;
+  }
+  const trimmedSnippet = candidate.bodyText.slice(bodyStart, bodyEnd).trim();
+  if (!trimmedSnippet) {
+    return candidate;
+  }
+  const headerPrefix = candidate.headerText ? `${candidate.headerText}\n\n` : "";
+  const snippetText = `${headerPrefix}${trimmedSnippet}`;
+  return {
+    ...candidate,
+    snippetText,
+    snippetHtml: `${escapeSnippetHtml(headerPrefix)}${escapeSnippetHtml(trimmedSnippet)}`,
+    bodyText: trimmedSnippet,
+    highlightRanges: [],
+    bodyHighlightRanges: [],
+  };
+}
+
 export class HybridEngine {
   private readonly db = getInstance(Database);
   private readonly setting = getInstance(OuterSetting);
@@ -271,7 +305,8 @@ export class HybridEngine {
   }
 
   private get indexEmbedBatchSize(): number {
-    return this.setting.hybrid.embeddingProvider === "openai"
+    return this.setting.hybrid.embeddingProvider === "openai" ||
+      this.setting.hybrid.embeddingProvider === "gemini"
       ? OPENAI_INDEX_EMBED_BATCH_SIZE
       : QWEN_INDEX_EMBED_BATCH_SIZE;
   }
@@ -822,7 +857,7 @@ export class HybridEngine {
       const rerankedCandidates = await this.rerankDisplayCandidates(
         prepared.query,
         rerankCandidates,
-        rerankCandidates.length,
+        topK,
         signal,
       );
       throwIfHybridQueryAborted(signal);
@@ -899,7 +934,7 @@ export class HybridEngine {
           return null;
         }
         return {
-          ...candidate,
+          ...applyRerankSnippetToDisplayCandidate(candidate, result.start, result.end),
           score: normalizeRerankDisplayScore(result.score),
         };
       })
@@ -907,16 +942,7 @@ export class HybridEngine {
         (candidate): candidate is HybridLexicalLaneDisplayCandidate =>
           candidate !== null,
       );
-    const usedIds = new Set(reranked.map((result) => result.id));
-    const remaining = candidates
-      .slice(0, rerankLimit)
-      .filter((_, index) => !usedIds.has(index))
-      .map((candidate) => ({ ...candidate, score: 0 }));
-    return [
-      ...rerankedHead,
-      ...remaining,
-      ...candidates.slice(rerankLimit),
-    ];
+    return rerankedHead;
   }
 
   private async recallDenseDisplayCandidates(

@@ -77,7 +77,6 @@ export default {
 	"hybridModal.connectivityMissingApiKey": "请先填写 API Key。",
 	"hybridModal.apiKeyNotice":
 		"这里显示的 token 以服务商接口返回的 usage 为准。请确认 API Key 已开通所选的 embedding 和 rerank 模型。",
-	"hybridModal.autoShowResultsWhenLexicalEmpty": "词法无结果时自动展示 hybrid",
 	"hybridModal.weeklyTokenLimit": "每周 token 限额",
 	"hybridModal.weeklyTokenLimit.desc":
 		"每周（周一至周日）最多允许消耗的 token 数量，设为 0 表示不限制。统计并非完全准确，以实际消耗为准。",
@@ -160,17 +159,6 @@ export default {
 	"hybridModal.thisWeekUsed": "本周",
 	"hybridModal.thisMonthUsed": "本月",
 	"hybridModal.totalUsed": "总计",
-	"hybridModal.autoShowResultsWhenLexicalEmpty.desc":
-		"当开启 hybrid 搜索且服务可用时，在普通库内搜索中，如果词法搜索结果为 0，且查询长度至少为 3，则自动展示 hybrid 结果。",
-	"hybridModal.autoFallbackFailed.title":
-		"词法结果为 0，且 hybrid 搜索也失败了。",
-	"hybridModal.autoFallbackFailed.possibleCauses": "可能原因：",
-	"hybridModal.autoFallbackFailed.cause.api":
-		"API Key、API 域名或模型权限不可用或无效。",
-	"hybridModal.autoFallbackFailed.cause.network":
-		"网络、供应商超时、限流或额度问题阻塞了语义链路。",
-	"hybridModal.autoFallbackFailed.cause.index":
-		"Hybrid 语义索引不可用、不完整，或仍在加载中。",
 	"files need to be indexed. Obsidian may freeze for a while":
 		"有文件需要建立索引，Obsidian 可能会暂时卡顿。",
 	"Omnisearch isn't installed": "未安装 Omnisearch。",
@@ -273,6 +261,10 @@ export default {
 	"hybridModal.deferredEmbeddingStatus.resumeState": "\u6062\u590d\u72b6\u6001",
 	"hybridModal.deferredEmbeddingStatus.readyState": "\u5df2\u5230\u671f\uff0c\u7b49\u5f85\u7d22\u5f15\u961f\u5217\u5904\u7406",
 	"hybridModal.deferredEmbeddingStatus.nextResume": "\u4e0b\u4e2a\u589e\u91cf Embedding \u7b49\u5f85\u65f6\u95f4",
+	"hybridModal.embeddingRetryNow": "\u7acb\u523b\u91cd\u8bd5",
+	"hybridModal.embeddingRetryNow.running": "\u6b63\u5728\u91cd\u8bd5...",
+	"hybridModal.embeddingRetryNow.queued": "\u5df2\u52a0\u5165 Embedding \u91cd\u8bd5\u961f\u5217",
+	"hybridModal.embeddingRetryNow.failed": "\u52a0\u5165 Embedding \u91cd\u8bd5\u961f\u5217\u5931\u8d25\u3002",
 	"hybridModal.failedEmbeddingReason.missing_api_key": "API Key \u4e0d\u5bf9",
 	"hybridModal.failedEmbeddingReason.weekly_token_limit": "\u8d85\u51fa\u672c\u5468 token \u9650\u989d",
 	"hybridModal.failedEmbeddingReason.quota_exhausted": "API Key \u4f59\u989d\u4e0d\u8db3",
@@ -286,8 +278,6 @@ export default {
 	"hybridModal.embeddingIncompleteFallback.title": "\u90e8\u5206\u6587\u4ef6\u7684 Embedding \u8fd8\u4e0d\u662f\u6700\u65b0\u3002",
 	"hybridModal.embeddingIncompleteFallback.desc": "\u8bf7\u5230 Hybrid \u8bbe\u7f6e\u9875\u67e5\u770b\u8be6\u60c5\u3002\u5f53\u524d\u5df2 fallback \u4e3a lexical \u641c\u7d22\u3002",
 	"hybridModal.enableHybridSearch": "\u542f\u7528\u6df7\u5408\u641c\u7d22",
-	"hybridModal.autoShowMixedSearchResults": "\u8bcd\u6cd5\u65e0\u7ed3\u679c\u65f6\u81ea\u52a8\u5c55\u793a\u6df7\u5408\u641c\u7d22\u7ed3\u679c",
-	"hybridModal.autoShowMixedSearchResults.desc": "\u5f53\u5f00\u542f\u6df7\u5408\u641c\u7d22\u4e14\u670d\u52a1\u53ef\u7528\u65f6\uff0c\u5982\u679c\u666e\u901a vault \u641c\u7d22\u4e2d lexical \u7ed3\u679c\u4e3a 0\uff0c\u4e14\u67e5\u8be2\u957f\u5ea6\u81f3\u5c11\u4e3a 3\uff0c\u5219\u81ea\u52a8\u5c55\u793a\u6df7\u5408\u641c\u7d22\u7ed3\u679c\u3002",
 	"hybridModal.freshnessNotice.titleUpdating": "Hybrid \u7d22\u5f15\u6b63\u5728\u540e\u53f0\u66f4\u65b0",
 	"hybridModal.freshnessNotice.titleRepair": "Hybrid \u7d22\u5f15\u6709\u6587\u4ef6\u5f85\u4fee\u590d",
 	"hybridModal.freshnessNotice.titleUpdatingAndRepair": "Hybrid \u7d22\u5f15\u6b63\u5728\u540e\u53f0\u66f4\u65b0\uff0c\u4e14\u6709\u6587\u4ef6\u5f85\u4fee\u590d",
@@ -337,8 +327,6 @@ export default {
 	"hybridModal.healthSummary.metric.stale": "\u672a\u540c\u6b65",
 	"hybridNotice.disabled":
 		"\u672a\u542f\u7528 Hybrid \u641c\u7d22\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical \u641c\u7d22\u3002",
-	"hybridNotice.autoFallbackToHybridFailedPrefix":
-		"Lexical \u65e0\u5339\u914d\uff0cfallback \u5230 Hybrid \u5931\u8d25\uff1a",
 	"hybridNotice.lexicalFallbackSuffix":
 		"\uff0c\u5f53\u524d\u7ed3\u679c\u5df2\u56de\u9000\u4e3a lexical fallback\u3002",
 	"hybridNotice.lexicalFallbackSwitchedSuffix":

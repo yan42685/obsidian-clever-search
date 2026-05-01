@@ -19,8 +19,11 @@ import { AsyncRateGate, retryAsync } from './runtime-control';
 
 const DEFAULT_DASHSCOPE_DOMAIN = 'dashscope.aliyuncs.com';
 const DEFAULT_OPENAI_DOMAIN = 'api.openai.com';
+const DEFAULT_GEMINI_DOMAIN = 'api.vectorengine.ai';
 const QWEN_EMBED_MODEL = 'text-embedding-v4';
 const OPENAI_EMBED_MODEL = 'text-embedding-3-large';
+const GEMINI_EMBED_MODEL = 'gemini-embedding-2-preview';
+const GEMINI_RERANK_MODEL = 'gemini-3.1-flash-lite-preview';
 const CACHE_MAX = 50;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
 const REQUEST_TIMEOUT_MS = 45_000;
@@ -66,6 +69,13 @@ export const EMBEDDING_PROVIDER_SPECS: Record<HybridEmbeddingProvider, Embedding
 		rerankModel: 'gpt-5.4-nano',
 		defaultDomain: DEFAULT_OPENAI_DOMAIN,
 	},
+	gemini: {
+		id: 'gemini',
+		label: 'Gemini embedding-2-preview + Gemini 3.1 Flash Lite Preview',
+		embeddingModel: GEMINI_EMBED_MODEL,
+		rerankModel: GEMINI_RERANK_MODEL,
+		defaultDomain: DEFAULT_GEMINI_DOMAIN,
+	},
 };
 
 export { NoApiKeyError, WeeklyTokenLimitExceededError } from './provider-error';
@@ -79,10 +89,15 @@ export class HybridDisabledError extends Error {
 
 type ProviderEmbeddingResponse = {
 	data?: Array<{ index?: number; embedding?: number[] }>;
+	embeddings?: Array<{ values?: number[] }>;
 	usage?: {
 		total_tokens?: number;
 		input_tokens?: number;
 		prompt_tokens?: number;
+	};
+	usageMetadata?: {
+		promptTokenCount?: number;
+		totalTokenCount?: number;
 	};
 };
 
@@ -159,6 +174,14 @@ export function getEmbeddingRequestProfile(
 	provider: unknown,
 ): EmbeddingRequestProfile {
 	const normalizedProvider = normalizeEmbeddingProvider(provider);
+	if (normalizedProvider === 'gemini') {
+		return {
+			maxBatchSize: 100,
+			minSpacingMs: 0,
+			flushDelayMs: 300,
+			concurrency: 1,
+		};
+	}
 	if (normalizedProvider === 'openai') {
 		return {
 			maxBatchSize: 100,
@@ -693,9 +716,11 @@ export class Embedder {
 						json.usage?.total_tokens ??
 						json.usage?.input_tokens ??
 						json.usage?.prompt_tokens ??
+						json.usageMetadata?.totalTokenCount ??
+						json.usageMetadata?.promptTokenCount ??
 						0;
 					return {
-						embeddings: this.validateEmbeddingResponse(texts, json),
+						embeddings: this.validateEmbeddingResponse(texts, json, provider),
 						tokensUsed,
 					};
 				} finally {
@@ -729,7 +754,21 @@ export class Embedder {
 	private validateEmbeddingResponse(
 		texts: string[],
 		json: ProviderEmbeddingResponse,
+		provider: HybridEmbeddingProvider,
 	): number[][] {
+		if (provider === 'gemini') {
+			if (!Array.isArray(json.embeddings)) {
+				throw new Error('Embedding response missing embeddings array');
+			}
+			if (json.embeddings.length !== texts.length) {
+				throw new Error(
+					`Embedding response count mismatch: expected ${texts.length}, received ${json.embeddings.length}`,
+				);
+			}
+			return json.embeddings.map((embedding, index) =>
+				validateEmbeddingVector(embedding?.values, index),
+			);
+		}
 		if (!Array.isArray(json.data)) {
 			throw new Error('Embedding response missing data array');
 		}
@@ -757,23 +796,7 @@ export class Embedder {
 			}
 			seenIndexes.add(index);
 
-			const embedding = item?.embedding;
-			if (!Array.isArray(embedding)) {
-				throw new Error(`Embedding response missing embedding array at index ${index}`);
-			}
-			if (embedding.length !== EMBED_DIM) {
-				throw new Error(
-					`Embedding response dimension mismatch at index ${index}: expected ${EMBED_DIM}, received ${embedding.length}`,
-				);
-			}
-			for (let valueIndex = 0; valueIndex < embedding.length; valueIndex++) {
-				if (!Number.isFinite(embedding[valueIndex])) {
-					throw new Error(
-						`Embedding response contains non-finite value at index ${index}, offset ${valueIndex}`,
-					);
-				}
-			}
-			embeddings[index] = embedding;
+			embeddings[index] = validateEmbeddingVector(item?.embedding, index);
 		}
 
 		for (let index = 0; index < embeddings.length; index++) {
@@ -1099,7 +1122,10 @@ async function getTotalTokensStrict(fromDate: string, toDate: string): Promise<n
 export function normalizeEmbeddingProvider(
 	provider: unknown,
 ): HybridEmbeddingProvider {
-	return provider === 'openai' ? 'openai' : 'qwen';
+	if (provider === 'openai' || provider === 'gemini') {
+		return provider;
+	}
+	return 'qwen';
 }
 
 export function getEmbeddingProviderSpec(
@@ -1152,8 +1178,12 @@ export function buildEmbeddingApiUrl(
 	domain: string | undefined,
 ): string {
 	const normalizedProvider = normalizeEmbeddingProvider(provider);
+	if (normalizedProvider === 'gemini') {
+		const host = normalizeProviderApiDomain(normalizedProvider, domain);
+		return `https://${host}/v1beta/models/${GEMINI_EMBED_MODEL}:batchEmbedContents`;
+	}
 	if (normalizedProvider === 'openai') {
-		const host = normalizeProviderApiDomain('openai', domain);
+		const host = normalizeProviderApiDomain(normalizedProvider, domain);
 		return `https://${host}/v1/embeddings`;
 	}
 	return buildDashScopeApiUrl(domain, 'embedding');
@@ -1169,8 +1199,12 @@ export function buildProviderApiUrl(
 		return buildEmbeddingApiUrl(normalizedProvider, domain);
 	}
 	if (normalizedProvider === 'openai') {
-		const host = normalizeProviderApiDomain('openai', domain);
+		const host = normalizeProviderApiDomain(normalizedProvider, domain);
 		return `https://${host}/v1/responses`;
+	}
+	if (normalizedProvider === 'gemini') {
+		const host = normalizeProviderApiDomain(normalizedProvider, domain);
+		return `https://${host}/v1beta/models/${GEMINI_RERANK_MODEL}:generateContent`;
 	}
 	return buildDashScopeApiUrl(domain, 'rerank');
 }
@@ -1178,18 +1212,61 @@ export function buildProviderApiUrl(
 export function buildEmbeddingRequestBody(
 	provider: unknown,
 	texts: string[],
-): {
-	model: string;
-	input: string[];
-	dimensions: number;
-	encoding_format: 'float';
-} {
+):
+	| {
+		model: string;
+		input: string[];
+		dimensions: number;
+		encoding_format: 'float';
+	}
+	| {
+		requests: Array<{
+			model: string;
+			content: {
+				parts: Array<{ text: string }>;
+			};
+			outputDimensionality: number;
+		}>;
+	} {
+	if (normalizeEmbeddingProvider(provider) === 'gemini') {
+		return {
+			requests: texts.map((text) => ({
+				model: `models/${GEMINI_EMBED_MODEL}`,
+				content: {
+					parts: [{ text }],
+				},
+				outputDimensionality: EMBED_DIM,
+			})),
+		};
+	}
 	return {
 		model: getEmbeddingProviderSpec(provider).embeddingModel,
 		input: texts,
 		dimensions: EMBED_DIM,
 		encoding_format: 'float',
 	};
+}
+
+function validateEmbeddingVector(
+	embedding: number[] | undefined,
+	index: number,
+): number[] {
+	if (!Array.isArray(embedding)) {
+		throw new Error(`Embedding response missing embedding array at index ${index}`);
+	}
+	if (embedding.length !== EMBED_DIM) {
+		throw new Error(
+			`Embedding response dimension mismatch at index ${index}: expected ${EMBED_DIM}, received ${embedding.length}`,
+		);
+	}
+	for (let valueIndex = 0; valueIndex < embedding.length; valueIndex++) {
+		if (!Number.isFinite(embedding[valueIndex])) {
+			throw new Error(
+				`Embedding response contains non-finite value at index ${index}, offset ${valueIndex}`,
+			);
+		}
+	}
+	return embedding;
 }
 
 function parseEmbeddingJsonResponse(params: Readonly<{

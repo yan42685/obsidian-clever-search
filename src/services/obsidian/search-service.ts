@@ -180,13 +180,6 @@ export class SearchService {
 		key: SearchResult["hybridFallbackNoticeKey"];
 		message: string | null;
 	} {
-		if (result.hybridNoticeContext === "lexical_auto_fallback") {
-			return {
-				key: null,
-				message: this.buildAutoHybridFailureMessage(result),
-			};
-		}
-
 		const directMessage = this.buildStandardHybridFallbackMessage(result);
 		if (directMessage) {
 			return {
@@ -199,14 +192,6 @@ export class SearchService {
 			key: null,
 			message: null,
 		};
-	}
-
-	private buildAutoHybridFailureMessage(result: SearchResult): string | null {
-		const reason = this.getHybridFailureReasonText(result);
-		if (!reason) {
-			return null;
-		}
-		return `${t("hybridNotice.autoFallbackToHybridFailedPrefix")} ${reason}`;
 	}
 
 	private buildStandardHybridFallbackMessage(result: SearchResult): string | null {

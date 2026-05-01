@@ -566,28 +566,6 @@ describe("SearchService hybrid rerank fallback behavior", () => {
 		]);
 	});
 
-	test("composes an auto-hybrid failure notice from lexical-empty context and the underlying reason", () => {
-		const { service } = createHarness();
-		const { SearchResult } = require("src/globals/search-types");
-		const result = new SearchResult(
-			"notes/current.md",
-			[],
-			"hybridNotice.searchFallbackToLexical",
-			null,
-			[],
-			"fallback_failed",
-			"missing_api_key",
-			null,
-			"lexical_auto_fallback",
-		);
-
-		service.notifyHybridFallback(result);
-
-		expect(mockNotices.map((entry) => entry.message)).toEqual([
-			"hybridNotice.autoFallbackToHybridFailedPrefix hybridReason.missingApiKey",
-		]);
-	});
-
 	test("dedupes identical fallback notices across staged updates", () => {
 		const { service } = createHarness();
 		const { SearchResult } = require("src/globals/search-types");

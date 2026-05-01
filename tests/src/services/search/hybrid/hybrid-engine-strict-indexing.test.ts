@@ -51,7 +51,7 @@ jest.mock("src/utils/logger", () => ({
 import { HybridEngine } from "src/services/search/hybrid/hybrid-engine";
 
 describe("HybridEngine strict indexing", () => {
-  function createEngineWithProvider(provider?: "qwen" | "openai") {
+  function createEngineWithProvider(provider?: "qwen" | "openai" | "gemini") {
     const engine = Object.create(HybridEngine.prototype) as any;
     engine.setting = {
       hybrid: {
@@ -112,6 +112,7 @@ describe("HybridEngine strict indexing", () => {
   test("uses provider-aware indexing embedding batch sizes", () => {
     expect(createEngineWithProvider("qwen").indexEmbedBatchSize).toBe(10);
     expect(createEngineWithProvider("openai").indexEmbedBatchSize).toBe(100);
+    expect(createEngineWithProvider("gemini").indexEmbedBatchSize).toBe(100);
   });
 
   test("indexFileStrict rejects embedding failures instead of committing lexical-only success", async () => {

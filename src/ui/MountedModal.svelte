@@ -25,7 +25,6 @@
 		shouldLogCoverageLexicalV3Debug,
 	} from "src/services/search/coverage-lexical-v3/debug";
 	import {
-		AutoHybridFallbackController,
 		createHiddenHybridFreshnessNoticeState,
 		getMountedModalFileItemScore,
 		HybridFreshnessNoticeController,
@@ -62,35 +61,10 @@
 		| "initial_mount"
 		| "input"
 		| "cache_hit"
-		| "hybrid_result_apply"
-		| "auto_hybrid_result_apply" = "initial_mount";
+		| "hybrid_result_apply" = "initial_mount";
 	let historyInputRef: any;
 	let hybridFreshnessNotice: HybridFreshnessNoticeState =
 		createHiddenHybridFreshnessNoticeState();
-
-	function shouldCacheAutoHybridFallbackResult(result: SearchResult): boolean {
-		return result.hybridSearchOutcome === "success" && result.items.length > 0;
-	}
-
-	const autoHybridFallback = new AutoHybridFallbackController({
-		searchService,
-		setting,
-		searchType,
-		isHybrid,
-		getLatestRequestId: () => latestSearchRequestId,
-		getCurrentQueryText: () => queryText,
-		onResultApplied: async (query, result) => {
-			latestSearchTrigger = "auto_hybrid_result_apply";
-			searchResult = result;
-			if (shouldCacheAutoHybridFallbackResult(result)) {
-				cachedResult.set(query, result);
-			} else {
-				cachedResult.delete(query);
-			}
-			hybridFreshnessNoticeController.syncFromResult(result);
-			await updateItemAsync(0);
-		},
-	});
 
 	const hybridFreshnessNoticeController = new HybridFreshnessNoticeController({
 		getSearchType: () => searchType,
@@ -287,16 +261,6 @@
 					},
 				});
 			}
-			if (
-				searchType === SearchType.IN_VAULT &&
-				!isHybrid &&
-				searchResult.items.length === 0 &&
-				!hasHybridEmbeddingIncomplete(searchResult)
-			) {
-				autoHybridFallback.schedule(currentQueryText, requestId);
-			} else {
-				autoHybridFallback.clear();
-			}
 			return;
 		}
 
@@ -356,16 +320,6 @@
 			});
 		}
 
-		if (
-			searchType === SearchType.IN_VAULT &&
-			!isHybrid &&
-			nextResult.items.length === 0 &&
-			!hasHybridEmbeddingIncomplete(nextResult)
-		) {
-			autoHybridFallback.schedule(currentQueryText, requestId);
-		} else {
-			autoHybridFallback.clear();
-		}
 	}
 
 	function handleInput() {
@@ -545,7 +499,6 @@
 
 	// ===================================================
 	onDestroy(() => {
-		autoHybridFallback.clear();
 		hybridQuerySessionController.clear();
 		hybridFreshnessNoticeController.clear();
 		logger.trace("mounted element has been destroyed.");

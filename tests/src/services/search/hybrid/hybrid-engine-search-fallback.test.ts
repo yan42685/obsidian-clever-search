@@ -127,6 +127,12 @@ describe("HybridEngine search fallback notices", () => {
 					previewContent: "a",
 					nativeSubItemsReady: true,
 					score: 10,
+					snippetText: "File: a\n\nalpha first useful sentence. trailing unrelated text.",
+					snippetHtml: "File: a\n\nalpha first useful sentence. trailing unrelated text.",
+					headerText: "File: a",
+					bodyText: "alpha first useful sentence. trailing unrelated text.",
+					highlightRanges: [],
+					bodyHighlightRanges: [],
 				},
 				{
 					filePath: "notes/b.md",
@@ -136,6 +142,12 @@ describe("HybridEngine search fallback notices", () => {
 					previewContent: "b",
 					nativeSubItemsReady: true,
 					score: 8,
+					snippetText: "File: b\n\nprefix noise. alpha second useful sentence. suffix noise.",
+					snippetHtml: "File: b\n\nprefix noise. alpha second useful sentence. suffix noise.",
+					headerText: "File: b",
+					bodyText: "prefix noise. alpha second useful sentence. suffix noise.",
+					highlightRanges: [],
+					bodyHighlightRanges: [],
 				},
 			],
 			fallbackNoticeKey,
@@ -277,6 +289,117 @@ describe("HybridEngine search fallback notices", () => {
 			"notes/a.md",
 		]);
 		expect(reranked.map((candidate: any) => candidate.score)).toEqual([1, 0.25]);
+	});
+
+	test("rerankDisplayCandidates applies returned offset window to displayed snippet", async () => {
+		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
+		const engine = new HybridEngine() as any;
+		engine.reranker = {
+			rerank: jest.fn(async () => [
+				{ id: 1, score: 0.92, start: 14, end: 43 },
+			]),
+		};
+
+		const reranked = await engine.rerankDisplayCandidates(
+			"alpha",
+			createPreparedRecall().displayCandidates,
+			2,
+		);
+
+		expect(reranked).toHaveLength(1);
+		expect(reranked[0].filePath).toBe("notes/b.md");
+		expect(reranked[0].bodyText).toBe("alpha second useful sentence.");
+		expect(reranked[0].snippetText).toBe(
+			"File: b\n\nalpha second useful sentence.",
+		);
+		expect(reranked[0].snippetHtml).toBe(
+			"File: b\n\nalpha second useful sentence.",
+		);
+		expect(reranked[0].score).toBe(0.92);
+	});
+
+	test("rerankDisplayCandidates does not re-add candidates omitted by rerank", async () => {
+		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
+		const engine = new HybridEngine() as any;
+		engine.reranker = {
+			rerank: jest.fn(async () => [{ id: 0, score: 0.95 }]),
+		};
+
+		const reranked = await engine.rerankDisplayCandidates(
+			"alpha",
+			createPreparedRecall().displayCandidates,
+			2,
+		);
+
+		expect(reranked.map((candidate: any) => candidate.filePath)).toEqual([
+			"notes/a.md",
+		]);
+		expect(reranked.map((candidate: any) => candidate.score)).toEqual([0.95]);
+	});
+
+	test("Gemini provider finalizes with lexical and dense candidates through rerank", async () => {
+		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
+		const engine = new HybridEngine() as any;
+		const outerSetting = mockInstanceMap.get(require("src/globals/plugin-setting").OuterSetting);
+		outerSetting.hybrid.embeddingProvider = "gemini";
+		const prepared = createPreparedRecall();
+		engine.recallDenseDisplayCandidates = jest.fn().mockResolvedValue([
+			{
+				filePath: "notes/dense.md",
+				score: 0.81,
+			},
+		]);
+		engine.rerankDisplayCandidates = jest.fn(async (_query, candidates) => [
+			candidates[2],
+			candidates[0],
+		]);
+
+		const finalized = await engine.finalizePreparedRecall(prepared, 10);
+
+		expect(engine.recallDenseDisplayCandidates).toHaveBeenCalledWith(
+			"alpha",
+			prepared.displayCandidates.slice(0, 6),
+			14,
+			undefined,
+		);
+		expect(engine.rerankDisplayCandidates).toHaveBeenCalledWith(
+			"alpha",
+			[
+				...prepared.displayCandidates.slice(0, 6),
+				{ filePath: "notes/dense.md", score: 0.81 },
+			],
+			10,
+			undefined,
+		);
+		expect(finalized.items.map((item: any) => item.id)).toEqual([
+			"notes/dense.md:0",
+			"notes/a.md:1",
+		]);
+		expect(finalized.fallbackToLexicalSearch).toBe(false);
+	});
+
+	test("Gemini provider prepares lexical lane candidates", async () => {
+		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
+		const lexicalLane = require("src/services/search/hybrid/lexical-lane");
+		const engine = new HybridEngine() as any;
+		const outerSetting = mockInstanceMap.get(require("src/globals/plugin-setting").OuterSetting);
+		outerSetting.hybrid.embeddingProvider = "gemini";
+		engine._ready = true;
+		lexicalLane.buildHybridLexicalLaneFileShortlist.mockResolvedValue([
+			{ path: "notes/a.md" },
+		]);
+		lexicalLane.prepareHybridLexicalLaneSearch.mockResolvedValue([
+			{ filePath: "notes/a.md", score: 0.5 },
+		]);
+
+		const prepared = await engine.prepareRecall("alpha", 10);
+
+		expect(prepared.displayCandidates).toEqual([
+			{ filePath: "notes/a.md", score: 0.5 },
+		]);
+		expect(prepared.fallbackToLexicalSearch).toBe(false);
+		expect(lexicalLane.buildHybridLexicalLaneFileShortlist).toHaveBeenCalled();
+		expect(lexicalLane.prepareHybridLexicalLaneSearch).toHaveBeenCalled();
 	});
 
 	test("dense display candidates preserve snapshot generation and source", () => {

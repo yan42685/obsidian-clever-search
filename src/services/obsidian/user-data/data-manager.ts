@@ -1100,6 +1100,15 @@ export class DataManager {
     await this.hybridRecoveryCoordinator.retryFailuresOnConfigChange(reason);
   }
 
+  async retryAllPendingHybridEmbeddingsNow(
+    reason = "manual-retry-now",
+  ): Promise<number> {
+    const enqueued = await this.hybridRecoveryCoordinator.retryAllNow(reason);
+    this.scheduleHybridRepairFlush();
+    this.notifyHybridRuntimeStatusChanged();
+    return enqueued;
+  }
+
   refreshFailedEmbeddingRetrySchedule(): void {
     this.hybridRecoveryCoordinator.refreshRetrySchedule();
   }
@@ -4296,7 +4305,10 @@ export class DataManager {
       1,
       Math.round(this.setting.hybrid.indexConcurrency ?? 3),
     );
-    if (this.setting.hybrid.embeddingProvider === "openai") {
+    if (
+      this.setting.hybrid.embeddingProvider === "openai" ||
+      this.setting.hybrid.embeddingProvider === "gemini"
+    ) {
       return {
         maxFiles: Math.min(
           DataManager.HYBRID_OPENAI_INDEX_CONCURRENCY_MAX,

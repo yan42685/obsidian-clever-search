@@ -56,7 +56,6 @@ export const DEFAULT_OUTER_SETTING: OuterSetting = {
 	enableStopWordsZh: isChineseUser ? true : false,
 	hybrid: {
 		enabled: false,
-		autoShowResultsWhenLexicalEmpty: true,
 		autoTriggerOnInput: true,
 		autoTriggerDebounceMs: 400,
 		embeddingProvider: "qwen",
@@ -149,7 +148,6 @@ export function toLegacyWeakFilePruneMode(
 }
 export type HybridSetting = {
 	enabled: boolean;
-	autoShowResultsWhenLexicalEmpty: boolean;
 	autoTriggerOnInput: boolean;
 	autoTriggerDebounceMs: number;
 	embeddingProvider: HybridEmbeddingProvider;
@@ -168,7 +166,7 @@ export type ReleaseAnnouncementSetting = {
 	seenVersions: string[];
 };
 
-export type HybridEmbeddingProvider = "qwen" | "openai";
+export type HybridEmbeddingProvider = "qwen" | "openai" | "gemini";
 
 export type HybridVectorCompression = "int8" | "float16";
 

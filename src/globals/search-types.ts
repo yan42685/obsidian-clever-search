@@ -107,9 +107,7 @@ export type HybridSearchIssueKind =
   | "network"
   | "unknown";
 
-export type HybridNoticeContext =
-  | "default"
-  | "lexical_auto_fallback";
+export type HybridNoticeContext = "default";
 
 export type FileItemFreshnessState =
   | "fresh"

@@ -29,23 +29,39 @@ jest.mock("src/services/search/hybrid/embedder", () => ({
 	buildProviderApiUrl: jest.fn((provider: string) =>
 		provider === "openai"
 			? "https://api.openai.com/v1/responses"
+			: provider === "gemini"
+				? "https://api.vectorengine.ai/v1beta/models/gemini-3.1-flash-lite-preview:generateContent"
 			: "https://example.com/rerank",
 	),
 	getEmbeddingProviderSpec: jest.fn((provider: string) => ({
-		id: provider === "openai" ? "openai" : "qwen",
+		id: provider === "openai" ? "openai" : provider === "gemini" ? "gemini" : "qwen",
 		label:
 			provider === "openai"
 				? "OpenAI text-embedding-3-large"
+				: provider === "gemini"
+					? "Gemini embedding-2-preview + Gemini 3.1 Flash Lite Preview"
 				: "Qwen text-embedding-v4",
 		embeddingModel:
 			provider === "openai"
 				? "text-embedding-3-large"
+				: provider === "gemini"
+					? "gemini-embedding-2-preview"
 				: "text-embedding-v4",
-		rerankModel: provider === "openai" ? "gpt-5.4-nano" : "qwen3-rerank",
-		defaultDomain: provider === "openai" ? "api.openai.com" : "dashscope.aliyuncs.com",
+		rerankModel:
+			provider === "openai"
+				? "gpt-5.4-nano"
+				: provider === "gemini"
+					? "gemini-3.1-flash-lite-preview"
+					: "qwen3-rerank",
+		defaultDomain:
+			provider === "openai"
+				? "api.openai.com"
+				: provider === "gemini"
+					? "api.vectorengine.ai"
+					: "dashscope.aliyuncs.com",
 	})),
 	normalizeEmbeddingProvider: jest.fn((provider: string) =>
-		provider === "openai" ? "openai" : "qwen",
+		provider === "openai" || provider === "gemini" ? provider : "qwen",
 	),
 	NoApiKeyError: class NoApiKeyError extends Error {
 		constructor() {
@@ -254,8 +270,8 @@ describe("HybridReranker", () => {
 			json: jest.fn().mockResolvedValue({
 				output_text: JSON.stringify({
 					results: [
-						{ index: 1, score: 0.99 },
-						{ index: 0, score: 0.5 },
+						{ index: 1, score: 0.99, start: 5, end: 19 },
+						{ index: 0, score: 0.5, start: 0, end: 9 },
 					],
 				}),
 				usage: { total_tokens: 12 },
@@ -290,8 +306,8 @@ describe("HybridReranker", () => {
 				2,
 			),
 		).resolves.toEqual([
-			{ id: 2, score: 0.99 },
-			{ id: 1, score: 0.5 },
+			{ id: 2, score: 0.99, start: 5, end: 19 },
+			{ id: 1, score: 0.5, start: 0, end: 9 },
 		]);
 		const [, init] = (global as any).fetch.mock.calls[0];
 		expect(JSON.parse(init.body)).toMatchObject({
@@ -299,12 +315,233 @@ describe("HybridReranker", () => {
 			text: { format: { type: "json_object" } },
 		});
 		expect(JSON.parse(init.body).input).toContain(
-			"Prioritize response speed as long as relevance quality is barely acceptable.",
+			"Return within 10s if possible.",
+		);
+		expect(JSON.parse(init.body).input).toContain(
+			'"start":0,"end":120',
+		);
+		expect(JSON.parse(init.body).input).toContain(
+			"start/end are character offsets in the candidate text",
 		);
 		expect(mockRecordTokenUsage).toHaveBeenCalledWith(
 			"[search] gpt-5.4-nano",
 			12,
 		);
+	});
+
+	test("uses Gemini generateContent rerank with Gemini flash lite preview", async () => {
+		const { HybridReranker } = require("src/services/search/hybrid/reranker");
+		mockInstanceMap.set(require("src/globals/plugin-setting").OuterSetting, {
+			hybrid: {
+				apiKey: "test-key",
+				apiDomain: "api.vectorengine.ai",
+				embeddingProvider: "gemini",
+			},
+		});
+		(global as any).fetch = jest.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			headers: {
+				get: jest.fn(() => null),
+			},
+			json: jest.fn().mockResolvedValue({
+				candidates: [
+					{
+						content: {
+							parts: [
+								{
+									text: JSON.stringify({
+										results: [
+											{ index: 1, score: 0.96, start: 7, end: 25 },
+											{ index: 0, score: 0.42, start: 0, end: 10 },
+										],
+									}),
+								},
+							],
+						},
+					},
+				],
+				usageMetadata: { totalTokenCount: 18 },
+			}),
+		});
+
+		const reranker = new HybridReranker();
+
+		await expect(
+			reranker.rerank(
+				"alpha",
+				[
+					{
+						id: 1,
+						filePath: "notes/a.md",
+						text: "some alpha context",
+						startLine: 0,
+						startCol: 0,
+						endLine: 0,
+						recallScore: 0.8,
+					},
+					{
+						id: 2,
+						filePath: "notes/b.md",
+						text: "strong alpha answer with surrounding context",
+						startLine: 0,
+						startCol: 0,
+						endLine: 0,
+						recallScore: 0.7,
+					},
+				],
+				2,
+			),
+		).resolves.toEqual([
+			{ id: 2, score: 0.96, start: 7, end: 25 },
+			{ id: 1, score: 0.42, start: 0, end: 10 },
+		]);
+		const [url, init] = (global as any).fetch.mock.calls[0];
+		expect(url).toBe(
+			"https://api.vectorengine.ai/v1beta/models/gemini-3.1-flash-lite-preview:generateContent",
+		);
+		const body = JSON.parse(init.body);
+		expect(body.generationConfig).toEqual({
+			responseMimeType: "application/json",
+		});
+		expect(body.contents[0].parts[0].text).toContain(
+			"Return within 10s if possible.",
+		);
+		expect(body.contents[0].parts[0].text).toContain(
+			'"start":0,"end":120',
+		);
+		expect(body.contents[0].parts[0].text).toContain(
+			"start/end are character offsets in the candidate text",
+		);
+		expect(mockRecordTokenUsage).toHaveBeenCalledWith(
+			"[search] gemini-3.1-flash-lite-preview",
+			18,
+		);
+	});
+
+	test("filters rerank items far below the top score", async () => {
+		const { HybridReranker } = require("src/services/search/hybrid/reranker");
+		mockInstanceMap.set(require("src/globals/plugin-setting").OuterSetting, {
+			hybrid: {
+				apiKey: "test-key",
+				apiDomain: "api.vectorengine.ai",
+				embeddingProvider: "gemini",
+			},
+		});
+		(global as any).fetch = jest.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			headers: {
+				get: jest.fn(() => null),
+			},
+			json: jest.fn().mockResolvedValue({
+				candidates: [
+					{
+						content: {
+							parts: [
+								{
+									text: JSON.stringify({
+										results: [
+											{ index: 0, score: 0.95 },
+											{ index: 1, score: 0 },
+											{ index: 2, score: 0.2 },
+										],
+									}),
+								},
+							],
+						},
+					},
+				],
+			}),
+		});
+
+		const reranker = new HybridReranker();
+
+		await expect(
+			reranker.rerank(
+				"alpha",
+				[
+					{
+						id: 1,
+						filePath: "notes/a.md",
+						text: "best alpha",
+						startLine: 0,
+						startCol: 0,
+						endLine: 0,
+						recallScore: 0.9,
+					},
+					{
+						id: 2,
+						filePath: "notes/b.md",
+						text: "weak",
+						startLine: 0,
+						startCol: 0,
+						endLine: 0,
+						recallScore: 0.8,
+					},
+					{
+						id: 3,
+						filePath: "notes/c.md",
+						text: "also weak",
+						startLine: 0,
+						startCol: 0,
+						endLine: 0,
+						recallScore: 0.7,
+					},
+				],
+				3,
+			),
+		).resolves.toEqual([{ id: 1, score: 0.95 }]);
+	});
+
+	test("caps LLM rerank results at three even when provider returns more", async () => {
+		const { HybridReranker } = require("src/services/search/hybrid/reranker");
+		mockInstanceMap.set(require("src/globals/plugin-setting").OuterSetting, {
+			hybrid: {
+				apiKey: "test-key",
+				apiDomain: "api.openai.com",
+				embeddingProvider: "openai",
+			},
+		});
+		(global as any).fetch = jest.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			headers: {
+				get: jest.fn(() => null),
+			},
+			json: jest.fn().mockResolvedValue({
+				output_text: JSON.stringify({
+					results: [
+						{ index: 0, score: 1 },
+						{ index: 1, score: 0.9 },
+						{ index: 2, score: 0.8 },
+						{ index: 3, score: 0.7 },
+					],
+				}),
+			}),
+		});
+
+		const reranker = new HybridReranker();
+
+		await expect(
+			reranker.rerank(
+				"alpha",
+				[0, 1, 2, 3].map((id) => ({
+					id,
+					filePath: `notes/${id}.md`,
+					text: `alpha ${id}`,
+					startLine: 0,
+					startCol: 0,
+					endLine: 0,
+					recallScore: 1,
+				})),
+				10,
+			),
+		).resolves.toEqual([
+			{ id: 0, score: 1, start: undefined, end: undefined },
+			{ id: 1, score: 0.9, start: undefined, end: undefined },
+			{ id: 2, score: 0.8, start: undefined, end: undefined },
+		]);
 	});
 
 	test("throws when rerank is requested without an API key", async () => {

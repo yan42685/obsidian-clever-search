@@ -145,6 +145,29 @@ export class HybridRecoveryCoordinator {
     this.scheduleRetry();
   }
 
+  async retryAllNow(reason = "manual-retry-now"): Promise<number> {
+    this.clearRetryTimer();
+    const entries = this.recoveryManager.markAllReadyForImmediateRetry();
+    let enqueued = 0;
+    for (const entry of entries) {
+      if (!this.options.canRetryPath(entry.path)) {
+        await this.clearPath(entry.path);
+        continue;
+      }
+      this.options.enqueueRepair({
+        path: entry.path,
+        mode: entry.mode,
+        reason,
+        eligibleAt: Date.now(),
+        sourceGeneration: entry.targetGeneration,
+      });
+      enqueued += 1;
+    }
+    await this.persistAllEntries();
+    this.scheduleRetry();
+    return enqueued;
+  }
+
   async clearPath(path: string): Promise<void> {
     this.recoveryManager.clearPath(path);
     this.scheduleRetry();

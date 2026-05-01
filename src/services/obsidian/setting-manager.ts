@@ -981,7 +981,7 @@ class HybridSearchModal extends Modal {
 	private statsEl: HTMLElement;
 	private openedApiDomain = "";
 	private openedApiKey = "";
-	private openedEmbeddingProvider: "qwen" | "openai" = "qwen";
+	private openedEmbeddingProvider: "qwen" | "openai" | "gemini" = "qwen";
 	private currentFailedEmbeddingSummary: HybridFailedEmbeddingSummary | null = null;
 	private currentDeferredEmbeddingSummary: HybridDeferredEmbeddingSummary | null = null;
 	private failedEmbeddingStatusTimer: number | null = null;
@@ -1034,21 +1034,6 @@ class HybridSearchModal extends Modal {
 					}),
 			);
 
-		// API Domain
-		new Setting(contentEl)
-			.setName(t("hybridModal.autoShowMixedSearchResults"))
-			.setDesc(t("hybridModal.autoShowMixedSearchResults.desc"))
-			.addToggle((toggle) =>
-				toggle
-					.setValue(
-						this.setting.hybrid.autoShowResultsWhenLexicalEmpty ?? false,
-					)
-					.onChange((value) => {
-						this.setting.hybrid.autoShowResultsWhenLexicalEmpty = value;
-						this.settingManager.saveSettings();
-					}),
-			);
-
 		new Setting(contentEl)
 			.setName(t("hybridModal.embeddingModel"))
 			.setDesc(this.createEmbeddingModelDescription())
@@ -1057,6 +1042,7 @@ class HybridSearchModal extends Modal {
 					.addOptions({
 						qwen: EMBEDDING_PROVIDER_SPECS.qwen.label,
 						openai: EMBEDDING_PROVIDER_SPECS.openai.label,
+						gemini: EMBEDDING_PROVIDER_SPECS.gemini.label,
 					})
 					.setValue(this.setting.hybrid.embeddingProvider)
 					.onChange(async (value) => {
@@ -1408,8 +1394,8 @@ class HybridSearchModal extends Modal {
 	}
 
 	private updateApiDomainForProviderChange(
-		previousProvider: "qwen" | "openai",
-		nextProvider: "qwen" | "openai",
+		previousProvider: "qwen" | "openai" | "gemini",
+		nextProvider: "qwen" | "openai" | "gemini",
 	): void {
 		const currentDomain = this.hybridApiDomainInputEl?.value?.trim() ??
 			this.setting.hybrid.apiDomain ??
@@ -1647,6 +1633,7 @@ class HybridSearchModal extends Modal {
 			t("hybridModal.deferredEmbeddingStatus.summary"),
 			String(summary.deferredCount),
 		);
+		this.appendEmbeddingRetryNowButton(this.deferredEmbeddingStatusEl, summary);
 		if (summary.deferredCount === 0) {
 			return;
 		}
@@ -1671,6 +1658,41 @@ class HybridSearchModal extends Modal {
 					: this.formatRelativeTime(summary.nextEligibleAt),
 			);
 		}
+	}
+
+	private appendEmbeddingRetryNowButton(
+		container: HTMLElement,
+		deferredSummary: HybridDeferredEmbeddingSummary,
+	) {
+		const pendingCount =
+			(this.currentFailedEmbeddingSummary?.failedCount ?? 0) +
+			deferredSummary.deferredCount;
+		const actionRow = container.createDiv();
+		actionRow.style.marginTop = "0.5em";
+		new Setting(actionRow).addButton((button) =>
+			button
+				.setButtonText(t("hybridModal.embeddingRetryNow"))
+				.setDisabled(pendingCount === 0)
+				.onClick(async () => {
+					button.setDisabled(true);
+					button.setButtonText(t("hybridModal.embeddingRetryNow.running"));
+					try {
+						const enqueued =
+							await getInstance(DataManager).retryAllPendingHybridEmbeddingsNow(
+								"manual-retry-now",
+							);
+						new MyNotice(
+							`${t("hybridModal.embeddingRetryNow.queued")}: ${enqueued}`,
+							3000,
+						);
+					} catch (error) {
+						logger.error("failed to retry pending hybrid embeddings now:", error);
+						new MyNotice(t("hybridModal.embeddingRetryNow.failed"), 5000);
+					} finally {
+						await this.refreshHybridRuntimeStatusFromData();
+					}
+				}),
+		);
 	}
 
 	private appendStatusText(container: HTMLElement, text: string) {

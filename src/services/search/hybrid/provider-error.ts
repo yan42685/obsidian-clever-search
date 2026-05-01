@@ -10,9 +10,11 @@ export type HybridProviderFailureKind =
 	| 'network'
 	| 'unknown';
 
+type HybridProviderId = 'qwen' | 'openai' | 'gemini';
+
 export type HybridProviderErrorDetails = {
 	kind: HybridProviderFailureKind;
-	provider?: 'qwen' | 'openai';
+	provider?: HybridProviderId;
 	status?: number;
 	providerCode?: string | null;
 	providerType?: string | null;
@@ -39,7 +41,7 @@ type DashScopeErrorEnvelope = {
 };
 
 type HybridProviderErrorDetailsOptions = {
-	provider?: 'qwen' | 'openai';
+	provider?: HybridProviderId;
 	status: number;
 	body: string;
 	retryAfterHeader?: string | null;
@@ -171,7 +173,7 @@ export function classifyHybridProviderFailureFromHttp(
 	return 'unknown';
 }
 
-export function parseHybridProviderErrorBody(body: string, provider: 'qwen' | 'openai' = 'qwen'): {
+export function parseHybridProviderErrorBody(body: string, provider: HybridProviderId = 'qwen'): {
 	providerMessage: string | null;
 	providerCode: string | null;
 	providerType: string | null;
