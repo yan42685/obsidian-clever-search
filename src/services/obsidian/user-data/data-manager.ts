@@ -1534,6 +1534,7 @@ export class DataManager {
   private async applyPersistentLexicalRecoveryChanges(
     deletePaths: readonly string[],
     files: readonly TAbstractFile[],
+    preparedDocuments?: readonly IndexedDocument[],
   ): Promise<LexicalAddDocumentsResult | null> {
     const lexicalRecoveryTarget = (
       this.lexicalEngine as unknown as {
@@ -1549,15 +1550,24 @@ export class DataManager {
       return null;
     }
     const tFiles = files.filter((file): file is TFile => file instanceof TFile);
-    const generateAllIndexedDocuments =
-      this.dataProvider.generateAllIndexedDocuments?.bind(this.dataProvider);
-    if (!generateAllIndexedDocuments) {
-      return null;
+    const indexedFiles = tFiles.filter(
+      (file) => this.dataProvider.isIndexable?.(file) ?? true,
+    );
+    let documents: readonly IndexedDocument[];
+    let failures: LexicalIndexFailure[];
+    if (preparedDocuments != null) {
+      documents = preparedDocuments;
+      failures = [];
+    } else {
+      const generateAllIndexedDocuments =
+        this.dataProvider.generateAllIndexedDocuments?.bind(this.dataProvider);
+      if (!generateAllIndexedDocuments) {
+        return null;
+      }
+      const result = await generateAllIndexedDocuments(indexedFiles);
+      documents = result.documents;
+      failures = [...result.failures];
     }
-    const { documents, indexedFiles, failures } =
-      await generateAllIndexedDocuments(
-        tFiles.filter((file) => this.dataProvider.isIndexable?.(file) ?? true),
-      );
     const applied = await applyPersistentRecoveryChanges.call(lexicalRecoveryTarget, {
       deletePaths: [...deletePaths],
       upsertDocuments: await this.attachLexicalDocRefs(documents),
@@ -1584,22 +1594,31 @@ export class DataManager {
     file: TFile,
     generation = file.stat.mtime,
   ): Promise<boolean> {
-    const result =
-      (await this.applyPersistentLexicalRecoveryChanges([], [file])) ??
-      (await this.addDocuments([file]));
-    if (result.failures.length > 0) {
-      this.addLexicalIndexFailures(result.failures);
+    const { documents, failures } =
+      await this.dataProvider.generateAllIndexedDocuments([file]);
+    if (failures.length > 0 || documents.length === 0) {
+      if (failures.length > 0) {
+        this.addLexicalIndexFailures(failures);
+      }
       return false;
     }
     const plainText = await this.primeCurrentFileText(file, generation);
-    this.clearLexicalIndexFailures([file.path]);
-    await this.ensureLexicalDocRegistryEntry({
+    const metadata = this.dataProvider.getIndexedDocumentMetadata(file);
+    const docRegistryEntry = await this.ensureLexicalDocRegistryEntry({
       path: file.path,
       generation,
       deleted: false,
       contentFingerprint: hashStableText(plainText),
     });
-    const metadata = this.dataProvider.getIndexedDocumentMetadata(file);
+    const preparedDocuments = documents.map((document) => ({
+      ...document,
+      docRef: docRegistryEntry?.docRef ?? document.docRef,
+      generation,
+      content: plainText,
+      aliases: metadata.aliases ?? "",
+      tags: metadata.tags ?? "",
+      headings: metadata.headings ?? "",
+    }));
     await this.fileSnapshotStore.publishIndexedMetadata([
       {
         path: file.path,
@@ -1616,6 +1635,14 @@ export class DataManager {
         text: plainText,
       },
     ]);
+    const result =
+      (await this.applyPersistentLexicalRecoveryChanges([], [file], preparedDocuments)) ??
+      (await this.addPreparedDocuments(file, preparedDocuments));
+    if (result.failures.length > 0) {
+      this.addLexicalIndexFailures(result.failures);
+      return false;
+    }
+    this.clearLexicalIndexFailures([file.path]);
     this.notifyLexicalIndexedTextsCommitted([
       {
         path: file.path,
@@ -1625,6 +1652,21 @@ export class DataManager {
     await this.upsertLexicalIndexedFileRef(file, generation);
     await this.markLexicalSnapshotDirty([file.path]);
     return true;
+  }
+
+  private async addPreparedDocuments(
+    file: TFile,
+    documents: readonly IndexedDocument[],
+  ): Promise<LexicalAddDocumentsResult> {
+    if (documents.length > 0) {
+      await this.lexicalEngine.addDocuments(
+        await this.attachLexicalDocRefs(documents),
+      );
+    }
+    return {
+      indexedFiles: [file],
+      failures: [],
+    };
   }
 
   private async commitMovedLexicalFileState(

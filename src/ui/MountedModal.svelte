@@ -454,10 +454,6 @@
 		return viewHelper.getStructuredSnippetSegments(subItem);
 	}
 
-	function getSubItemScoreLabel(): string {
-		return isDevEnvironment ? "coverage score" : "score";
-	}
-
 	function getFileExtensionText(item: FileItem): string {
 		return item.extension === "md" ? "" : item.extension;
 	}
@@ -661,9 +657,9 @@
 									class:selected={index === currSubItemIndex}
 									class="file-sub-item"
 								>
-									{#if subItem.score !== undefined}
+									{#if isDevEnvironment && subItem.score !== undefined}
 										<span class="subitem-score"
-											>{getSubItemScoreLabel()} {formatScore(subItem.score)}</span
+											>coverage score {formatScore(subItem.score)}</span
 										>
 									{/if}
 									<span class="subitem-snippet">

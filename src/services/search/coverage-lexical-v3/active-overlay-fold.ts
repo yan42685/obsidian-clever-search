@@ -16,7 +16,11 @@ import {
 	type ResidentShardDescriptor,
 } from "./shards";
 import type { CoverageLexicalV3ProductionStores } from "./stores";
-import type { ActiveShardIndexedSnapshotReader } from "./active-document-source";
+import {
+	MissingIndexedTextSnapshotsError,
+	MissingResidentShardArtifactsError,
+	type ActiveShardIndexedSnapshotReader,
+} from "./active-document-source";
 
 export type ActiveOverlayFoldPlan = Readonly<{
 	activeShard: ResidentShardDescriptor;
@@ -113,6 +117,21 @@ export async function runActiveOverlayFoldMaintenanceJob(params: {
 		clearedOverlayEntries: entries.length,
 		oldActiveArtifactOwner: params.activeShard.artifactOwner,
 	};
+}
+
+export function isMissingIndexedTextSnapshotsError(
+	error: unknown,
+): error is MissingIndexedTextSnapshotsError {
+	return error instanceof MissingIndexedTextSnapshotsError;
+}
+
+export function isMissingActiveDocumentSourceError(
+	error: unknown,
+): error is MissingIndexedTextSnapshotsError | MissingResidentShardArtifactsError {
+	return (
+		error instanceof MissingIndexedTextSnapshotsError ||
+		error instanceof MissingResidentShardArtifactsError
+	);
 }
 
 function foldOverlayEntriesIntoCurrentDocuments(

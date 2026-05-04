@@ -18,6 +18,50 @@ export type ActiveShardIndexedSnapshotReader = Readonly<{
 	) => Promise<Map<string, IndexedMetadataSnapshot>>;
 }>;
 
+export class MissingIndexedTextSnapshotsError extends Error {
+	readonly missingRefs: ReadonlyArray<{
+		docRef: number;
+		path: string;
+		generation: number;
+	}>;
+
+	constructor(
+		missingRefs: ReadonlyArray<{
+			docRef: number;
+			path: string;
+			generation: number;
+		}>,
+	) {
+		super(
+			`Missing indexed text snapshots for ${missingRefs.length} active document(s).`,
+		);
+		this.name = "MissingIndexedTextSnapshotsError";
+		this.missingRefs = missingRefs;
+	}
+}
+
+export class MissingResidentShardArtifactsError extends Error {
+	readonly missingShards: ReadonlyArray<{
+		shardId: string;
+		generation: number;
+		artifactOwner: string;
+	}>;
+
+	constructor(
+		missingShards: ReadonlyArray<{
+			shardId: string;
+			generation: number;
+			artifactOwner: string;
+		}>,
+	) {
+		super(
+			`Missing resident shard artifacts for ${missingShards.length} shard(s).`,
+		);
+		this.name = "MissingResidentShardArtifactsError";
+		this.missingShards = missingShards;
+	}
+}
+
 export async function loadCurrentActiveDocuments(params: {
 	activeShard: ResidentShardDescriptor;
 	residentShardArtifactLoader: CoverageLexicalV3ResidentShardArtifactLoader;
@@ -30,7 +74,13 @@ export async function loadCurrentActiveDocuments(params: {
 		params.activeShard,
 	);
 	if (activeResidentShard == null) {
-		return [];
+		throw new MissingResidentShardArtifactsError([
+			{
+				shardId: params.activeShard.shardId,
+				generation: params.activeShard.generation,
+				artifactOwner: params.activeShard.artifactOwner,
+			},
+		]);
 	}
 	const refs = extractResidentDocumentRefs(activeResidentShard.base);
 	const requests = refs.map((ref) => ({ path: ref.path, generation: ref.generation }));
@@ -38,10 +88,12 @@ export async function loadCurrentActiveDocuments(params: {
 		params.indexedSnapshotReader.readIndexedTextSnapshots(requests),
 		params.indexedSnapshotReader.readIndexedMetadata(requests),
 	]);
-	return refs.flatMap((ref) => {
+	const missingRefs: Array<{ docRef: number; path: string; generation: number }> = [];
+	const documents = refs.flatMap((ref) => {
 		const requestKey = buildIndexedSnapshotRequestKey(ref);
 		const text = textsByPath.get(requestKey);
 		if (text == null) {
+			missingRefs.push(ref);
 			return [];
 		}
 		const metadata = metadataByPath.get(requestKey);
@@ -60,6 +112,10 @@ export async function loadCurrentActiveDocuments(params: {
 			} satisfies IndexedDocument,
 		];
 	});
+	if (missingRefs.length > 0) {
+		throw new MissingIndexedTextSnapshotsError(missingRefs);
+	}
+	return documents;
 }
 
 function extractResidentDocumentRefs(

@@ -324,6 +324,95 @@ describe("coverage lexical v3 maintenance coordinator", () => {
 		expect(getDocPath(compactShard!.base, 0)).toBe("two.md");
 	});
 
+	test("compact waits instead of publishing a partial shard when a live snapshot is missing", async () => {
+		const first = descriptor("sealed-1", 1);
+		const second = descriptor("sealed-2", 2);
+		const stores = createMemoryCoverageLexicalV3ProductionStores({
+			registry: [first, second],
+		});
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>(
+				(row) => row.id,
+			),
+		);
+		const docs = [doc("one.md", "one target", 1), doc("two.md", "two target", 2)];
+		await artifacts.publishResidentShardArtifact({
+			descriptor: first,
+			shard: residentShard("sealed-1", [docs[0]]),
+			createdAt: 1,
+		});
+		await artifacts.publishResidentShardArtifact({
+			descriptor: second,
+			shard: residentShard("sealed-2", [docs[1]]),
+			createdAt: 1,
+		});
+
+		const result = await runCoverageLexicalV3Maintenance({
+			stores,
+			residentShardArtifactStore: artifacts,
+			overlayJournalStore: new MemoryActiveOverlayJournalStore(),
+			compactJobStore: new MemoryCompactJobManifestStore(),
+			compactTempArtifactStore: new MemoryCompactTempArtifactStore(),
+			indexedSnapshotReader: indexedSnapshotReader([docs[0]]),
+			now: 25,
+		});
+
+		expect(result.compactJobsStarted).toBe(0);
+		expect(result.stateChanged).toBe(false);
+		expect(await stores.shardRegistry.loadRegistry()).toEqual([first, second]);
+		expect(await artifacts.loadResidentShard({
+			shardId: "sealed-compact-25",
+			generation: 1,
+			state: "sealed",
+			sourceBytes: 1024,
+			docCount: 2,
+			createdOrder: 1,
+			artifactOwner: "sealed-compact-25",
+		})).toBeUndefined();
+	});
+
+	test("compact waits instead of publishing a partial shard when an input artifact is missing", async () => {
+		const first = descriptor("sealed-1", 1);
+		const second = descriptor("sealed-2", 2);
+		const stores = createMemoryCoverageLexicalV3ProductionStores({
+			registry: [first, second],
+		});
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>(
+				(row) => row.id,
+			),
+		);
+		const docs = [doc("one.md", "one target", 1), doc("two.md", "two target", 2)];
+		await artifacts.publishResidentShardArtifact({
+			descriptor: first,
+			shard: residentShard("sealed-1", [docs[0]]),
+			createdAt: 1,
+		});
+
+		const result = await runCoverageLexicalV3Maintenance({
+			stores,
+			residentShardArtifactStore: artifacts,
+			overlayJournalStore: new MemoryActiveOverlayJournalStore(),
+			compactJobStore: new MemoryCompactJobManifestStore(),
+			compactTempArtifactStore: new MemoryCompactTempArtifactStore(),
+			indexedSnapshotReader: indexedSnapshotReader(docs),
+			now: 26,
+		});
+
+		expect(result.compactJobsStarted).toBe(0);
+		expect(result.stateChanged).toBe(false);
+		expect(await stores.shardRegistry.loadRegistry()).toEqual([first, second]);
+		expect(await artifacts.loadResidentShard({
+			shardId: "sealed-compact-26",
+			generation: 1,
+			state: "sealed",
+			sourceBytes: 1024,
+			docCount: 2,
+			createdOrder: 1,
+			artifactOwner: "sealed-compact-26",
+		})).toBeUndefined();
+	});
+
 	test("compact marks fully stale sealed inputs garbage instead of retrying forever", async () => {
 		const first = descriptor("sealed-1", 1);
 		const second = descriptor("sealed-2", 2);

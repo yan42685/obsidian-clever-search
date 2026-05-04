@@ -255,6 +255,49 @@ describe("coverage lexical v3 active shard publisher", () => {
 		]);
 	});
 
+	test("fails active document hydration when a live snapshot is missing", async () => {
+		const active = activeShard({ sourceBytes: 0, docCount: 0 });
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>(
+				(row) => row.id,
+			),
+		);
+		const oldDocument = doc("folder/missing.md", "old alpha", 1);
+		await publishActiveShardAppend({
+			stores: createMemoryCoverageLexicalV3ProductionStores({ registry: [active] }),
+			residentShardArtifactStore: artifacts,
+			activeShard: active,
+			currentActiveDocuments: [],
+			changes: [{ document: oldDocument }],
+			plannerOptions: { sealSourceBytes: 1024 * 1024, now: 100 },
+		});
+
+		await expect(
+			loadCurrentActiveDocuments({
+				activeShard: { ...active, sourceBytes: 10, docCount: 1 },
+				residentShardArtifactLoader: artifacts,
+				indexedSnapshotReader: indexedSnapshotReader([]),
+			}),
+		).rejects.toThrow("Missing indexed text snapshots");
+	});
+
+	test("fails active document hydration when the active artifact is missing", async () => {
+		const active = activeShard({ sourceBytes: 10, docCount: 1 });
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>(
+				(row) => row.id,
+			),
+		);
+
+		await expect(
+			loadCurrentActiveDocuments({
+				activeShard: active,
+				residentShardArtifactLoader: artifacts,
+				indexedSnapshotReader: indexedSnapshotReader([]),
+			}),
+		).rejects.toThrow("Missing resident shard artifacts");
+	});
+
 	test("publisher can rebuild active shard from durable indexed snapshots", async () => {
 		const active = activeShard({ sourceBytes: 0, docCount: 0 });
 		const stores = createMemoryCoverageLexicalV3ProductionStores({ registry: [active] });

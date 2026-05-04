@@ -66,7 +66,7 @@ export default {
 	"hybridModal.embeddingModel.descSuffix":
 		"\u5bfc\u81f4\u7684 token/\u8d39\u7528\u5de8\u91cf\u6d88\u8017\u8d1f\u8d23\u3002",
 	"hybridModal.desc":
-		"混合搜索结合了词法搜索与服务商语义检索。Qwen 使用 text-embedding-v4 和 qwen3-rerank；OpenAI 使用 text-embedding-3-large 和 gpt-5.4-nano 重排。接口返回的 token 用量会计入每周限额。当语义链路失败时，结果会自动降级为词法搜索。",
+		"混合搜索结合了词法搜索与服务商语义检索。Qwen 使用 text-embedding-v4 和 qwen-flash 重排；OpenAI 使用 text-embedding-3-large 和 gpt-5.4-nano 重排。接口返回的 token 用量会计入每周限额。当语义链路失败时，结果会自动降级为词法搜索。",
 	"hybridModal.apiDomain": "API 域名",
 	"hybridModal.apiDomain.desc":
 		"如果使用代理商 API Key，请确认其提供了对应的模型接口，Rerank 阶段 Qwen 会调用 reranker 模型，OpenAI 会调用 gpt5.4-nano 模型。",

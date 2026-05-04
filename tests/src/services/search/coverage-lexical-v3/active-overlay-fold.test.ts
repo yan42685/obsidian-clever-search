@@ -280,4 +280,50 @@ describe("coverage lexical v3 active overlay fold", () => {
 			await overlayStore.loadActiveOverlayEntries({ activeShardId: "active-1", activeShardGeneration: 1 }),
 		).toHaveLength(0);
 	});
+
+	test("aborts fold when a current active document snapshot is missing", async () => {
+		const active = activeDescriptor();
+		const stores = createMemoryCoverageLexicalV3ProductionStores({ registry: [active] });
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>((row) => row.id),
+		);
+		const overlayStore = new MemoryActiveOverlayJournalStore();
+		const baseDoc = doc("base.md", "base alpha", 1);
+		await publishActiveShardAppend({
+			stores,
+			residentShardArtifactStore: artifacts,
+			activeShard: active,
+			currentActiveDocuments: [],
+			changes: [{ document: baseDoc }],
+			plannerOptions: { sealSourceBytes: 1024 * 1024, now: 1 },
+		});
+		const activeAfterBase = (await stores.shardRegistry.loadRegistry())[0] ?? active;
+		await writeActiveOverlayChanges({
+			stores,
+			overlayJournalStore: overlayStore,
+			activeShard: activeAfterBase,
+			changes: [{ document: doc("overlay.md", "overlay beta", 2) }],
+			sequenceStart: 1,
+			now: 2,
+		});
+
+		await expect(
+			runActiveOverlayFoldMaintenanceJob({
+				stores,
+				residentShardArtifactStore: artifacts,
+				overlayJournalStore: overlayStore,
+				activeShard: activeAfterBase,
+				indexedSnapshotReader: indexedSnapshotReader([]),
+				sealSourceBytes: 1024 * 1024,
+				now: 3,
+			}),
+		).rejects.toThrow("Missing indexed text snapshots");
+		expect(await stores.shardRegistry.loadRegistry()).toEqual([activeAfterBase]);
+		expect(
+			await overlayStore.loadActiveOverlayEntries({
+				activeShardId: "active-1",
+				activeShardGeneration: 1,
+			}),
+		).toHaveLength(1);
+	});
 });

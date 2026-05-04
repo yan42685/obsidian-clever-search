@@ -176,7 +176,7 @@ export default {
 	"lexicalModal.section.matching": "Matching and indexing",
 
 	"hybridModal.manageIntro": "Configure the hybrid pipeline here, including provider access, token budget, ranking, and indexing scope.",
-	"hybridModal.desc": "Hybrid search combines lexical search with provider-based semantic retrieval. Qwen uses text-embedding-v4 plus qwen3-rerank; OpenAI uses text-embedding-3-large plus gpt-5.4-nano reranking. Provider-reported token costs are counted toward the weekly limit. If the semantic path fails (network error, quota exceeded, etc.), results automatically fall back to lexical search.",
+	"hybridModal.desc": "Hybrid search combines lexical search with provider-based semantic retrieval. Qwen uses text-embedding-v4 plus qwen-flash reranking; OpenAI uses text-embedding-3-large plus gpt-5.4-nano reranking. Provider-reported token costs are counted toward the weekly limit. If the semantic path fails (network error, quota exceeded, etc.), results automatically fall back to lexical search.",
 	"hybridModal.embeddingModel": "Embedding model",
 	"hybridModal.embeddingModel.descPrefix": "Qwen is recommended because its embedding quality is clearly better, but its API key spending and limits cannot be controlled by the plugin cloud side. This plugin is not responsible for massive token or fee consumption caused by API key leakage, configuration mistakes, provider billing changes, or ",
 	"hybridModal.embeddingModel.descBold": "any circumstances",

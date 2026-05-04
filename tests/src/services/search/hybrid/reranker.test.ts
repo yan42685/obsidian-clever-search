@@ -31,7 +31,7 @@ jest.mock("src/services/search/hybrid/embedder", () => ({
 			? "https://api.openai.com/v1/responses"
 			: provider === "gemini"
 				? "https://api.vectorengine.ai/v1beta/models/gemini-3.1-flash-lite-preview:generateContent"
-			: "https://example.com/rerank",
+				: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
 	),
 	getEmbeddingProviderSpec: jest.fn((provider: string) => ({
 		id: provider === "openai" ? "openai" : provider === "gemini" ? "gemini" : "qwen",
@@ -52,7 +52,7 @@ jest.mock("src/services/search/hybrid/embedder", () => ({
 				? "gpt-5.4-nano"
 				: provider === "gemini"
 					? "gemini-3.1-flash-lite-preview"
-					: "qwen3-rerank",
+					: "qwen-flash",
 		defaultDomain:
 			provider === "openai"
 				? "api.openai.com"
@@ -149,7 +149,7 @@ describe("HybridReranker", () => {
 			text: jest.fn().mockResolvedValue(
 				JSON.stringify({
 					code: "AccessDenied",
-					message: "Model access denied for qwen3-rerank.",
+					message: "Model access denied for qwen-flash.",
 					request_id: "req-403",
 				}),
 			),
@@ -318,6 +318,9 @@ describe("HybridReranker", () => {
 			"Return within 10s if possible.",
 		);
 		expect(JSON.parse(init.body).input).toContain(
+			"Return exactly 2 results.",
+		);
+		expect(JSON.parse(init.body).input).toContain(
 			'"start":0,"end":120',
 		);
 		expect(JSON.parse(init.body).input).toContain(
@@ -326,6 +329,95 @@ describe("HybridReranker", () => {
 		expect(mockRecordTokenUsage).toHaveBeenCalledWith(
 			"[search] gpt-5.4-nano",
 			12,
+		);
+	});
+
+	test("uses Qwen Flash chat completions for Qwen rerank", async () => {
+		const { HybridReranker } = require("src/services/search/hybrid/reranker");
+		mockInstanceMap.set(require("src/globals/plugin-setting").OuterSetting, {
+			hybrid: {
+				apiKey: "test-key",
+				apiDomain: "dashscope.aliyuncs.com",
+				embeddingProvider: "qwen",
+			},
+		});
+		(global as any).fetch = jest.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			headers: {
+				get: jest.fn(() => null),
+			},
+			json: jest.fn().mockResolvedValue({
+				choices: [
+					{
+						message: {
+							content: JSON.stringify({
+								results: [
+									{ index: 1, score: 0.97, start: 4, end: 22 },
+									{ index: 0, score: 0.6, start: 0, end: 12 },
+								],
+							}),
+						},
+					},
+				],
+				usage: { total_tokens: 15 },
+			}),
+		});
+
+		const reranker = new HybridReranker();
+
+		await expect(
+			reranker.rerank(
+				"alpha",
+				[
+					{
+						id: 1,
+						filePath: "notes/a.md",
+						text: "less relevant",
+						startLine: 0,
+						startCol: 0,
+						endLine: 0,
+						recallScore: 0.8,
+					},
+					{
+						id: 2,
+						filePath: "notes/b.md",
+						text: "more relevant alpha",
+						startLine: 0,
+						startCol: 0,
+						endLine: 0,
+						recallScore: 0.7,
+					},
+				],
+				2,
+			),
+		).resolves.toEqual([
+			{ id: 2, score: 0.97, start: 4, end: 22 },
+			{ id: 1, score: 0.6, start: 0, end: 12 },
+		]);
+		const [url, init] = (global as any).fetch.mock.calls[0];
+		expect(url).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
+		const body = JSON.parse(init.body);
+		expect(body).toMatchObject({
+			model: "qwen-flash",
+			response_format: { type: "json_object" },
+			temperature: 0,
+		});
+		expect(body).not.toHaveProperty("query");
+		expect(body).not.toHaveProperty("documents");
+		expect(body).not.toHaveProperty("top_n");
+		expect(body.messages[0].content).toContain(
+			"Return within 10s if possible.",
+		);
+		expect(body.messages[0].content).toContain(
+			"Return exactly 2 results.",
+		);
+		expect(body.messages[0].content).toContain(
+			'"start":0,"end":120',
+		);
+		expect(mockRecordTokenUsage).toHaveBeenCalledWith(
+			"[search] qwen-flash",
+			15,
 		);
 	});
 
@@ -406,6 +498,9 @@ describe("HybridReranker", () => {
 		});
 		expect(body.contents[0].parts[0].text).toContain(
 			"Return within 10s if possible.",
+		);
+		expect(body.contents[0].parts[0].text).toContain(
+			"Return exactly 2 results.",
 		);
 		expect(body.contents[0].parts[0].text).toContain(
 			'"start":0,"end":120',

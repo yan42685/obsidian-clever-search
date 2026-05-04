@@ -18,6 +18,11 @@ export type ActiveOverlayWriteResult = Readonly<{
 	invalidationCount: number;
 }>;
 
+export type ActiveOverlayWritePlan = Readonly<{
+	entries: readonly ActiveOverlayJournalEntry[];
+	invalidations: Parameters<CoverageLexicalV3ProductionStores["invalidations"]["appendInvalidations"]>[0];
+}>;
+
 export type ActiveOverlayWriteAtomicStore = Readonly<{
 	appendOverlayEntriesWithInvalidations: (params: {
 		entries: readonly ActiveOverlayJournalEntry[];
@@ -33,6 +38,24 @@ export async function writeActiveOverlayChanges(params: {
 	sequenceStart: number;
 	now?: number;
 }): Promise<ActiveOverlayWriteResult> {
+	const plan = planActiveOverlayChanges(params);
+	await commitActiveOverlayWritePlan({
+		stores: params.stores,
+		overlayJournalStore: params.overlayJournalStore,
+		plan,
+	});
+	return {
+		entries: plan.entries,
+		invalidationCount: plan.invalidations.length,
+	};
+}
+
+export function planActiveOverlayChanges(params: {
+	activeShard: ResidentShardDescriptor;
+	changes: readonly ActiveShardAppendChange[];
+	sequenceStart: number;
+	now?: number;
+}): ActiveOverlayWritePlan {
 	const now = params.now ?? Date.now();
 	const entries = params.changes.map((change, index): ActiveOverlayJournalEntry => {
 		const sequence = params.sequenceStart + index;
@@ -68,6 +91,15 @@ export async function writeActiveOverlayChanges(params: {
 			} as const,
 		];
 	});
+	return { entries, invalidations };
+}
+
+export async function commitActiveOverlayWritePlan(params: {
+	stores: CoverageLexicalV3ProductionStores;
+	overlayJournalStore: ActiveOverlayJournalStore;
+	plan: ActiveOverlayWritePlan;
+}): Promise<void> {
+	const { entries, invalidations } = params.plan;
 	const atomicStore = params.overlayJournalStore as unknown as Partial<ActiveOverlayWriteAtomicStore>;
 	if (typeof atomicStore.appendOverlayEntriesWithInvalidations === "function") {
 		await atomicStore.appendOverlayEntriesWithInvalidations({ entries, invalidations });
@@ -81,8 +113,4 @@ export async function writeActiveOverlayChanges(params: {
 		stores: params.stores,
 		entries: invalidations,
 	});
-	return {
-		entries,
-		invalidationCount: invalidations.length,
-	};
 }

@@ -1,7 +1,15 @@
 import type { IndexedDocument } from "src/globals/search-types";
 import { buildIndexedSnapshotRequestKey } from "src/services/search/shared/file-snapshot-store";
-import type { ActiveShardIndexedSnapshotReader } from "./active-document-source";
-import { planActiveOverlayFold, runActiveOverlayFoldMaintenanceJob } from "./active-overlay-fold";
+import {
+	MissingIndexedTextSnapshotsError,
+	MissingResidentShardArtifactsError,
+	type ActiveShardIndexedSnapshotReader,
+} from "./active-document-source";
+import {
+	isMissingActiveDocumentSourceError,
+	planActiveOverlayFold,
+	runActiveOverlayFoldMaintenanceJob,
+} from "./active-overlay-fold";
 import {
 	buildShardColdEvidenceRows,
 	type ActiveShardColdEvidencePublisher,
@@ -97,15 +105,20 @@ export async function runCoverageLexicalV3Maintenance(params: {
 		) {
 			const foldStartedAt = Date.now();
 			const result = await runActiveOverlayFoldMaintenanceJob({
-				stores: params.stores,
-				residentShardArtifactStore: params.residentShardArtifactStore,
-				overlayJournalStore: params.overlayJournalStore,
-				activeShard,
-				indexedSnapshotReader: params.indexedSnapshotReader,
-				tokenizeDocumentText: params.tokenizeDocumentText,
-				coldEvidencePublisher: params.coldEvidencePublisher,
-				now,
-			});
+					stores: params.stores,
+					residentShardArtifactStore: params.residentShardArtifactStore,
+					overlayJournalStore: params.overlayJournalStore,
+					activeShard,
+					indexedSnapshotReader: params.indexedSnapshotReader,
+					tokenizeDocumentText: params.tokenizeDocumentText,
+					coldEvidencePublisher: params.coldEvidencePublisher,
+					now,
+				}).catch((error) => {
+					if (isMissingActiveDocumentSourceError(error)) {
+						return null;
+					}
+					throw error;
+				});
 			foldMs += Math.max(0, Date.now() - foldStartedAt);
 			stateChanged ||= result != null;
 		}
@@ -171,11 +184,22 @@ async function maybeRunOneCompactJob(params: {
 		return false;
 	}
 	const documents = await loadLiveDocumentsForShards({
-		shards: inputShards,
-		invalidations,
-		residentShardArtifactStore: params.residentShardArtifactStore,
-		indexedSnapshotReader: params.indexedSnapshotReader,
-	});
+			shards: inputShards,
+			invalidations,
+			residentShardArtifactStore: params.residentShardArtifactStore,
+			indexedSnapshotReader: params.indexedSnapshotReader,
+		}).catch((error) => {
+			if (
+				error instanceof MissingIndexedTextSnapshotsError ||
+				error instanceof MissingResidentShardArtifactsError
+			) {
+				return null;
+			}
+			throw error;
+		});
+	if (documents == null) {
+		return false;
+	}
 	if (documents.length === 0) {
 		await markCompactInputsGarbage({
 			stores: params.stores,
@@ -336,13 +360,20 @@ async function loadLiveDocumentsForShards(params: {
 	indexedSnapshotReader: ActiveShardIndexedSnapshotReader;
 }): Promise<readonly IndexedDocument[]> {
 	const documents: IndexedDocument[] = [];
+	const missingRefs: Array<{ path: string; generation: number; docRef: number }> = [];
 	const invalidatedKeys = new Set(
 		params.invalidations.map((entry) => buildShardInvalidationKey(entry)),
 	);
 	for (const descriptor of params.shards) {
 		const shard = await params.residentShardArtifactStore.loadResidentShard(descriptor);
 		if (shard == null) {
-			continue;
+			throw new MissingResidentShardArtifactsError([
+				{
+					shardId: descriptor.shardId,
+					generation: descriptor.generation,
+					artifactOwner: descriptor.artifactOwner,
+				},
+			]);
 		}
 		const refs = extractLiveDocumentRefs(shard, invalidatedKeys);
 		const [textsByPath, metadataByPath] = await Promise.all([
@@ -353,6 +384,7 @@ async function loadLiveDocumentsForShards(params: {
 			const requestKey = buildIndexedSnapshotRequestKey(ref);
 			const text = textsByPath.get(requestKey);
 			if (text == null) {
+				missingRefs.push(ref);
 				continue;
 			}
 			const metadata = metadataByPath.get(requestKey);
@@ -369,6 +401,9 @@ async function loadLiveDocumentsForShards(params: {
 				headings: metadata?.headingsText ?? "",
 			});
 		}
+	}
+	if (missingRefs.length > 0) {
+		throw new MissingIndexedTextSnapshotsError(missingRefs);
 	}
 	return documents;
 }

@@ -19,7 +19,7 @@ import {
 const RERANK_TIMEOUT_MS = 15_000;
 const MIN_RERANK_SCORE_RELATIVE_TO_TOP = 0.35;
 const LLM_RERANK_MAX_RESULTS = 3;
-export const SEARCH_QWEN_RERANK_TOKEN_KEY = '[search] qwen3-rerank';
+export const SEARCH_QWEN_RERANK_TOKEN_KEY = '[search] qwen-flash';
 export const SEARCH_OPENAI_RERANK_TOKEN_KEY = '[search] gpt-5.4-nano';
 export const SEARCH_GEMINI_RERANK_TOKEN_KEY = '[search] gemini-3.1-flash-lite-preview';
 export const SEARCH_RERANK_TOKEN_KEY = SEARCH_QWEN_RERANK_TOKEN_KEY;
@@ -158,7 +158,7 @@ export class HybridReranker {
 				throw error;
 			}
 
-		const json = await resp.json() as {
+			const json = await resp.json() as {
 				results?: Array<{ index: number; relevance_score?: number; score?: number }>;
 				data?: Array<{ index: number; relevance_score?: number; score?: number }>;
 				output?: {
@@ -171,6 +171,11 @@ export class HybridReranker {
 				candidates?: Array<{
 					content?: {
 						parts?: Array<{ text?: string }>;
+					};
+				}>;
+				choices?: Array<{
+					message?: {
+						content?: string;
 					};
 				}>;
 			};
@@ -222,8 +227,8 @@ export class HybridReranker {
 		return items.filter((item) => item.score >= minScore);
 	}
 
-	private getResultLimit(provider: RerankProvider, topK: number): number {
-		return provider === 'qwen' ? topK : Math.min(topK, LLM_RERANK_MAX_RESULTS);
+	private getResultLimit(_provider: RerankProvider, topK: number): number {
+		return Math.min(topK, LLM_RERANK_MAX_RESULTS);
 	}
 
 	private async fetchRerankResponse(
@@ -284,16 +289,18 @@ export class HybridReranker {
 	}
 
 	private extractRankedItems(json: {
-		results?: Array<{ index: number; relevance_score?: number; score?: number }>;
-		data?: Array<{ index: number; relevance_score?: number; score?: number }>;
-				output?: {
-					results?: Array<{ index: number; relevance_score?: number; score?: number }>;
-					content?: Array<{ type?: string; text?: string }>;
-				} | Array<{ content?: Array<{ type?: string; text?: string }> }>;
+		output?: {
+			content?: Array<{ type?: string; text?: string }>;
+		} | Array<{ content?: Array<{ type?: string; text?: string }> }>;
 		output_text?: string;
 		candidates?: Array<{
 			content?: {
 				parts?: Array<{ text?: string }>;
+			};
+		}>;
+		choices?: Array<{
+			message?: {
+				content?: string;
 			};
 		}>;
 	}, provider: RerankProvider = this.provider): Array<{ index: number; score: number; start?: number; end?: number }> {
@@ -303,23 +310,7 @@ export class HybridReranker {
 		if (provider === 'gemini') {
 			return this.extractGeminiRankedItems(json);
 		}
-		const outputResults = !Array.isArray(json.output)
-			? json.output?.results
-			: undefined;
-		const rawItems = Array.isArray(json.results)
-			? json.results
-			: Array.isArray(json.data)
-				? json.data
-				: Array.isArray(outputResults)
-					? outputResults
-					: [];
-		return rawItems
-			.map((item) => ({
-				index: item.index,
-				score: item.relevance_score ?? item.score ?? 0,
-			}))
-			.filter((item) => Number.isFinite(item.index) && Number.isFinite(item.score))
-			.sort((a, b) => b.score - a.score);
+		return this.extractQwenRankedItems(json);
 	}
 
 	private buildQwenRerankRequest(
@@ -328,17 +319,24 @@ export class HybridReranker {
 		topK: number,
 	): {
 		model: string;
-		query: string;
-		documents: string[];
-		top_n: number;
-		instruct: string;
+		messages: Array<{ role: 'user'; content: string }>;
+		response_format: { type: 'json_object' };
+		temperature: number;
 	} {
+		const candidates = documents.map((text, index) => ({
+			index,
+			text,
+		}));
 		return {
 			model: getEmbeddingProviderSpec('qwen').rerankModel,
-			query,
-			documents,
-			top_n: Math.min(documents.length, topK),
-			instruct: 'Retrieve semantically similar text.',
+			messages: [
+				{
+					role: 'user',
+					content: this.buildLlmRerankPrompt(query, candidates, topK),
+				},
+			],
+			response_format: { type: 'json_object' },
+			temperature: 0,
 		};
 	}
 
@@ -399,11 +397,11 @@ export class HybridReranker {
 		candidates: Array<{ index: number; text: string }>,
 		topK: number,
 	): string {
-		const maxResults = Math.min(candidates.length, topK, LLM_RERANK_MAX_RESULTS);
+		const resultCount = Math.min(candidates.length, topK, LLM_RERANK_MAX_RESULTS);
 		return [
 			'Rerank search chunks. Return within 10s if possible.',
 			'Return JSON only: {"results":[{"index":0,"score":1,"start":0,"end":120}]}',
-			`Return at most ${maxResults} results.`,
+			`Return exactly ${resultCount} results. If fewer candidates exist, return all candidates.`,
 			'Use normalized score 0-1. Drop clearly weak chunks.',
 			'start/end are character offsets in the candidate text for a short original excerpt with useful context.',
 			'Do not process useless chunks.',
@@ -422,38 +420,21 @@ export class HybridReranker {
 			typeof json.output_text === 'string'
 				? json.output_text
 				: this.collectOpenAIResponseTexts(json.output).join('\n');
-		if (!text.trim()) {
-			return [];
-		}
-		try {
-			const parsed = JSON.parse(text.trim()) as {
-				results?: Array<{
-					index?: unknown;
-					score?: unknown;
-					start?: unknown;
-					end?: unknown;
-				}>;
+		return this.extractLlmRankedItemsFromText(text);
+	}
+
+	private extractQwenRankedItems(json: {
+		choices?: Array<{
+			message?: {
+				content?: string;
 			};
-			const results = Array.isArray(parsed.results) ? parsed.results : [];
-			return results
-				.map((item, fallbackRank) => ({
-					index: typeof item.index === 'number' ? item.index : Number.NaN,
-					score:
-						typeof item.score === 'number' && Number.isFinite(item.score)
-							? item.score
-							: -fallbackRank,
-					start: typeof item.start === 'number' && Number.isFinite(item.start)
-						? item.start
-						: undefined,
-					end: typeof item.end === 'number' && Number.isFinite(item.end)
-						? item.end
-						: undefined,
-				}))
-				.filter((item) => Number.isInteger(item.index) && Number.isFinite(item.score))
-				.sort((a, b) => b.score - a.score);
-		} catch {
-			return [];
-		}
+		}>;
+	}): Array<{ index: number; score: number; start?: number; end?: number }> {
+		const text = (json.choices ?? [])
+			.map((choice) => choice.message?.content)
+			.filter((value): value is string => Boolean(value))
+			.join('\n');
+		return this.extractLlmRankedItemsFromText(text);
 	}
 
 	private extractGeminiRankedItems(json: {
@@ -468,6 +449,12 @@ export class HybridReranker {
 			.map((part) => part.text)
 			.filter((value): value is string => Boolean(value))
 			.join('\n');
+		return this.extractLlmRankedItemsFromText(text);
+	}
+
+	private extractLlmRankedItemsFromText(
+		text: string,
+	): Array<{ index: number; score: number; start?: number; end?: number }> {
 		if (!text.trim()) {
 			return [];
 		}

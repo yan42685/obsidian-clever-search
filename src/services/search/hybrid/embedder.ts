@@ -21,6 +21,7 @@ const DEFAULT_DASHSCOPE_DOMAIN = 'dashscope.aliyuncs.com';
 const DEFAULT_OPENAI_DOMAIN = 'api.openai.com';
 const DEFAULT_GEMINI_DOMAIN = 'api.vectorengine.ai';
 const QWEN_EMBED_MODEL = 'text-embedding-v4';
+const QWEN_RERANK_MODEL = 'qwen-flash';
 const OPENAI_EMBED_MODEL = 'text-embedding-3-large';
 const GEMINI_EMBED_MODEL = 'gemini-embedding-2-preview';
 const GEMINI_RERANK_MODEL = 'gemini-3.1-flash-lite-preview';
@@ -59,7 +60,7 @@ export const EMBEDDING_PROVIDER_SPECS: Record<HybridEmbeddingProvider, Embedding
 		id: 'qwen',
 		label: 'Qwen text-embedding-v4',
 		embeddingModel: QWEN_EMBED_MODEL,
-		rerankModel: 'qwen3-rerank',
+		rerankModel: QWEN_RERANK_MODEL,
 		defaultDomain: DEFAULT_DASHSCOPE_DOMAIN,
 	},
 	openai: {
@@ -1206,7 +1207,8 @@ export function buildProviderApiUrl(
 		const host = normalizeProviderApiDomain(normalizedProvider, domain);
 		return `https://${host}/v1beta/models/${GEMINI_RERANK_MODEL}:generateContent`;
 	}
-	return buildDashScopeApiUrl(domain, 'rerank');
+	const host = normalizeProviderApiDomain(normalizedProvider, domain);
+	return `https://${host}/compatible-mode/v1/chat/completions`;
 }
 
 export function buildEmbeddingRequestBody(

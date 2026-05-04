@@ -44,9 +44,13 @@ import { bootstrapCoverageLexicalV3Engine } from "./bootstrap";
 import {
 	buildOverlayResidentArtifacts,
 	createAtomicDexieActiveOverlayJournalStore,
+	type ActiveOverlayJournalEntry,
 	type ActiveOverlayJournalStore,
 } from "./active-overlay-journal";
-import { writeActiveOverlayChanges } from "./active-overlay-writer";
+import {
+	commitActiveOverlayWritePlan,
+	planActiveOverlayChanges,
+} from "./active-overlay-writer";
 import type { ExistingShardDocVersion } from "./append-planner";
 import {
 	DexieCompactJobManifestStore,
@@ -1032,12 +1036,24 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		const persistentStores = this.getPersistentStores();
 		const sequenceStart =
 			(await this.getNextOverlaySequence(persistentStores.overlayJournalStore, activeShard));
-		await writeActiveOverlayChanges({
-			stores: persistentStores.productionStores,
-			overlayJournalStore: persistentStores.overlayJournalStore,
+		const existingEntries =
+			await persistentStores.overlayJournalStore.loadActiveOverlayEntries({
+				activeShardId: activeShard.shardId,
+				activeShardGeneration: activeShard.generation,
+			});
+		const writePlan = planActiveOverlayChanges({
 			activeShard,
 			changes: overlayChanges,
 			sequenceStart,
+		});
+		await this.publishOverlayEvidenceForEntries(activeShard, [
+			...existingEntries,
+			...writePlan.entries,
+		]);
+		await commitActiveOverlayWritePlan({
+			stores: persistentStores.productionStores,
+			overlayJournalStore: persistentStores.overlayJournalStore,
+			plan: writePlan,
 		});
 		if (recoveryGeneration !== this.overlayRecoveryGeneration) {
 			return true;
@@ -1052,6 +1068,36 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			this.storeIndexedDocument(document);
 		}
 		return true;
+	}
+
+	private async publishOverlayEvidenceForEntries(
+		activeShard: ResidentShardDescriptor,
+		entries: readonly ActiveOverlayJournalEntry[],
+	): Promise<void> {
+		const overlayArtifacts = buildOverlayResidentArtifacts({
+			activeShardId: activeShard.shardId,
+			activeShardGeneration: activeShard.generation,
+			entries,
+			tokenizeDocumentText: (text) => this.getDocumentTerms(text),
+		});
+		const snapshotStore = this.getFileSnapshotStore();
+		await Promise.all([
+			overlayArtifacts.bodyEvidenceRows.length > 0
+				? snapshotStore.publishLexicalBodyEvidence?.(
+						overlayArtifacts.bodyEvidenceRows,
+					) ?? Promise.resolve()
+				: Promise.resolve(),
+			overlayArtifacts.hanDocEvidenceRows.length > 0
+				? snapshotStore.publishLexicalHanDocEvidence?.(
+						overlayArtifacts.hanDocEvidenceRows,
+					) ?? Promise.resolve()
+				: Promise.resolve(),
+			overlayArtifacts.hanBodyEvidenceRows.length > 0
+				? snapshotStore.publishLexicalHanBodyEvidence?.(
+						overlayArtifacts.hanBodyEvidenceRows,
+					) ?? Promise.resolve()
+				: Promise.resolve(),
+		]);
 	}
 
 	private async getNextOverlaySequence(
@@ -1082,24 +1128,6 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			entries,
 			tokenizeDocumentText: (text) => this.getDocumentTerms(text),
 		});
-		const snapshotStore = this.getFileSnapshotStore();
-		await Promise.all([
-			overlayArtifacts.bodyEvidenceRows.length > 0
-				? snapshotStore.publishLexicalBodyEvidence?.(
-						overlayArtifacts.bodyEvidenceRows,
-					) ?? Promise.resolve()
-				: Promise.resolve(),
-			overlayArtifacts.hanDocEvidenceRows.length > 0
-				? snapshotStore.publishLexicalHanDocEvidence?.(
-						overlayArtifacts.hanDocEvidenceRows,
-					) ?? Promise.resolve()
-				: Promise.resolve(),
-			overlayArtifacts.hanBodyEvidenceRows.length > 0
-				? snapshotStore.publishLexicalHanBodyEvidence?.(
-						overlayArtifacts.hanBodyEvidenceRows,
-					) ?? Promise.resolve()
-				: Promise.resolve(),
-		]);
 		this.engine.loadOverlayResidentShard(overlayArtifacts.shard);
 	}
 
