@@ -3671,6 +3671,110 @@ test("hydrates Han ranking evidence from doc/block rows without loading full Han
 		expect(visible.map((file) => file.path)).toEqual(["winsong-gong.md"]);
 	});
 
+	test("searchFiles hides same-coverage Han candidates that miss the residual singleton", async () => {
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		await engine.reIndexAll([
+			createDocument({
+				path: "winsong-gong.md",
+				basename: "note",
+				folder: "zh",
+				content: "\u8d62\u5b8b\u529f",
+			}),
+			createDocument({
+				path: "winsong-only.md",
+				basename: "note",
+				folder: "zh",
+				content: "\u8d62\u5b8b",
+			}),
+		]);
+		const search = jest.fn((): CoverageLexicalV3SearchResult => ({
+			recallState: {
+				queryAnalysis: {
+					queryText: "\u8d62\u5b8b\u529f",
+					normalizedQueryText: "\u8d62\u5b8b\u529f",
+					querySingletonHanChar: null,
+					querySingletonHanCodePoint: null,
+					querySingletonHanRecallEligible: false,
+					surfaceGroups: [createHanSurfaceGroup(0, "\u8d62\u5b8b\u529f")],
+					primaryUnits: [],
+					hanBackstopGroups: [],
+					surfaceCoverageShapeKey: "h",
+				},
+				unitFamilyMatches: [],
+				candidateDocs: [],
+			},
+			rankedCandidates: [
+				createPackingProfile({
+					docId: 0,
+					path: "winsong-gong.md",
+					realizedCoverageCount: 1,
+					coverageGate: {
+						realizedCoverageCount: 1,
+						visibilityCoverageCount: 1,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+					singletonHanCompletion: {
+						singletonHanChar: "\u529f",
+						singletonHanCharIndex: 2,
+						singletonHanSurfaceGroupIndex: 0,
+						matched: true,
+						matchSource: "body_same_block",
+						bestAnchorKind: "bigram",
+						bestAnchorDistance: 0,
+						sameBlockAsAnchor: true,
+						sameBlockAsBestBodyWindow: true,
+						tier: "tight",
+					},
+				}),
+				createPackingProfile({
+					docId: 1,
+					path: "winsong-only.md",
+					realizedCoverageCount: 1,
+					coverageGate: {
+						realizedCoverageCount: 1,
+						visibilityCoverageCount: 1,
+						fullySatisfiedSurfaceGroupCount: 1,
+						startedSurfaceGroupCount: 1,
+						crossScriptSatisfiedGroupCount: 1,
+					},
+					singletonHanCompletion: {
+						singletonHanChar: "\u529f",
+						singletonHanCharIndex: 2,
+						singletonHanSurfaceGroupIndex: 0,
+						matched: false,
+						matchSource: "none",
+						bestAnchorKind: "none",
+						bestAnchorDistance: null,
+						sameBlockAsAnchor: false,
+						sameBlockAsBestBodyWindow: false,
+						tier: "none",
+					},
+				}),
+			],
+		}));
+		(engine as unknown as {
+				engine: {
+					search: (...args: unknown[]) => CoverageLexicalV3SearchResult;
+					getResidentIndexView: () => { shards: [{ base: ResidentBase }] } | null;
+				};
+		}).engine = {
+			...createMockSearchRuntime(search, createResidentBaseForBlockCounts([1, 1])),
+			getResidentIndexView: () => null,
+		};
+
+		const visible = await engine.searchFiles({
+			queryText: "\u8d62\u5b8b\u529f",
+			isPrefixMatch: true,
+			isFuzzy: false,
+			hideWeaklyRelatedResults: true,
+			maxItemResults: 5,
+		});
+
+		expect(visible.map((file) => file.path)).toEqual(["winsong-gong.md"]);
+	});
+
 	test("searchFiles keeps weak witness order when indexed snapshots are unavailable", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		await engine.reIndexAll([

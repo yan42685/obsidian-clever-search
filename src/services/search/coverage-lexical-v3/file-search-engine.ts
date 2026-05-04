@@ -2344,27 +2344,28 @@ function hasHanBigramRescueSupport(candidate: EvidencePackingProfile): boolean {
 function filterToTopCoverageGateBand(
 	candidates: readonly EvidencePackingProfile[],
 ): readonly EvidencePackingProfile[] {
-	const strongestCoverageGate = candidates[0]?.coverageGate;
-	if (strongestCoverageGate == null) {
+	const strongestCandidate = candidates[0];
+	if (strongestCandidate == null) {
 		return candidates;
 	}
 	return candidates.filter((candidate) =>
-		hasVisibilityCoverageGateAtLeastTop(candidate.coverageGate, strongestCoverageGate),
+		hasVisibilityCoverageGateAtLeastTop(candidate, strongestCandidate),
 	);
 }
 
 function hasVisibilityCoverageGateAtLeastTop(
-	left: EvidencePackingProfile["coverageGate"],
-	right: EvidencePackingProfile["coverageGate"],
+	left: EvidencePackingProfile,
+	right: EvidencePackingProfile,
 ): boolean {
 	return (
 		getVisibilityCoverageCount(left) + VISIBILITY_COVERAGE_GATE_TOLERANCE >=
 			getVisibilityCoverageCount(right) &&
-		left.fullySatisfiedSurfaceGroupCount ===
-			right.fullySatisfiedSurfaceGroupCount &&
-		left.startedSurfaceGroupCount === right.startedSurfaceGroupCount &&
-		left.crossScriptSatisfiedGroupCount ===
-			right.crossScriptSatisfiedGroupCount
+		left.coverageGate.fullySatisfiedSurfaceGroupCount ===
+			right.coverageGate.fullySatisfiedSurfaceGroupCount &&
+		left.coverageGate.startedSurfaceGroupCount ===
+			right.coverageGate.startedSurfaceGroupCount &&
+		left.coverageGate.crossScriptSatisfiedGroupCount ===
+			right.coverageGate.crossScriptSatisfiedGroupCount
 	);
 }
 
@@ -2383,9 +2384,18 @@ function hasSameCoverageGate(
 }
 
 function getVisibilityCoverageCount(
-	coverageGate: EvidencePackingProfile["coverageGate"],
+	candidate: EvidencePackingProfile,
 ): number {
-	return coverageGate.visibilityCoverageCount ?? coverageGate.realizedCoverageCount;
+	const coverageGate = candidate.coverageGate;
+	const singletonHanVisibilityBonus =
+		candidate.singletonHanCompletion.matched &&
+		candidate.singletonHanCompletion.tier === "tight"
+			? 1
+			: 0;
+	return (
+		(coverageGate.visibilityCoverageCount ?? coverageGate.realizedCoverageCount) +
+		singletonHanVisibilityBonus
+	);
 }
 
 function applyHanSurfaceCompletionDominance(

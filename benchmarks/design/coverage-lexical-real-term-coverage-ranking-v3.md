@@ -2414,3 +2414,29 @@ Validation completed for this phase:
 - `npm run typecheck:build` passes on 2026-04-29
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts` passes on 2026-04-29
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/ranking-stability.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine-request-flags.test.ts` passes on 2026-04-29
+
+### Phase 52
+
+Status: Completed on 2026-05-04
+
+This phase tightens the top-level file-list hiding boundary for residual
+singleton-Han completion:
+
+- `hideWeaklyRelatedResults` now treats a tight matched
+  `singletonHanCompletion` as one extra visibility-coverage unit when comparing
+  against the top candidate's visibility coverage gate
+- this does not change `realizedCoverageCount`, comparator coverage ordering, or
+  exact/prefix lexical support; the singleton bonus is only used by the
+  file-list hiding gate
+- the singleton bonus uses the existing candidate-final singleton completion
+  signal, so it applies to the query singleton or residual singleton selected
+  by query/candidate coverage analysis rather than any arbitrary Han character
+  present in the document
+- candidates that otherwise match the top coverage band but miss the residual
+  singleton are now hidden when a same-band candidate tightly completes that
+  missing character
+
+Validation completed for this phase:
+
+- `npm run typecheck:build` passes on 2026-05-04
+- `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts` passes on 2026-05-04
