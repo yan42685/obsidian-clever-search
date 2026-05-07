@@ -127,6 +127,10 @@ type LexicalAddDocumentsResult = {
   failures: LexicalIndexFailure[];
 };
 
+type PreparedLexicalDocumentsResult = LexicalAddDocumentsResult & {
+  documents: IndexedDocument[];
+};
+
 type LexicalStartupMove = {
   oldPath: string;
   file: TFile;
@@ -1505,8 +1509,24 @@ export class DataManager {
   private async addDocuments(
     files: TAbstractFile[],
   ): Promise<LexicalAddDocumentsResult> {
+    const result = await this.prepareLexicalDocuments(files);
+    if (result.documents.length > 0) {
+      await this.lexicalEngine.addDocuments(
+        await this.attachLexicalDocRefs(result.documents),
+      );
+    }
+    return {
+      indexedFiles: result.indexedFiles,
+      failures: result.failures,
+    };
+  }
+
+  private async prepareLexicalDocuments(
+    files: readonly TAbstractFile[],
+  ): Promise<PreparedLexicalDocumentsResult> {
     if (files.length === 0) {
       return {
+        documents: [],
         indexedFiles: [],
         failures: [],
       };
@@ -1520,12 +1540,8 @@ export class DataManager {
       await this.dataProvider.generateAllIndexedDocuments(
         tFiles.filter((f) => this.dataProvider.isIndexable(f)),
       );
-    if (documents.length > 0) {
-      await this.lexicalEngine.addDocuments(
-        await this.attachLexicalDocRefs(documents),
-      );
-    }
     return {
+      documents,
       indexedFiles,
       failures,
     };
@@ -1535,6 +1551,7 @@ export class DataManager {
     deletePaths: readonly string[],
     files: readonly TAbstractFile[],
     preparedDocuments?: readonly IndexedDocument[],
+    preparedFailures: readonly LexicalIndexFailure[] = [],
   ): Promise<LexicalAddDocumentsResult | null> {
     const lexicalRecoveryTarget = (
       this.lexicalEngine as unknown as {
@@ -1557,7 +1574,7 @@ export class DataManager {
     let failures: LexicalIndexFailure[];
     if (preparedDocuments != null) {
       documents = preparedDocuments;
-      failures = [];
+      failures = [...preparedFailures];
     } else {
       const generateAllIndexedDocuments =
         this.dataProvider.generateAllIndexedDocuments?.bind(this.dataProvider);
@@ -3204,9 +3221,6 @@ export class DataManager {
     const deleteList = [...deletePaths];
     if (deleteList.length > 0) {
       logger.trace(`lexical recovery docs to delete: ${deleteList.length}`);
-      await this.fileSnapshotStore.removeFiles(deleteList);
-      await this.deleteLexicalIndexedFileRefs(deleteList);
-      this.clearLexicalIndexFailures(deleteList);
       for (const path of deleteList) {
         dirtyPaths.add(path);
       }
@@ -3217,13 +3231,28 @@ export class DataManager {
       return file ? [file] : [];
     });
     logger.trace(`lexical recovery docs to upsert: ${upsertFiles.length}`);
+    const preparedUpsert = await this.prepareLexicalDocuments(upsertFiles);
+    if (preparedUpsert.indexedFiles.length > 0) {
+      await this.commitIndexedLexicalFiles(preparedUpsert.indexedFiles);
+    }
     const overlayAddResult =
-      await this.applyPersistentLexicalRecoveryChanges(deleteList, upsertFiles);
+      await this.applyPersistentLexicalRecoveryChanges(
+        deleteList,
+        upsertFiles,
+        preparedUpsert.documents,
+        preparedUpsert.failures,
+      );
     if (!overlayAddResult) {
       await this.deleteDocuments(deleteList);
     }
-    const addResult = overlayAddResult ?? (await this.addDocuments(upsertFiles));
-    await this.commitIndexedLexicalFiles(addResult.indexedFiles);
+    if (deleteList.length > 0) {
+      await this.fileSnapshotStore.removeFiles(deleteList);
+      await this.deleteLexicalIndexedFileRefs(deleteList);
+      this.clearLexicalIndexFailures(deleteList);
+    }
+    const addResult =
+      overlayAddResult ??
+      (await this.addPreparedLexicalDocuments(upsertFiles, preparedUpsert));
     const failedPaths = new Set(
       addResult.failures.map((failure) => failure.file.path),
     );
@@ -3244,6 +3273,21 @@ export class DataManager {
         ...addResult.indexedFiles.map((file) => file.path),
       ]);
     }
+  }
+
+  private async addPreparedLexicalDocuments(
+    files: readonly TFile[],
+    prepared: PreparedLexicalDocumentsResult,
+  ): Promise<LexicalAddDocumentsResult> {
+    if (prepared.documents.length > 0) {
+      await this.lexicalEngine.addDocuments(
+        await this.attachLexicalDocRefs(prepared.documents),
+      );
+    }
+    return {
+      indexedFiles: prepared.indexedFiles,
+      failures: prepared.failures,
+    };
   }
 
   private async updateLexicalIndexedFileRefsByMtime() {

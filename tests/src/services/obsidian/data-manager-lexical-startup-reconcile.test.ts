@@ -163,7 +163,7 @@ function createHarness(params: {
 }) {
   const manager = Object.create(DataManager.prototype) as DataManager & Record<string, any>;
   const filesByPath = new Map(params.files.map((file) => [file.path, file]));
-  const indexedSnapshotTexts = params.indexedSnapshotTexts ?? new Map<string, string>();
+  const indexedSnapshotTexts = new Map(params.indexedSnapshotTexts ?? []);
   let lexicalSearchSnapshot = params.previousLexicalSearchSnapshot ?? null;
   const docRegistryRows = new Map(
     (params.previousDocRegistryEntries ?? []).map((row) => [row.path, { ...row }]),
@@ -190,10 +190,30 @@ function createHarness(params: {
 
   manager.dataProvider = {
     allFilesToBeIndexed: jest.fn(() => Array.from(filesByPath.values())),
+    isIndexable: jest.fn(() => true),
     readPlainText: jest.fn(async (file: TFile | string) => {
       const path = typeof file === "string" ? file : file.path;
       return params.texts.get(path) ?? "";
     }),
+    generateAllIndexedDocuments: jest.fn(async (filesToIndex: readonly TFile[]) => ({
+      documents: filesToIndex.map((file) => {
+        const content = params.texts.get(file.path) ?? "";
+        return {
+          path: file.path,
+          basename: file.basename,
+          folder: file.path.includes("/")
+            ? file.path.slice(0, file.path.lastIndexOf("/"))
+            : "",
+          content,
+          aliases: "",
+          tags: "",
+          headings: "",
+          generation: file.stat.mtime,
+        };
+      }),
+      indexedFiles: [...filesToIndex],
+      failures: [],
+    })),
     getIndexedDocumentMetadata: jest.fn(() => ({})),
   };
   manager.database = {
@@ -229,6 +249,13 @@ function createHarness(params: {
         { ...ref },
       ];
       manager.database.getLexicalIndexedFileRefs.mockResolvedValue(nextRefs);
+    }),
+    deleteLexicalIndexedFileRefs: jest.fn(async (paths: readonly string[]) => {
+      const pathSet = new Set(paths);
+      const previousRefs = await manager.database.getLexicalIndexedFileRefs();
+      manager.database.getLexicalIndexedFileRefs.mockResolvedValue(
+        previousRefs.filter((item: BaseIndexedFileRef) => !pathSet.has(item.path)),
+      );
     }),
     listDocRegistryEntries: jest.fn(
       async () => [...(params.previousDocRegistryEntries ?? [])].map((row) => ({
@@ -396,20 +423,32 @@ function createHarness(params: {
     ),
     publishIndexedTexts: jest.fn(
       async (
-        _files: ReadonlyArray<{
+        files: ReadonlyArray<{
           path: string;
           generation?: number;
           text?: string;
         }>,
-      ) => {},
+      ) => {
+        for (const file of files) {
+          indexedSnapshotTexts.set(file.path, file.text ?? "");
+        }
+      },
     ),
-    removeFiles: jest.fn(async (_paths: readonly string[]) => {}),
+    removeFiles: jest.fn(async (paths: readonly string[]) => {
+      for (const path of paths) {
+        indexedSnapshotTexts.delete(path);
+      }
+    }),
   };
   manager.deleteDocuments = jest.fn(async (_paths: readonly string[]) => {});
   manager.addDocuments = jest.fn(async (files: readonly TFile[]) => ({
     indexedFiles: [...files],
     failures: [],
   }));
+  manager.lexicalEngine = {
+    addDocuments: jest.fn(async () => undefined),
+    applyPersistentRecoveryChanges: jest.fn(async () => false),
+  };
   manager.commitMovedLexicalFileState = jest.fn(async () => true);
   manager.commitIndexedLexicalFiles = jest.fn(async (_files: readonly TFile[]) => {});
   manager.saveLexicalIndexedFileRefs = jest.fn(async (_files: readonly TFile[]) => {});
@@ -435,6 +474,7 @@ function createHarness(params: {
     manager,
     fileSnapshotStore: manager.fileSnapshotStore,
     database: manager.database,
+    indexedSnapshotTexts,
     indexRecoveryRows,
     pendingDocOperationRows,
     lexicalMutationJournalRows,
@@ -1114,7 +1154,6 @@ describe("DataManager lexical startup reconcile", () => {
 
     expect(harness.manager.commitMovedLexicalFileState).not.toHaveBeenCalled();
     expect(harness.manager.deleteDocuments).toHaveBeenCalledWith([path]);
-    expect(harness.manager.addDocuments).toHaveBeenCalledWith([updatedFile]);
     expect(harness.manager.commitIndexedLexicalFiles).toHaveBeenCalledWith([
       updatedFile,
     ]);
@@ -1138,13 +1177,62 @@ describe("DataManager lexical startup reconcile", () => {
       docsToMove: [],
     });
 
-    expect(harness.manager.addDocuments).toHaveBeenCalledWith([updatedFile]);
     expect(harness.manager.commitIndexedLexicalFiles).toHaveBeenCalledWith([
       updatedFile,
     ]);
     expect(harness.manager.saveLexicalIndexedFileRefs).toHaveBeenCalledWith([
       updatedFile,
     ]);
+  });
+
+  test("persistent lexical recovery publishes upsert snapshots before applying deletions", async () => {
+    const oldPath = "docs/old.md";
+    const updatedFile = createFile("docs/recover.md", "recover body", 410);
+    const harness = createHarness({
+      files: [updatedFile],
+      texts: new Map([[updatedFile.path, "recover body"]]),
+      indexedSnapshotTexts: new Map([[oldPath, "old body"]]),
+      previousIndexedFileRefs: [
+        {
+          path: oldPath,
+          generation: 300,
+          size: 8,
+        },
+      ],
+    });
+    const observedAtApply: unknown[] = [];
+    const commitIndexedLexicalFiles =
+      DataManager.prototype["commitIndexedLexicalFiles"].bind(harness.manager);
+    harness.manager.commitIndexedLexicalFiles = jest.fn(commitIndexedLexicalFiles);
+    harness.manager.lexicalEngine = {
+      addDocuments: jest.fn(async () => undefined),
+      applyPersistentRecoveryChanges: jest.fn(async () => {
+        observedAtApply.push({
+          oldSnapshot: harness.indexedSnapshotTexts.get(oldPath),
+          newSnapshot: harness.indexedSnapshotTexts.get(updatedFile.path),
+        });
+        return true;
+      }),
+    };
+
+    await harness.manager["applyLexicalPersistentRecoveryPlan"]({
+      status: "needs_heal",
+      reason: "vault_drift",
+      docsToDelete: [oldPath],
+      docsToAdd: [],
+      docsToUpdate: [updatedFile.path],
+      docsToMove: [],
+    });
+
+    expect(observedAtApply).toEqual([
+      {
+        oldSnapshot: "old body",
+        newSnapshot: "recover body",
+      },
+    ]);
+    expect(harness.indexedSnapshotTexts.has(oldPath)).toBe(false);
+    expect(harness.indexedSnapshotTexts.get(updatedFile.path)).toBe("recover body");
+    expect(harness.manager.lexicalEngine.addDocuments).not.toHaveBeenCalled();
   });
 
   test("full lexical reindex routes successful files through commitIndexedLexicalFiles before retainOnly", async () => {
