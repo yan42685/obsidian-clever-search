@@ -647,6 +647,30 @@ function createMockDatabase(overrides: Record<string, unknown> = {}) {
       const row = docRegistryRows.find((item) => item.path === path);
       return row ? { ...row } : undefined;
     }),
+    moveDocRegistryPath: jest.fn(
+      async (
+        oldPath: string,
+        newPath: string,
+        options?: {
+          generation?: number;
+          contentFingerprint?: string;
+        },
+      ) => {
+        ensureDocRegistryFromStoredRows();
+        const existing = docRegistryRows.find((item) => item.path === oldPath);
+        if (!existing) {
+          return undefined;
+        }
+        existing.path = newPath;
+        existing.liveGeneration = options?.generation ?? existing.liveGeneration;
+        existing.generation = options?.generation ?? existing.generation;
+        existing.deleted = false;
+        if (options?.contentFingerprint !== undefined) {
+          existing.contentFingerprint = options.contentFingerprint;
+        }
+        return { ...existing };
+      },
+    ),
     getDocRegistryEntries: jest.fn(async (paths: readonly string[]) => {
       ensureDocRegistryFromStoredRows();
       const result = new Map<string, Record<string, any>>();
@@ -1441,6 +1465,91 @@ describe("DataManager integration", () => {
       reason: "runtime-incremental-edit",
       sourceGeneration: 220,
     });
+  });
+
+  test("publishes renamed lexical snapshot before invalidating the old path", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = false;
+
+    const oldPath = "docs/source.md";
+    const newPath = "docs/renamed.md";
+    const movedText = "renamed searchable content";
+    const movedFile = createFile(newPath, movedText, 240);
+    const files = new Map([[newPath, movedFile]]);
+    const texts = new Map([[newPath, movedText]]);
+    const database = createMockDatabase();
+    const dataProvider = createMockDataProvider({ files, texts });
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    fileSnapshotStore.persisted.set(oldPath, {
+      text: "old searchable content",
+      generation: 120,
+    });
+    const lexicalEngine = createMockLexicalEngine();
+    const hybridEngine = createMockHybridEngine();
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [movedFile],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    await database.ensureDocRegistryEntry({
+      path: oldPath,
+      generation: 120,
+      deleted: false,
+    });
+    await database.setLexicalIndexedFileRefs([
+      {
+        docRef: (await database.getDocRegistryEntry(oldPath))?.docRef,
+        path: oldPath,
+        generation: 120,
+        size: 22,
+      },
+    ]);
+    const observedNewSnapshotAtMove: unknown[] = [];
+    lexicalEngine.moveDocument.mockImplementation(
+      async (_oldPath: string, document: any) => {
+        observedNewSnapshotAtMove.push(fileSnapshotStore.persisted.get(newPath));
+        lexicalEngine.deleteDocuments([_oldPath, document.path]);
+        await lexicalEngine.addDocuments([document]);
+        return true;
+      },
+    );
+
+    const manager = resolveDataManager();
+    manager.receiveDocOperation(new DocMoveOperation(oldPath, newPath, 240));
+    await (manager as any).docOperationsBuffer.forceFlush();
+
+    expect(observedNewSnapshotAtMove).toEqual([
+      {
+        text: movedText,
+        generation: 240,
+      },
+    ]);
+    expect(lexicalEngine.moveDocument).toHaveBeenCalledWith(
+      oldPath,
+      expect.objectContaining({
+        path: newPath,
+        content: movedText,
+        generation: 240,
+      }),
+    );
+    expect(fileSnapshotStore.persisted.has(oldPath)).toBe(false);
+    expect(fileSnapshotStore.persisted.get(newPath)).toEqual({
+      text: movedText,
+      generation: 240,
+    });
+    expect(await database.getLexicalIndexedFileRefs()).toEqual([
+      expect.objectContaining({
+        path: newPath,
+        generation: 240,
+        size: movedFile.stat.size,
+      }),
+    ]);
   });
 
   test("rebuilds lexical startup state when a legacy snapshot is incompatible and reports persisted versus runtime storage clearly", async () => {

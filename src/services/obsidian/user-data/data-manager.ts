@@ -1687,21 +1687,10 @@ export class DataManager {
       return false;
     }
 
-    const previousDocRef = (await this.getLexicalDocRegistryEntry(oldPath))?.docRef;
-    const nextDocument =
-      previousDocRef === undefined
-        ? documents[0]
-        : {
-            ...documents[0],
-            docRef: previousDocRef,
-          };
-    const moved = await this.lexicalEngine.moveDocument(oldPath, nextDocument);
-    if (!moved) {
-      return false;
-    }
-
     const plainText = documents[0].content ?? "";
     const contentFingerprint = hashStableText(plainText);
+    const metadata = this.dataProvider.getIndexedDocumentMetadata(file);
+    const previousDocRef = (await this.getLexicalDocRegistryEntry(oldPath))?.docRef;
     const movedRegistryEntry = await this.moveLexicalDocRegistryPath(
       oldPath,
       file.path,
@@ -1710,23 +1699,30 @@ export class DataManager {
         contentFingerprint,
       },
     );
-    if (!movedRegistryEntry) {
-      await this.ensureLexicalDocRegistryEntry({
+    const docRegistryEntry =
+      movedRegistryEntry ??
+      (await this.ensureLexicalDocRegistryEntry({
         path: file.path,
         generation,
         deleted: false,
         contentFingerprint,
-      });
-    }
-    this.clearLexicalIndexFailures([oldPath, file.path]);
-    await this.fileSnapshotStore.removeFiles([oldPath]);
+      }));
+    const nextDocument = {
+      ...documents[0],
+      docRef: docRegistryEntry?.docRef ?? previousDocRef ?? documents[0].docRef,
+      generation,
+      content: plainText,
+      aliases: metadata.aliases ?? documents[0].aliases ?? "",
+      tags: metadata.tags ?? documents[0].tags ?? "",
+      headings: metadata.headings ?? documents[0].headings ?? "",
+    };
     await this.fileSnapshotStore.publishIndexedMetadata([
       {
         path: file.path,
         generation,
-        aliasesText: documents[0].aliases ?? "",
-        tagsText: documents[0].tags ?? "",
-        headingsText: documents[0].headings ?? "",
+        aliasesText: nextDocument.aliases ?? "",
+        tagsText: nextDocument.tags ?? "",
+        headingsText: nextDocument.headings ?? "",
       },
     ]);
     await this.fileSnapshotStore.publishIndexedTexts([
@@ -1736,6 +1732,12 @@ export class DataManager {
         text: plainText,
       },
     ]);
+    const moved = await this.lexicalEngine.moveDocument(oldPath, nextDocument);
+    if (!moved) {
+      return false;
+    }
+
+    this.clearLexicalIndexFailures([oldPath, file.path]);
     this.notifyLexicalIndexedTextsCommitted([
       {
         path: file.path,
@@ -1744,6 +1746,7 @@ export class DataManager {
     ]);
     await this.deleteLexicalIndexedFileRefs([oldPath]);
     await this.upsertLexicalIndexedFileRef(file, generation);
+    await this.fileSnapshotStore.removeFiles([oldPath]);
     await this.markLexicalSnapshotDirty([oldPath, file.path]);
     return true;
   }
