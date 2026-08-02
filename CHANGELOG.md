@@ -1,3 +1,7 @@
+## [0.3.7] - 2026-08-02
+
+- chore: align release baseline and CI runner
+
 ## [0.2.25] - 2026-08-02
 
 - chore: refine search docs and release workflow
