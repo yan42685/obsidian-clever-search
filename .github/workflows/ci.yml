@@ -30,4 +30,17 @@ jobs:
         run: pnpm install
 
       - name: Run Tests
-        run: pnpm test
+        shell: pwsh
+        run: |
+          & pnpm test 2>&1 | Tee-Object -FilePath test-output.log
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
+            exit $exitCode
+          }
+
+      - name: Upload test output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output-${{ github.run_id }}
+          path: test-output.log
