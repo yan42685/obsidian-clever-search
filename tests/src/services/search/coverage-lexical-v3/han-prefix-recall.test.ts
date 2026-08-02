@@ -59,14 +59,25 @@ describe("coverage lexical v3 Han prefix recall", () => {
 		expect(candidateDocs).not.toHaveLength(0);
 
 		const rankedPaths = candidateDocs
-			.map((candidateRecall) =>
-				buildPackingProfile(
+			.map((candidateRecall) => {
+				const profile = buildPackingProfile(
 					base,
 					queryAnalysis,
 					candidateRecall,
 					unitFamilyMatches,
-				),
-			)
+				);
+				console.log("han-prefix profile", {
+					path: profile.path,
+					candidateRecall,
+					realizedFamilies: profile.realizedFamilies,
+					coverageGate: profile.coverageGate,
+					strongestContainer: profile.strongestContainer,
+					secondStrongestContainer: profile.secondStrongestContainer,
+					hanSurfaceCompletionGroups: profile.hanSurfaceCompletionGroups,
+					hanRescueAssessments: profile.hanRescueAssessments,
+				});
+				return profile;
+			})
 			.sort(comparePackingProfiles)
 			.map((candidate) => candidate.path);
 
