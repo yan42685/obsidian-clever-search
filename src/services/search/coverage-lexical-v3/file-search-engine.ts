@@ -973,18 +973,19 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	private async applyOverlayRecoveryChanges(
 		changes: PersistentFileIndexRecoveryChanges,
 	): Promise<boolean> {
-		const previousRecovery = this.pendingOverlayRecovery;
 		const recoveryGeneration = this.overlayRecoveryGeneration;
-		const recovery = previousRecovery
-			.catch(() => undefined)
-			.then(() =>
+		return await this.runSerializedOverlayTask(() =>
 				this.applyOverlayRecoveryChangesInternal(changes, recoveryGeneration),
-			);
-		this.pendingOverlayRecovery = recovery.then(
+		);
+	}
+
+	private async runSerializedOverlayTask<T>(task: () => Promise<T>): Promise<T> {
+		const operation = this.pendingOverlayRecovery.catch(() => undefined).then(task);
+		this.pendingOverlayRecovery = operation.then(
 			() => undefined,
 			() => undefined,
 		);
-		return await recovery;
+		return await operation;
 	}
 
 	private async applyOverlayRecoveryChangesInternal(
@@ -1209,7 +1210,10 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	}
 
 	async persistFileIndexArtifact(): Promise<void> {
-		await this.awaitPendingOverlayRecovery();
+		await this.runSerializedOverlayTask(() => this.persistFileIndexArtifactInternal());
+	}
+
+	private async persistFileIndexArtifactInternal(): Promise<void> {
 		const indexView = this.engine.getResidentIndexView();
 		if (indexView == null || indexView.shards.length === 0) {
 			await this.clearPersistedFileIndexArtifact();

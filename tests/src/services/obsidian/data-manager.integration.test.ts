@@ -261,6 +261,20 @@ function createMockFileSnapshotStore() {
         return result;
       },
     ),
+    readFreshCurrentTexts: jest.fn(
+      async (fileOrPaths: ReadonlyArray<string | { path: string }>) => {
+        const result = new Map<string, string>();
+        for (const fileOrPath of fileOrPaths) {
+          const path =
+            typeof fileOrPath === "string" ? fileOrPath : fileOrPath.path;
+          const currentEntry = current.get(path);
+          if (currentEntry) {
+            result.set(path, currentEntry.text);
+          }
+        }
+        return result;
+      },
+    ),
     publishIndexedTexts: jest.fn(
       async (
         files: ReadonlyArray<{
@@ -1381,6 +1395,43 @@ describe("DataManager integration", () => {
     expect(fileWatcher.flushPendingModifications.mock.invocationCallOrder[0]).toBeLessThan(
       forceFlushSpy.mock.invocationCallOrder[0],
     );
+  });
+
+  test("starts the file watcher before opening the startup database", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = false;
+    const database = createMockDatabase();
+    const dataProvider = createMockDataProvider({
+      files: new Map(),
+      texts: new Map(),
+    });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine({
+      isEnabled: jest.fn(() => false),
+    });
+    const { fileWatcher } = registerDataManagerDeps({
+      setting,
+      pluginFiles: [],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+    database.openAndConsumeSchemaUpgradeReport.mockImplementation(async () => {
+      expect(fileWatcher.start).toHaveBeenCalledTimes(1);
+      return {
+        schemaUpgradeDetected: false,
+        recovery: null,
+      };
+    });
+
+    const manager = resolveDataManager();
+    await manager.initAsync();
+    await (manager as any).searchBootstrapCommitTask;
+
+    expect(database.openAndConsumeSchemaUpgradeReport).toHaveBeenCalledTimes(1);
   });
 
   test("coalesces rename plus modify burst into the final new-path lexical and snapshot state", async () => {

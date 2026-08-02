@@ -1876,6 +1876,102 @@ describe("coverage lexical v3 file search engine", () => {
 		]);
 	});
 
+	test("overlay recovery waits for an in-flight persist before selecting its active generation", async () => {
+		const productionStores = createMemoryCoverageLexicalV3ProductionStores();
+		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable((row) => row.id),
+		);
+		const overlayJournalStore = new MemoryActiveOverlayJournalStore();
+		const snapshotStore = new MemoryCoverageLexicalV3SnapshotStore();
+		const persistentStores = {
+			productionStores,
+			artifactStore,
+			overlayJournalStore,
+			snapshotStore,
+		};
+		const evidenceSnapshotStore = {
+			readIndexedTexts: jest.fn(async () => new Map<string, string>()),
+			readIndexedMetadata: jest.fn(async () => new Map()),
+			readCurrentTexts: jest.fn(async () => new Map<string, string>()),
+			publishLexicalBodyEvidence: jest.fn(async () => undefined),
+			readLexicalBodyEvidenceForBlocks: jest.fn(async () => new Map()),
+			publishLexicalHanDocEvidence: jest.fn(async () => undefined),
+			readLexicalHanDocEvidenceForDocs: jest.fn(async () => new Map()),
+			publishLexicalHanBodyEvidence: jest.fn(async () => undefined),
+			readLexicalHanBodyEvidenceForBlocks: jest.fn(async () => new Map()),
+			publishLexicalFuzzyRescue: jest.fn(async () => undefined),
+			readLexicalFuzzyRescue: jest.fn(async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX),
+			readLexicalFuzzyRescueForLookupKeys: jest.fn(
+				async () => EMPTY_RESIDENT_FUZZY_RESCUE_INDEX,
+			),
+		};
+		const engine = new CoverageLexicalV3FileSearchEngine();
+		(engine as any).getPersistentStores = () => persistentStores;
+		(engine as any).getFileSnapshotStore = () => evidenceSnapshotStore;
+		await engine.reIndexAll([
+			createDocument({
+				docRef: 55,
+				path: "notes/base.md",
+				basename: "base",
+				folder: "notes",
+				content: "base content",
+				generation: 1,
+			}),
+		]);
+
+		let releasePublish!: () => void;
+		const publishGate = new Promise<void>((resolve) => {
+			releasePublish = resolve;
+		});
+		let markPublishStarted!: () => void;
+		const publishStarted = new Promise<void>((resolve) => {
+			markPublishStarted = resolve;
+		});
+		const originalPublish = artifactStore.publishResidentShardArtifact.bind(artifactStore);
+		(artifactStore as any).publishResidentShardArtifact = jest.fn(async (params) => {
+			markPublishStarted();
+			await publishGate;
+			return await originalPublish(params);
+		});
+
+		const persist = engine.persistFileIndexArtifact();
+		await publishStarted;
+		const recovery = engine.applyPersistentRecoveryChanges({
+			deletePaths: [],
+			upsertDocuments: [
+				createDocument({
+					docRef: 56,
+					path: "notes/during-persist.md",
+					basename: "during-persist",
+					folder: "notes",
+					content: "concurrent recovered content",
+					generation: 2,
+				}),
+			],
+		});
+		await Promise.resolve();
+
+		await expect(
+			overlayJournalStore.loadActiveOverlayEntries({
+				activeShardId: "base-0",
+				activeShardGeneration: 1,
+			}),
+		).resolves.toHaveLength(0);
+
+		releasePublish();
+		await Promise.all([persist, recovery]);
+		await expect(
+			overlayJournalStore.loadActiveOverlayEntries({
+				activeShardId: "base-0",
+				activeShardGeneration: 1,
+			}),
+		).resolves.toEqual([
+			expect.objectContaining({
+				document: expect.objectContaining({ path: "notes/during-persist.md" }),
+			}),
+		]);
+	});
+
 	test("direct subitems wait for pending overlay recovery before reading document views", async () => {
 		class SlowAppendOverlayJournalStore extends MemoryActiveOverlayJournalStore {
 			async appendOverlayEntries(entries: readonly any[]) {

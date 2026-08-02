@@ -1,4 +1,4 @@
-import { App, TAbstractFile, TFile } from "obsidian";
+import { App, TAbstractFile, TFile, TFolder } from "obsidian";
 import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
@@ -16,9 +16,13 @@ export class FileWatcher {
 	private readonly fileSnapshotStore = getInstance(FileSnapshotStore);
 	private readonly app = getInstance(App);
 	private modifyTimers: Map<string, NodeJS.Timeout> = new Map();
+	private started = false;
 
 	start() {
-		this.stop(); // in case THIS_PLUGIN.onunload isn't called correctly, sometimes it happens
+		if (this.started) {
+			return;
+		}
+		this.started = true;
 		this.app.vault.on("create", this.onCreate);
 		this.app.vault.on("delete", this.onDelete);
 		this.app.vault.on("rename", this.onRename);
@@ -27,6 +31,10 @@ export class FileWatcher {
 	}
 
 	stop() {
+		if (!this.started) {
+			return;
+		}
+		this.started = false;
 		this.app.vault.off("create", this.onCreate);
 		this.app.vault.off("delete", this.onDelete);
 		this.app.vault.off("rename", this.onRename);
@@ -68,14 +76,34 @@ export class FileWatcher {
 		this.dataManager.receiveDocOperation(new DocDeleteOperation(file.path));
 	};
 
-	private readonly onRename = (file: TAbstractFile, oldPath: string) => {
+	private readonly onRename = async (file: TAbstractFile, oldPath: string) => {
 		logger.debug(`renamed: ${oldPath} => ${file.path}`);
 		if (file instanceof TFile) {
-			void this.enqueuePrimedMove(oldPath, file);
+			await this.enqueuePrimedMove(oldPath, file);
 			return;
 		}
-		this.dataManager.receiveDocOperation(new DocMoveOperation(oldPath, file.path));
+		if (file instanceof TFolder) {
+			for (const descendant of this.collectDescendantFiles(file)) {
+				const relativePath = descendant.path.slice(file.path.length + 1);
+				const oldDescendantPath = `${oldPath}/${relativePath}`;
+				this.clearModifyTimer(oldDescendantPath);
+				this.clearModifyTimer(descendant.path);
+				await this.enqueuePrimedMove(oldDescendantPath, descendant);
+			}
+		}
 	};
+
+	private collectDescendantFiles(folder: TFolder): TFile[] {
+		const files: TFile[] = [];
+		for (const child of folder.children) {
+			if (child instanceof TFile) {
+				files.push(child);
+			} else if (child instanceof TFolder) {
+				files.push(...this.collectDescendantFiles(child));
+			}
+		}
+		return files;
+	}
 
 	// Debounce modify events and always re-read the latest file state at flush time.
 	private readonly onModify = (file: TAbstractFile) => {
@@ -126,11 +154,18 @@ export class FileWatcher {
 	}
 
 	private async primeCurrentFileText(file: TFile): Promise<number> {
-		try {
-			await this.fileSnapshotStore.readCurrentTexts([file]);
-		} catch (error) {
-			logger.warn(`failed to prime current file text for ${file.path}:`, error);
+		while (true) {
+			const sourcePath = file.path;
+			const sourceGeneration = file.stat.mtime;
+			try {
+				await this.fileSnapshotStore.readCurrentTexts([file]);
+			} catch (error) {
+				logger.warn(`failed to prime current file text for ${file.path}:`, error);
+				return sourceGeneration;
+			}
+			if (file.path === sourcePath && file.stat.mtime === sourceGeneration) {
+				return sourceGeneration;
+			}
 		}
-		return file.stat.mtime;
 	}
 }

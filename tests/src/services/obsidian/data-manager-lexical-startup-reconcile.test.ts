@@ -399,6 +399,15 @@ function createHarness(params: {
     }),
   };
   manager.fileSnapshotStore = {
+    readFreshCurrentTexts: jest.fn(
+      async (files: ReadonlyArray<TFile | string>) =>
+        new Map(
+          files.map((file) => {
+            const path = typeof file === "string" ? file : file.path;
+            return [path, params.texts.get(path) ?? ""] as const;
+          }),
+        ),
+    ),
     readIndexedTexts: jest.fn(
       async (requests: ReadonlyArray<{ path: string; generation?: number }>) => {
         const result = new Map<string, string>();
@@ -462,6 +471,10 @@ function createHarness(params: {
     dispose: jest.fn(),
   };
   manager.lexicalStartupPendingOperations = [];
+  manager.lexicalStartupCapturedOperations = [];
+  manager.captureLexicalStartupOperations = false;
+  manager.pendingLexicalOperationPersistence = Promise.resolve();
+  manager.lexicalStartupFingerprintDriftPaths = new Set();
   manager.lexicalIndexedFileRefsLoaded = true;
   manager.lexicalIndexedFileRefsByPath = new Map(
     params.previousIndexedFileRefs.map((ref) => [ref.path, { ...ref }]),
@@ -513,6 +526,96 @@ function createBootstrapMetrics() {
 describe("DataManager lexical startup reconcile", () => {
   beforeEach(() => {
     MyNotice.clear();
+  });
+
+  test("captures runtime operations during bootstrap and replays them after persistence is ready", async () => {
+    const file = createFile("docs/during-startup.md", "latest body", 200);
+    const harness = createHarness({
+      files: [file],
+      texts: new Map([[file.path, "latest body"]]),
+      previousIndexedFileRefs: [],
+    });
+    harness.manager.captureLexicalStartupOperations = true;
+    harness.manager.persistLexicalSearchSnapshotIfAvailable = jest.fn(async () => {});
+    harness.manager.replayPersistedPendingLexicalDocOperations = jest.fn(async () => {
+      expect(harness.manager.lexicalStartupPendingOperations).toEqual([
+        expect.objectContaining({ path: file.path }),
+      ]);
+      harness.manager.lexicalStartupPendingOperations = [];
+    });
+
+    const operation = new DocUpsertOperation(file.path, file.stat.mtime);
+    DataManager.prototype.receiveDocOperation.call(harness.manager, operation);
+    await harness.manager.pendingLexicalOperationPersistence;
+
+    expect(harness.manager.docOperationsBuffer.add).not.toHaveBeenCalled();
+    expect(harness.manager.lexicalStartupCapturedOperations).toEqual([operation]);
+    expect(harness.pendingDocOperationRows.has(operation.id)).toBe(true);
+    expect(harness.lexicalMutationJournalRows.has(operation.id)).toBe(true);
+
+    await harness.manager.commitLexicalBootstrapPlan();
+
+    expect(harness.manager.captureLexicalStartupOperations).toBe(false);
+    expect(
+      harness.manager.replayPersistedPendingLexicalDocOperations,
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  test("detects equal-mtime equal-size content drift from a fresh vault read", async () => {
+    const path = "docs/same-stat.md";
+    const file = createFile(path, "new body", 100);
+    const harness = createHarness({
+      files: [file],
+      texts: new Map([[path, "new body"]]),
+      previousIndexedFileRefs: [
+        {
+          path,
+          generation: 100,
+          size: Buffer.byteLength("old body", "utf8"),
+        },
+      ],
+      previousDocRegistryEntries: [
+        {
+          docRef: 1,
+          path,
+          deleted: false,
+          liveGeneration: 100,
+          contentFingerprint: hashStableText("old body"),
+          updatedAt: 1,
+        },
+      ],
+    });
+
+    const driftPaths =
+      await harness.manager.findLexicalStartupFingerprintDriftPaths();
+
+    expect(driftPaths).toEqual(new Set([path]));
+    expect(
+      harness.manager.hasIndexedFileRefChanged(file, {
+        path,
+        generation: 200,
+        size: file.stat.size,
+      }),
+    ).toBe(true);
+
+    harness.manager.lexicalStartupFingerprintDriftPaths = driftPaths;
+    expect(
+      harness.manager.mergeFingerprintDriftIntoRecoveryPlan({
+        status: "up_to_date",
+        reason: "up_to_date",
+        docsToDelete: [],
+        docsToAdd: [],
+        docsToUpdate: [],
+        docsToMove: [],
+      }),
+    ).toEqual({
+      status: "needs_heal",
+      reason: "vault_drift",
+      docsToDelete: [],
+      docsToAdd: [],
+      docsToUpdate: [path],
+      docsToMove: [],
+    });
   });
 
   test("forces full rebuild when a persisted lexical snapshot exists but the fine-grained evidence marker is not ready", async () => {

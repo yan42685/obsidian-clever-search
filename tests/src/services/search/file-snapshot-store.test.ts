@@ -707,6 +707,51 @@ describe("FileSnapshotStore", () => {
     expect(vault.cachedRead).toHaveBeenCalledTimes(1);
   });
 
+  test("readCurrentTexts retries when mtime changes while the vault read is in flight", async () => {
+    const file = new TFile("docs/rapid-edit.md", "old body", 100);
+    const { store, vault } = createStoreHarness({ files: [file] });
+    vault.cachedRead
+      .mockImplementationOnce(async () => {
+        file.stat.mtime = 200;
+        file.stat.size = Buffer.byteLength("latest body", "utf8");
+        return "old body";
+      })
+      .mockResolvedValueOnce("latest body");
+
+    const first = await store.readCurrentTexts([file]);
+    const second = await store.readCurrentTexts([file]);
+
+    expect(first.get(file.path)).toBe("latest body");
+    expect(second.get(file.path)).toBe("latest body");
+    expect(vault.cachedRead).toHaveBeenCalledTimes(2);
+  });
+
+  test("readFreshCurrentTexts bypasses an aligned persisted snapshot", async () => {
+    const file = new TFile("docs/external-rewrite.md", "latest body", 200);
+    const { store, vault } = createStoreHarness({
+      files: [file],
+      fileSnapshots: [
+        {
+          filePath: file.path,
+          plainText: "stale body",
+          generation: 200,
+        },
+      ],
+      reads: {
+        [file.path]: "latest body",
+      },
+    });
+
+    const cached = await store.readCurrentTexts([file]);
+    const fresh = await store.readFreshCurrentTexts([file]);
+    const current = await store.readCurrentTexts([file]);
+
+    expect(cached.get(file.path)).toBe("stale body");
+    expect(fresh.get(file.path)).toBe("latest body");
+    expect(current.get(file.path)).toBe("latest body");
+    expect(vault.cachedRead).toHaveBeenCalledTimes(1);
+  });
+
   test("readIndexedTexts does not fall back to newer vault text when no aligned indexed generation exists", async () => {
     const file = new TFile("docs/generation-mismatch.md", "latest body", 200);
     const { store, vault } = createStoreHarness({

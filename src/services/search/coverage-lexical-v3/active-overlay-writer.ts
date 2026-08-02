@@ -4,6 +4,7 @@ import {
 } from "./append-planner";
 import {
 	buildActiveOverlayJournalEntryId,
+	buildOverlayShardId,
 	type ActiveOverlayJournalEntry,
 	type ActiveOverlayJournalStore,
 } from "./active-overlay-journal";
@@ -77,7 +78,10 @@ export function planActiveOverlayChanges(params: {
 	});
 	const invalidations = entries.flatMap((entry) => {
 		const previousVersion = entry.previousVersion;
-		if (previousVersion == null) {
+		if (
+			previousVersion == null ||
+			isSameOverlayDocumentVersion(params.activeShard, entry, previousVersion)
+		) {
 			return [];
 		}
 		return [
@@ -92,6 +96,22 @@ export function planActiveOverlayChanges(params: {
 		];
 	});
 	return { entries, invalidations };
+}
+
+function isSameOverlayDocumentVersion(
+	activeShard: ResidentShardDescriptor,
+	entry: ActiveOverlayJournalEntry,
+	previousVersion: NonNullable<ActiveOverlayJournalEntry["previousVersion"]>,
+): boolean {
+	const document = entry.document;
+	return (
+		entry.operation === "append" &&
+		document != null &&
+		previousVersion.shardId === buildOverlayShardId(activeShard.shardId) &&
+		previousVersion.shardGeneration === activeShard.generation &&
+		previousVersion.docRef === document.docRef &&
+		previousVersion.docGeneration === document.generation
+	);
 }
 
 export async function commitActiveOverlayWritePlan(params: {

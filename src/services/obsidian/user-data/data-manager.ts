@@ -452,6 +452,7 @@ export class DataManager {
   private isLexicalEngineUpToDate = false;
   private lexicalIndexedFileRefsLoaded = false;
   private lexicalIndexedFileRefsByPath = new Map<string, BaseIndexedFileRef>();
+  private lexicalStartupFingerprintDriftPaths = new Set<string>();
   private readonly lexicalSnapshotCoordinator = new DirtyArtifactCoordinator({
     engine: "lexical",
     artifact: "snapshot",
@@ -494,6 +495,9 @@ export class DataManager {
   private lexicalFailureRetryInFlight = false;
   private lexicalStartupFailureRetryPending = false;
   private lexicalStartupPendingOperations: DocOperation[] = [];
+  private lexicalStartupCapturedOperations: DocOperation[] = [];
+  private captureLexicalStartupOperations = false;
+  private pendingLexicalOperationPersistence: Promise<void> = Promise.resolve();
   private isUnloaded = false;
   private readonly lexicalIndexFailuresByPath = new Map<
     string,
@@ -1122,6 +1126,7 @@ export class DataManager {
     if (this.isUnloaded) {
       return;
     }
+    await this.pendingLexicalOperationPersistence;
     const { rawOperations, reducedBatch: operations } = batch;
     const consumedStalePaths = new Set<string>();
     // Apply surviving dirty paths first so rename fast-paths can reuse old-path data
@@ -1164,13 +1169,17 @@ export class DataManager {
     this.isUnloaded = false;
     this.lexicalStartupFailureRetryPending = false;
     this.lexicalStartupPendingOperations = [];
+    this.lexicalStartupCapturedOperations = [];
+    this.captureLexicalStartupOperations = true;
     this.clearHybridFailedEmbeddingState();
     this.resetLexicalSnapshotTracking();
     this.fileSnapshotStore.resetRuntimeState();
     this.lexicalIndexedFileRefsLoaded = false;
     this.lexicalIndexedFileRefsByPath.clear();
+    this.lexicalStartupFingerprintDriftPaths.clear();
     this.setHybridRuntimeQueryGate("blocked");
     this.beginSearchBootstrapRun();
+    getInstance(FileWatcher).start();
     try {
       const bootstrapSummary = await this.runSearchBootstrapPipeline();
       this.kickOffSearchBootstrapCommit();
@@ -1178,6 +1187,7 @@ export class DataManager {
         this.noticeSearchBootstrapCompletion(bootstrapSummary);
       }
     } catch (error) {
+      this.releaseCapturedLexicalOperationsToRuntimeBuffer();
       this.setLexicalBootstrapState("failed");
       if (this.hybridEngine.isEnabled()) {
         this.setHybridBootstrapState("failed");
@@ -1202,6 +1212,8 @@ export class DataManager {
     this.lexicalIndexFailuresByPath.clear();
     this.lexicalStartupFailureRetryPending = false;
     this.lexicalStartupPendingOperations = [];
+    this.lexicalStartupCapturedOperations = [];
+    this.captureLexicalStartupOperations = false;
     this.searchBootstrapCommitTask = null;
     this.setLexicalBootstrapState("blocked");
     this.setHybridBootstrapState("blocked");
@@ -1211,9 +1223,42 @@ export class DataManager {
     if (this.isUnloaded) {
       return;
     }
-    this.docOperationsBuffer.add(operation);
-    void this.persistPendingLexicalDocOperation(operation);
-    void this.persistLexicalMutationJournalEntry(operation);
+    if (this.captureLexicalStartupOperations) {
+      this.lexicalStartupCapturedOperations.push(operation);
+    } else {
+      this.docOperationsBuffer.add(operation);
+    }
+    const persistence = Promise.all([
+      this.persistPendingLexicalDocOperation(operation),
+      this.persistLexicalMutationJournalEntry(operation),
+    ]).then(() => undefined);
+    this.pendingLexicalOperationPersistence = Promise.all([
+      this.pendingLexicalOperationPersistence,
+      persistence,
+    ]).then(() => undefined);
+  }
+
+  private finishLexicalStartupOperationCapture(): DocOperation[] {
+    this.captureLexicalStartupOperations = false;
+    const operations = this.lexicalStartupCapturedOperations;
+    this.lexicalStartupCapturedOperations = [];
+    return operations;
+  }
+
+  private releaseCapturedLexicalOperationsToRuntimeBuffer(): void {
+    for (const operation of this.finishLexicalStartupOperationCapture()) {
+      this.docOperationsBuffer.add(operation);
+    }
+  }
+
+  private mergeLexicalStartupOperations(
+    operations: readonly DocOperation[],
+  ): DocOperation[] {
+    const operationById = new Map<string, DocOperation>();
+    for (const operation of operations) {
+      operationById.set(operation.id, operation);
+    }
+    return [...operationById.values()];
   }
 
   private async runSearchBootstrapPipeline(): Promise<SearchBootstrapCompletionSummary> {
@@ -2885,10 +2930,14 @@ export class DataManager {
           persistentRecoveryPlan: null,
         };
       }
-      const persistentRecoveryPlan = await this.lexicalEngine.planPersistentRecovery(
-        this.buildCurrentLexicalIndexedFileRefs(),
-      );
       await this.reloadLexicalIndexedFileRefs();
+      this.lexicalStartupFingerprintDriftPaths =
+        await this.findLexicalStartupFingerprintDriftPaths();
+      const persistentRecoveryPlan = this.mergeFingerprintDriftIntoRecoveryPlan(
+        await this.lexicalEngine.planPersistentRecovery(
+          this.buildCurrentLexicalIndexedFileRefs(),
+        ),
+      );
       if (persistentRecoveryPlan?.status === "needs_full_rebuild") {
         logger.warn(
           `Persisted lexical recovery requires full rebuild: ${persistentRecoveryPlan.reason}`,
@@ -2950,6 +2999,8 @@ export class DataManager {
       };
     }
     await this.reloadLexicalIndexedFileRefs();
+    this.lexicalStartupFingerprintDriftPaths =
+      await this.findLexicalStartupFingerprintDriftPaths();
     if (this.shouldForceLexicalRebuildAfterSnapshotRestore()) {
       logger.warn(
         "Restored lexical snapshot is inconsistent with persisted lexical indexed refs. Rebuilding lexical index.",
@@ -2965,7 +3016,9 @@ export class DataManager {
 
     return {
       needsFullReindex: false,
-      needsRefHeal: !this.isLexicalEngineUpToDate,
+      needsRefHeal:
+        !this.isLexicalEngineUpToDate ||
+        this.lexicalStartupFingerprintDriftPaths.size > 0,
       persistentRecoveryPlan: null,
     };
   }
@@ -3002,6 +3055,7 @@ export class DataManager {
     } else {
       await this.ensureLexicalIndexedFileRefsLoaded();
     }
+    this.lexicalStartupFingerprintDriftPaths.clear();
 
     const restoredFailureCount =
       await this.restorePersistedLexicalRecoveryState();
@@ -3026,6 +3080,12 @@ export class DataManager {
 
   private async commitLexicalBootstrapPlan(): Promise<void> {
     logger.trace("Lexical engine is ready");
+    const capturedOperations = this.finishLexicalStartupOperationCapture();
+    this.lexicalStartupPendingOperations = this.mergeLexicalStartupOperations([
+      ...this.lexicalStartupPendingOperations,
+      ...capturedOperations,
+    ]);
+    await this.pendingLexicalOperationPersistence;
     await this.persistLexicalSearchSnapshotIfAvailable();
     if (this.lexicalStartupPendingOperations.length > 0) {
       await this.replayPersistedPendingLexicalDocOperations();
@@ -3180,10 +3240,75 @@ export class DataManager {
   }
   private buildCurrentLexicalIndexedFileRefs(): BaseIndexedFileRef[] {
     return this.dataProvider.allFilesToBeIndexed().map((file) => ({
+      docRef: this.lexicalIndexedFileRefsByPath.get(file.path)?.docRef,
       path: file.path,
       generation: file.stat.mtime,
       size: file.stat.size,
     }));
+  }
+
+  private async findLexicalStartupFingerprintDriftPaths(): Promise<Set<string>> {
+    await this.ensureLexicalIndexedFileRefsLoaded();
+    const registryByPath = new Map(
+      (await this.listLexicalDocRegistryEntries()).map((entry) => [entry.path, entry]),
+    );
+    const candidates: TFile[] = [];
+    const driftPaths = new Set<string>();
+
+    for (const file of this.dataProvider.allFilesToBeIndexed()) {
+      const indexedRef = this.lexicalIndexedFileRefsByPath.get(file.path);
+      if (!indexedRef) {
+        continue;
+      }
+      if (
+        file.stat.mtime !== indexedRef.generation ||
+        (indexedRef.size !== undefined && file.stat.size !== indexedRef.size)
+      ) {
+        continue;
+      }
+      const fingerprint = registryByPath.get(file.path)?.contentFingerprint;
+      if (!fingerprint) {
+        driftPaths.add(file.path);
+        continue;
+      }
+      candidates.push(file);
+    }
+
+    const freshTexts = await this.fileSnapshotStore.readFreshCurrentTexts(candidates);
+    for (const file of candidates) {
+      const currentText = freshTexts.get(file.path);
+      const indexedFingerprint = registryByPath.get(file.path)?.contentFingerprint;
+      if (
+        currentText !== undefined &&
+        indexedFingerprint !== undefined &&
+        hashStableText(currentText) !== indexedFingerprint
+      ) {
+        driftPaths.add(file.path);
+      }
+    }
+    return driftPaths;
+  }
+
+  private mergeFingerprintDriftIntoRecoveryPlan(
+    plan: PersistentFileIndexRecoveryPlan | null,
+  ): PersistentFileIndexRecoveryPlan | null {
+    if (
+      plan == null ||
+      plan.status === "needs_full_rebuild" ||
+      this.lexicalStartupFingerprintDriftPaths.size === 0
+    ) {
+      return plan;
+    }
+    const docsToUpdate = new Set(plan.docsToUpdate);
+    for (const path of this.lexicalStartupFingerprintDriftPaths) {
+      docsToUpdate.add(path);
+    }
+    return {
+      ...plan,
+      status: "needs_heal",
+      reason: "vault_drift",
+      docsToUpdate: [...docsToUpdate],
+    };
   }
 
   private async applyLexicalPersistentRecoveryPlan(
@@ -3309,7 +3434,10 @@ export class DataManager {
       const previousIndexedFileRef = previousIndexedFileRefs.get(path);
       if (!previousIndexedFileRef) {
         docsToAdd.push(file);
-      } else if (this.hasIndexedFileRefChanged(file, previousIndexedFileRef)) {
+      } else if (
+        this.hasIndexedFileRefChanged(file, previousIndexedFileRef) ||
+        this.lexicalStartupFingerprintDriftPaths.has(file.path)
+      ) {
         docsToDelete.push(file.path);
         docsToAdd.push(file);
       }
@@ -3690,7 +3818,7 @@ export class DataManager {
     file: TFile,
     indexedFileRef: BaseIndexedFileRef,
   ): boolean {
-    if (file.stat.mtime > indexedFileRef.generation) {
+    if (file.stat.mtime !== indexedFileRef.generation) {
       return true;
     }
     if (indexedFileRef.size === undefined) {
@@ -4335,7 +4463,6 @@ export class DataManager {
 
     if (!this.shouldForceRefresh) {
       this.ensureInVaultSearchFlushListener();
-      getInstance(FileWatcher).start();
     }
 
     this.notifyHybridRuntimeStatusChanged();

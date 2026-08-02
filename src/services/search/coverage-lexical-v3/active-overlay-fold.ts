@@ -108,10 +108,7 @@ export async function runActiveOverlayFoldMaintenanceJob(params: {
 	if (activeStillVisible) {
 		throw new Error("Active overlay fold did not publish replacement registry before clearing overlay.");
 	}
-	await params.overlayJournalStore.clearActiveOverlayEntries({
-		activeShardId: params.activeShard.shardId,
-		activeShardGeneration: params.activeShard.generation,
-	});
+	await params.overlayJournalStore.removeEntries(entries.map((entry) => entry.id));
 	return {
 		...result,
 		clearedOverlayEntries: entries.length,

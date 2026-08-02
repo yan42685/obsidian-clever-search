@@ -232,7 +232,8 @@ export function openQuickSwitchManageModal(app: App) {
 @singleton()
 class GeneralTab extends PluginSettingTab {
 	private readonly settingManager = getInstance(SettingManager);
-	private readonly setting = getInstance(OuterSetting);
+	// Obsidian uses `setting` internally on PluginSettingTab in recent versions.
+	private readonly pluginSetting = getInstance(OuterSetting);
 	// WARN: this class should not initialize any other modules on fields
 	//       or there will be runtime exceptions that are hard to diagnose
 	// BE CAUTIOUS
@@ -338,7 +339,7 @@ class GeneralTab extends PluginSettingTab {
 		});
 
 		const collapseDevSettingByDefault =
-			this.setting.ui.collapseDevSettingByDefault;
+			this.pluginSetting.ui.collapseDevSettingByDefault;
 		devSettingContent.style.display = collapseDevSettingByDefault
 			? "none"
 			: "block";
@@ -361,9 +362,9 @@ class GeneralTab extends PluginSettingTab {
 			.setName(t("Collapse development setting by default"))
 			.addToggle((toggle) =>
 				toggle
-					.setValue(this.setting.ui.collapseDevSettingByDefault)
+					.setValue(this.pluginSetting.ui.collapseDevSettingByDefault)
 					.onChange((value) => {
-						this.setting.ui.collapseDevSettingByDefault = value;
+						this.pluginSetting.ui.collapseDevSettingByDefault = value;
 					}),
 			);
 
@@ -380,11 +381,11 @@ class GeneralTab extends PluginSettingTab {
 						none: "none",
 					} as LogLevelOptions)
 					// Use lowercase values because the stored log level is normalized.
-					.setValue(this.setting.logLevel.toLowerCase())
+					.setValue(this.pluginSetting.logLevel.toLowerCase())
 					.onChange(async (value) => {
 						const level = value as LogLevel;
 						logger.setLevel(level);
-						this.setting.logLevel = level;
+						this.pluginSetting.logLevel = level;
 					}),
 			);
 

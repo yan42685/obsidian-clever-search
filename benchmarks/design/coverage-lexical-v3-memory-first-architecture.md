@@ -1448,3 +1448,47 @@ Validation completed for this update:
 - direct-subitem and hybrid lexical subitem regression coverage verifies
   normalized matches map back to original offsets when NFKC expands a preceding
   character.
+
+2026-08-01 follow-up hardening:
+
+- file-index persistence and active-overlay recovery now share one serialized
+  mutation queue, so an edit cannot select an active generation while snapshot
+  maintenance is folding and replacing that generation.
+- active-overlay fold removes only the journal entry ids included in its fold;
+  a concurrently appended tail is not deleted by a generation-wide clear.
+- same-generation replacements inside the active overlay no longer invalidate
+  the identical replacement identity that remains live in the materialized
+  overlay shard.
+- current vault text is cached only when the file path and `mtime` remain stable
+  for the full asynchronous read, preventing stale text from being stamped with
+  a newer generation and persisted across restart.
+- targeted regressions cover the persist/edit interleaving, concurrent fold
+  tail preservation, same-generation replacement, and in-flight `mtime` change.
+- `npm run typecheck:build`, `npm run typecheck:test`, and the targeted overlay,
+  file-search-engine, and file-snapshot-store suites pass on 2026-08-01.
+
+2026-08-01 startup and vault-drift hardening:
+
+- the file watcher now starts before the startup database and index bootstrap,
+  closing the event-loss window while persisted state is being opened and
+  reconciled.
+- file operations captured during bootstrap are persisted immediately, held
+  outside the rebuilding runtime index, and replayed after the startup index is
+  committed; bootstrap failure releases them to the normal runtime buffer.
+- pending-operation and mutation-journal writes are awaited before replayed
+  rows are processed or deleted, so a slow persistence write cannot be lost to
+  startup cleanup.
+- folder rename events expand into one move operation per descendant file,
+  preserving indexed identities for nested notes instead of handling only the
+  folder object.
+- startup drift detection treats any `mtime` mismatch as changed, including
+  timestamps that move backwards after sync or restore.
+- files with equal `mtime` and size are read directly from the vault and checked
+  against their persisted content fingerprint, detecting same-stat content
+  replacements and healing legacy rows without fingerprints.
+- regression coverage verifies early watcher registration, startup capture and
+  replay ordering, persistence completion before cleanup, descendant folder
+  rename handling, older timestamps, equal-stat fingerprint drift, and fresh
+  reads that bypass aligned but stale persisted snapshots.
+- `npm run typecheck:build`, `npm run typecheck:test`, and all `101` Jest suites
+  (`703` tests) pass on 2026-08-01.

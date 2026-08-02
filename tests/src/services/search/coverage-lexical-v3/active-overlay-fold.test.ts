@@ -74,6 +74,78 @@ function indexedSnapshotReader(documents: readonly IndexedDocument[]) {
 }
 
 describe("coverage lexical v3 active overlay fold", () => {
+	test("removes only the folded journal entries when a concurrent append arrives", async () => {
+		const active = activeDescriptor();
+		const stores = createMemoryCoverageLexicalV3ProductionStores({ registry: [active] });
+		const artifacts = createDexieCoverageLexicalV3ResidentShardArtifactStore(
+			new FakeArtifactTable<CoverageLexicalV3ResidentShardArtifactRow, string>((row) => row.id),
+		);
+		const concurrentDocument = doc("concurrent.md", "concurrent gamma", 3);
+		class ConcurrentAppendOverlayStore extends MemoryActiveOverlayJournalStore {
+			private appended = false;
+
+			async removeEntries(ids: readonly string[]): Promise<void> {
+				if (!this.appended) {
+					this.appended = true;
+					await this.appendOverlayEntries([
+						{
+							id: "active-1@1:2",
+							sequence: 2,
+							activeShardId: "active-1",
+							activeShardGeneration: 1,
+							operation: "append",
+							document: concurrentDocument,
+							sourceBytes: concurrentDocument.content?.length ?? 0,
+							createdAt: 3,
+						},
+					]);
+				}
+				await super.removeEntries(ids);
+			}
+		}
+		const overlayStore = new ConcurrentAppendOverlayStore();
+		const baseDoc = doc("base.md", "base alpha", 1);
+		await publishActiveShardAppend({
+			stores,
+			residentShardArtifactStore: artifacts,
+			activeShard: active,
+			currentActiveDocuments: [],
+			changes: [{ document: baseDoc }],
+			plannerOptions: { sealSourceBytes: 1024 * 1024, now: 1 },
+		});
+		const activeAfterBase = (await stores.shardRegistry.loadRegistry())[0] ?? active;
+		await writeActiveOverlayChanges({
+			stores,
+			overlayJournalStore: overlayStore,
+			activeShard: activeAfterBase,
+			changes: [{ document: doc("overlay.md", "overlay beta", 2) }],
+			sequenceStart: 1,
+			now: 2,
+		});
+
+		await runActiveOverlayFoldMaintenanceJob({
+			stores,
+			residentShardArtifactStore: artifacts,
+			overlayJournalStore: overlayStore,
+			activeShard: activeAfterBase,
+			indexedSnapshotReader: indexedSnapshotReader([baseDoc]),
+			sealSourceBytes: 1024 * 1024,
+			now: 3,
+		});
+
+		await expect(
+			overlayStore.loadActiveOverlayEntries({
+				activeShardId: "active-1",
+				activeShardGeneration: 1,
+			}),
+		).resolves.toEqual([
+			expect.objectContaining({
+				id: "active-1@1:2",
+				document: expect.objectContaining({ path: "concurrent.md" }),
+			}),
+		]);
+	});
+
 	test("folds overlay into a new active artifact and clears journal", async () => {
 		const active = activeDescriptor();
 		const stores = createMemoryCoverageLexicalV3ProductionStores({ registry: [active] });

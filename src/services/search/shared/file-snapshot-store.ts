@@ -381,6 +381,20 @@ export class FileSnapshotStore {
 		return texts;
 	}
 
+	async readFreshCurrentTexts(
+		fileOrPaths: ReadonlyArray<TFile | string>,
+	): Promise<Map<string, string>> {
+		const texts = new Map<string, string>();
+		for (const fileOrPath of fileOrPaths) {
+			const file = this.resolveFile(fileOrPath);
+			if (!(file instanceof TFile)) {
+				continue;
+			}
+			texts.set(file.path, await this.readFreshCurrentFileText(file));
+		}
+		return texts;
+	}
+
 	async readIndexedTexts(
 		requests: ReadonlyArray<IndexedTextRequest>,
 	): Promise<Map<string, string>> {
@@ -1091,10 +1105,21 @@ export class FileSnapshotStore {
 		) {
 			return cachedText;
 		}
-		const plainText = await this.vault.cachedRead(file);
-		const normalized =
-			file.extension === "html" ? this.normalizeHtmlToText(plainText) : plainText;
-		return this.writeCurrentFileText(file.path, normalized, file.stat.mtime);
+		return await this.readFreshCurrentFileText(file);
+	}
+
+	private async readFreshCurrentFileText(file: TFile): Promise<string> {
+		while (true) {
+			const readPath = file.path;
+			const readGeneration = file.stat.mtime;
+			const plainText = await this.vault.cachedRead(file);
+			if (file.path !== readPath || file.stat.mtime !== readGeneration) {
+				continue;
+			}
+			const normalized =
+				file.extension === "html" ? this.normalizeHtmlToText(plainText) : plainText;
+			return this.writeCurrentFileText(readPath, normalized, readGeneration);
+		}
 	}
 
 	resetRuntimeState(): void {

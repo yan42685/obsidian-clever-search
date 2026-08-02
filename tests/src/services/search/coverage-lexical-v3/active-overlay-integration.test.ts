@@ -1,6 +1,7 @@
 import type { IndexedDocument } from "src/globals/search-types";
 import {
 	buildOverlayResidentShard,
+	materializeOverlayDocuments,
 	MemoryActiveOverlayJournalStore,
 } from "src/services/search/coverage-lexical-v3/active-overlay-journal";
 import { writeActiveOverlayChanges } from "src/services/search/coverage-lexical-v3/active-overlay-writer";
@@ -132,6 +133,63 @@ describe("coverage lexical v3 active overlay integration", () => {
 		const paths = engine.search("project new target").rankedCandidates.map((candidate) => candidate.path);
 		expect(paths).toContain("new.md");
 		expect(paths).not.toContain("old.md");
+	});
+
+	test("same-generation overlay replacement does not invalidate its replacement", async () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.loadResidentIndexView({
+			version: 1,
+			shards: [buildShard("active-1", 1, [])],
+		});
+		const stores = createMemoryCoverageLexicalV3ProductionStores();
+		const overlayStore = new MemoryActiveOverlayJournalStore();
+		const first = doc("rapid.md", "project stale target", 9, 1);
+		const replacement = doc("rapid.md", "project fresh target", 9, 1);
+
+		await writeActiveOverlayChanges({
+			stores,
+			overlayJournalStore: overlayStore,
+			activeShard: activeDescriptor(),
+			changes: [{ document: first }],
+			sequenceStart: 1,
+			now: 20,
+		});
+		await writeActiveOverlayChanges({
+			stores,
+			overlayJournalStore: overlayStore,
+			activeShard: activeDescriptor(),
+			changes: [
+				{
+					document: replacement,
+					previousVersion: {
+						shardId: "active-1:overlay",
+						shardGeneration: 1,
+						docRef: 9,
+						docGeneration: 1,
+					},
+				},
+			],
+			sequenceStart: 2,
+			now: 21,
+		});
+
+		const invalidations = await stores.invalidations.loadInvalidations();
+		expect(invalidations).toEqual([]);
+		const entries = await overlayStore.loadActiveOverlayEntries({
+			activeShardId: "active-1",
+			activeShardGeneration: 1,
+		});
+		expect(materializeOverlayDocuments(entries)).toEqual([replacement]);
+		engine.loadShardInvalidations(invalidations);
+		engine.loadOverlayResidentShard(
+			buildOverlayResidentShard({
+				activeShardId: "active-1",
+				activeShardGeneration: 1,
+				entries,
+			}),
+		);
+
+		expect(engine.search("project fresh target").recallState.candidateDocs).toHaveLength(1);
 	});
 
 	test("external fuzzy rescue still applies to the base shard while overlay is loaded", async () => {
