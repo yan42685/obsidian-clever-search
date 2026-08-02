@@ -5052,7 +5052,7 @@ export class DataManager {
     );
     const estimatedHybridBytes = Math.round(totalBytes * estimatedRatio);
 
-    const storageEstimate = await navigator.storage
+    const storageEstimate = await globalThis.navigator?.storage
       ?.estimate?.()
       .catch(() => null);
     const quotaBytes =
