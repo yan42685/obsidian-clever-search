@@ -1,3 +1,23 @@
+## [0.2.25] - 2026-08-02
+
+- chore: refine search docs and release workflow
+- Improve fuzzy prefix rescue
+- Clean stale bundle analysis on regular build
+- Tune hybrid HNSW recall path
+- Fix strict hybrid indexing failure handling
+- Improve hybrid embedding recovery checks
+- Add hybrid OpenAI provider support
+- Add provider-aware embedding queue
+- Improve hybrid repair and rerank flow
+- Tune OpenAI rerank prompt scoring
+- Tune hybrid rerank and recent list behavior
+- Update hybrid embedding and rerank flow
+- Tighten singleton Han visibility gate
+- Harden lexical recovery and update hybrid rerank
+- Harden lexical rename commits
+- Harden lexical startup recovery commits
+- fix: harden lexical index recovery
+
 ## [0.2.24] - 2026-03-17
 
 - 优化了一些细节
