@@ -6,7 +6,10 @@ import {
 	lookupQueryUnitFamilies,
 	recallCandidateDocs,
 } from "src/services/search/coverage-lexical-v3/recall";
-import { buildPackingProfile } from "src/services/search/coverage-lexical-v3/ranking";
+import {
+	buildPackingProfile,
+	comparePackingProfiles,
+} from "src/services/search/coverage-lexical-v3/ranking";
 
 function createDocument(
 	overrides: Partial<IndexedDocument> &
@@ -64,7 +67,7 @@ describe("coverage lexical v3 Han prefix recall", () => {
 					unitFamilyMatches,
 				),
 			)
-			.sort((left, right) => right.finalScore - left.finalScore)
+			.sort(comparePackingProfiles)
 			.map((candidate) => candidate.path);
 
 		expect(rankedPaths[0]).toBe("pkm-zh/books/电子技术入门.md");

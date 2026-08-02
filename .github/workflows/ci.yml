@@ -37,10 +37,3 @@ jobs:
           if ($exitCode -ne 0) {
             exit $exitCode
           }
-
-      - name: Upload test output on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-output-${{ github.run_id }}
-          path: test-output.log

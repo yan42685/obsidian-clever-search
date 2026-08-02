@@ -580,6 +580,22 @@ implementation refinement:
 
 ## Implementation Status
 
+### 2026-08-02 Update: Windows CI Test Determinism
+
+- The Node 20 Windows CI run now validates the same Jest suite used for local
+  development instead of relying on a Linux-only runner.
+- A CI-only ranking failure was traced to
+  `han-prefix-recall.test.ts` sorting `EvidencePackingProfile` values by a
+  nonexistent `finalScore` field. The test now uses the production
+  `comparePackingProfiles` comparator, so its result no longer depends on
+  candidate insertion order or the runner's locale.
+- The temporary failure-log artifact step was removed after the failure was
+  diagnosed.
+
+Validation:
+
+- Node 20.19.4 + pnpm 8.12.1 focused regression passes on Windows.
+
 ### Phase 1
 
 Status: Completed on 2026-04-14
