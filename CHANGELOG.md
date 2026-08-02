@@ -1,3 +1,7 @@
+## [0.3.8] - 2026-08-02
+
+- fix: guard browser storage detection in node tests
+
 ## [0.3.7] - 2026-08-02
 
 - chore: align release baseline and CI runner
