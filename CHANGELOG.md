@@ -1,3 +1,12 @@
+## [0.3.9] - 2026-08-03
+
+- ci: install dependencies after selecting node
+- ci: preserve test output on failure
+- test: use lexical comparator in Han ranking regression
+- test: log Han ranking profile on CI failure
+- test: avoid locale-dependent Han tie assertion
+- fix: keep large vault indexing responsive
+
 ## [0.3.8] - 2026-08-02
 
 - fix: guard browser storage detection in node tests
