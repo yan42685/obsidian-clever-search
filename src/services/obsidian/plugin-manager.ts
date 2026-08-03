@@ -59,6 +59,9 @@ export class PluginManager {
 	}
 
 	private async maybeShowReleaseAnnouncement(): Promise<void> {
+		if (isDevEnvironment) {
+			return;
+		}
 		const version = this.resolveReleaseAnnouncementVersion();
 		if (!version) {
 			return;
@@ -76,9 +79,6 @@ export class PluginManager {
 	}
 
 	private resolveReleaseAnnouncementVersion(): string | null {
-		if (isDevEnvironment) {
-			return RELEASE_ANNOUNCEMENT_VERSION_030;
-		}
 		const plugin = getInstance(THIS_PLUGIN) as CleverSearch;
 		const pluginVersion = plugin.manifest.version ?? "";
 		return pluginVersion.startsWith(`${RELEASE_ANNOUNCEMENT_VERSION_030}.`) ||

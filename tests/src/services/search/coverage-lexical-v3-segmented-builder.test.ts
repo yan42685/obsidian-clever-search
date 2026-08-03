@@ -3,6 +3,7 @@ import {
 	buildResidentHotBaseArtifactsStreaming,
 	type ResidentColdEvidenceSink,
 } from "src/services/search/coverage-lexical-v3/build";
+import type { CoverageLexicalV3RebuildProgress } from "src/services/search/coverage-lexical-v3/build";
 import type {
 	LexicalHanBodyEvidenceRow,
 	LexicalHanDocEvidenceRow,
@@ -131,5 +132,51 @@ describe("coverage lexical v3 segmented builder", () => {
 		expect(tinyBatch.batchMaxRawTextBytes).toBeLessThanOrEqual(
 			Math.max(...documents.map((document) => document.size ?? 0)),
 		);
+	});
+
+	test("reports intermediate file progress during both build passes", async () => {
+		const templateDocuments = createDocuments();
+		const documents = Array.from({ length: 256 }, (_, index) => {
+			const template = templateDocuments[index % templateDocuments.length]!;
+			return {
+				...template,
+				path: `synthetic/doc-${index}.md`,
+				docRef: index + 1,
+				size: 100,
+			};
+		});
+		const progress: CoverageLexicalV3RebuildProgress[] = [];
+
+		await buildResidentHotBaseArtifactsStreaming(
+			documents,
+			undefined,
+			createSink({ body: [], hanDoc: [], hanBody: [] }),
+			{
+				batchRawTextByteCap: 1_000,
+				onProgress: (item) => progress.push(item),
+			},
+		);
+
+		const pass1Progress = progress.filter((item) => item.phase === "pass1");
+		const pass2Progress = progress.filter((item) => item.phase === "pass2");
+		expect(pass1Progress[0]).toMatchObject({
+			processedFiles: 0,
+			totalFiles: documents.length,
+		});
+		expect(pass1Progress).toContainEqual(
+			expect.objectContaining({ processedFiles: 128 }),
+		);
+		expect(
+			pass2Progress.some(
+				(item) =>
+					(item.processedFiles ?? 0) > 0 &&
+					(item.processedFiles ?? 0) < documents.length,
+			),
+		).toBe(true);
+		expect(pass2Progress.at(-1)).toMatchObject({
+			processedFiles: documents.length,
+			totalFiles: documents.length,
+			processedBytes: 25_600,
+		});
 	});
 });

@@ -360,6 +360,8 @@ type LexicalIndexProgress =
       phase: "pass1" | "pass2" | "merge";
       processedBytes?: number;
       totalBytes?: number;
+      processedFiles?: number;
+      totalFiles?: number;
     }
   | {
       stage: "writing_snapshot";
@@ -385,17 +387,21 @@ class LexicalIndexProgressNotice {
       return `Reading documents: ${progress.processedFiles} / ${progress.totalFiles} files`;
     }
     if (progress.stage === "building") {
+      const fileProgress =
+        progress.processedFiles !== undefined && progress.totalFiles !== undefined
+          ? ` (${progress.processedFiles}/${progress.totalFiles} files)`
+          : "";
       if (
         progress.phase === "pass2" &&
         progress.processedBytes !== undefined &&
         progress.totalBytes !== undefined
       ) {
-        return `Building Coverage V3 index: pass2 ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)}`;
+        return `Building Coverage V3 index: pass2 ${formatBytesLabel(progress.processedBytes)} / ${formatBytesLabel(progress.totalBytes)}${fileProgress}`;
       }
       if (progress.phase === "merge") {
         return "Merging postings";
       }
-      return `Building Coverage V3 index: ${progress.phase}`;
+      return `Building Coverage V3 index: ${progress.phase}${fileProgress}`;
     }
     return "Writing snapshot";
   }
@@ -3163,6 +3169,8 @@ export class DataManager {
             phase: progress.phase,
             processedBytes: progress.processedBytes,
             totalBytes: progress.totalBytes,
+            processedFiles: progress.processedFiles,
+            totalFiles: progress.totalFiles,
           });
         });
       } catch (error) {

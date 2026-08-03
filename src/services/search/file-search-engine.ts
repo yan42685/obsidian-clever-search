@@ -81,6 +81,8 @@ export type FileSearchRebuildProgress = {
 	phase: "pass1" | "pass2" | "merge";
 	processedBytes?: number;
 	totalBytes?: number;
+	processedFiles?: number;
+	totalFiles?: number;
 };
 
 export interface FileSearchEngine {

@@ -166,11 +166,16 @@ export type CoverageLexicalV3RebuildProgress = Readonly<{
 	phase: "pass1" | "pass2" | "merge";
 	processedBytes?: number;
 	totalBytes?: number;
+	processedFiles?: number;
+	totalFiles?: number;
 }>;
 
 export const DEFAULT_COLD_EVIDENCE_CHUNK_SIZE = 128;
 export const DEFAULT_RESIDENT_REBUILD_BATCH_RAW_TEXT_BYTE_CAP = 32 * 1024 * 1024;
 export const LOW_MEMORY_RESIDENT_REBUILD_BATCH_RAW_TEXT_BYTE_CAP = 16 * 1024 * 1024;
+const REBUILD_PROGRESS_DOCUMENT_INTERVAL = 128;
+const REBUILD_PROGRESS_BYTE_INTERVAL = 2 * 1024 * 1024;
+const REBUILD_COOPERATIVE_YIELD_BUDGET_MS = 48;
 
 type CoverageV3BuildMemo = Readonly<{
 	encodeHanBigramId: (bigram: string) => number;
@@ -569,9 +574,27 @@ export async function buildResidentHotBaseArtifactsStreaming(
 		(sum, document) => sum + estimateIndexedDocumentRawTextBytes(document),
 		0,
 	);
-	options.onProgress?.({ phase: "pass1" });
+	let lastYieldAtMs = nowMs();
+	const yieldToHostIfNeeded = async (): Promise<void> => {
+		if (nowMs() - lastYieldAtMs < REBUILD_COOPERATIVE_YIELD_BUDGET_MS) {
+			return;
+		}
+		lastYieldAtMs = nowMs();
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+	};
+	options.onProgress?.({
+		phase: "pass1",
+		processedBytes: 0,
+		totalBytes: totalRawTextBytes,
+		processedFiles: 0,
+		totalFiles: sortedDocuments.length,
+	});
 	const pass1StartMs = nowMs();
 	const familySourceMaskByText = new Map<string, number>();
+	let pass1ProcessedBytes = 0;
+	let pass1ProcessedFiles = 0;
+	let pass1ReportedBytes = 0;
+	let pass1ReportedFiles = 0;
 	for (let docId = 0; docId < sortedDocuments.length; docId += 1) {
 		const document = sortedDocuments[docId];
 		if (!document) {
@@ -582,7 +605,32 @@ export async function buildResidentHotBaseArtifactsStreaming(
 			document,
 			buildMemo,
 		);
+		pass1ProcessedBytes += estimateIndexedDocumentRawTextBytes(document);
+		pass1ProcessedFiles += 1;
+		if (
+			pass1ProcessedFiles === sortedDocuments.length ||
+			pass1ProcessedFiles - pass1ReportedFiles >= REBUILD_PROGRESS_DOCUMENT_INTERVAL ||
+			pass1ProcessedBytes - pass1ReportedBytes >= REBUILD_PROGRESS_BYTE_INTERVAL
+		) {
+			options.onProgress?.({
+				phase: "pass1",
+				processedBytes: pass1ProcessedBytes,
+				totalBytes: totalRawTextBytes,
+				processedFiles: pass1ProcessedFiles,
+				totalFiles: sortedDocuments.length,
+			});
+			pass1ReportedBytes = pass1ProcessedBytes;
+			pass1ReportedFiles = pass1ProcessedFiles;
+		}
+		await yieldToHostIfNeeded();
 	}
+	options.onProgress?.({
+		phase: "pass1",
+		processedBytes: pass1ProcessedBytes,
+		totalBytes: totalRawTextBytes,
+		processedFiles: pass1ProcessedFiles,
+		totalFiles: sortedDocuments.length,
+	});
 	const pass1Ms = nowMs() - pass1StartMs;
 	const mergeStartMs = nowMs();
 	const familyTexts = [...familySourceMaskByText.keys()].sort((left, right) =>
@@ -610,6 +658,8 @@ export async function buildResidentHotBaseArtifactsStreaming(
 		phase: "pass2",
 		processedBytes: 0,
 		totalBytes: totalRawTextBytes,
+		processedFiles: 0,
+		totalFiles: sortedDocuments.length,
 	});
 	const pass2StartMs = nowMs();
 	const identityFamilyIdsByDoc: number[][] = [];
@@ -635,6 +685,9 @@ export async function buildResidentHotBaseArtifactsStreaming(
 	let maxColdEvidenceChunkSize = 0;
 	let batchRawTextBytes = 0;
 	let pass2ProcessedRawTextBytes = 0;
+	let pass2ProcessedFiles = 0;
+	let pass2ReportedBytes = 0;
+	let pass2ReportedFiles = 0;
 	let batchMaxRawTextBytes = 0;
 	let bodyEvidenceChunk: LexicalBodyEvidencePublishRow[] = [];
 	let hanBodyEvidenceChunk: LexicalHanBodyEvidenceRow[] = [];
@@ -670,20 +723,19 @@ export async function buildResidentHotBaseArtifactsStreaming(
 		await coldEvidenceSink.publishHanDocEvidence(rows);
 	};
 	const flushBatch = async (): Promise<void> => {
-		const flushedRawTextBytes = batchRawTextBytes;
 		await flushBodyEvidence();
 		await flushHanBodyEvidence();
 		await flushHanDocEvidence();
 		batchMaxRawTextBytes = Math.max(batchMaxRawTextBytes, batchRawTextBytes);
-		pass2ProcessedRawTextBytes = Math.min(
-			totalRawTextBytes,
-			pass2ProcessedRawTextBytes + flushedRawTextBytes,
-		);
 		options.onProgress?.({
 			phase: "pass2",
 			processedBytes: pass2ProcessedRawTextBytes,
 			totalBytes: totalRawTextBytes,
+			processedFiles: pass2ProcessedFiles,
+			totalFiles: sortedDocuments.length,
 		});
+		pass2ReportedBytes = pass2ProcessedRawTextBytes;
+		pass2ReportedFiles = pass2ProcessedFiles;
 		batchRawTextBytes = 0;
 	};
 	for (let docId = 0; docId < sortedDocuments.length; docId += 1) {
@@ -853,8 +905,36 @@ export async function buildResidentHotBaseArtifactsStreaming(
 				await flushHanDocEvidence();
 			}
 		}
+		pass2ProcessedRawTextBytes = Math.min(
+			totalRawTextBytes,
+			pass2ProcessedRawTextBytes + documentRawBytes,
+		);
+		pass2ProcessedFiles += 1;
+		if (
+			pass2ProcessedFiles === sortedDocuments.length ||
+			pass2ProcessedFiles - pass2ReportedFiles >= REBUILD_PROGRESS_DOCUMENT_INTERVAL ||
+			pass2ProcessedRawTextBytes - pass2ReportedBytes >= REBUILD_PROGRESS_BYTE_INTERVAL
+		) {
+			options.onProgress?.({
+				phase: "pass2",
+				processedBytes: pass2ProcessedRawTextBytes,
+				totalBytes: totalRawTextBytes,
+				processedFiles: pass2ProcessedFiles,
+				totalFiles: sortedDocuments.length,
+			});
+			pass2ReportedBytes = pass2ProcessedRawTextBytes;
+			pass2ReportedFiles = pass2ProcessedFiles;
+		}
+		await yieldToHostIfNeeded();
 	}
 	await flushBatch();
+	options.onProgress?.({
+		phase: "pass2",
+		processedBytes: pass2ProcessedRawTextBytes,
+		totalBytes: totalRawTextBytes,
+		processedFiles: pass2ProcessedFiles,
+		totalFiles: sortedDocuments.length,
+	});
 	const pass2Ms = nowMs() - pass2StartMs;
 	options.onProgress?.({ phase: "merge" });
 	const finalMergeStartMs = nowMs();
