@@ -3,6 +3,7 @@ import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { DataManager } from "./data-manager";
+import { DataProvider } from "./data-provider";
 import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import {
 	DocDeleteOperation,
@@ -13,6 +14,7 @@ import {
 @singleton()
 export class FileWatcher {
 	private readonly dataManager = getInstance(DataManager);
+	private readonly dataProvider = getInstance(DataProvider);
 	private readonly fileSnapshotStore = getInstance(FileSnapshotStore);
 	private readonly app = getInstance(App);
 	private modifyTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -140,6 +142,12 @@ export class FileWatcher {
 	}
 
 	private async enqueuePrimedUpsert(file: TFile): Promise<void> {
+		if (!this.dataProvider.isIndexable(file)) {
+			this.dataManager.receiveDocOperation(
+				new DocUpsertOperation(file.path, file.stat.mtime),
+			);
+			return;
+		}
 		const sourceGeneration = await this.primeCurrentFileText(file);
 		this.dataManager.receiveDocOperation(
 			new DocUpsertOperation(file.path, sourceGeneration),
@@ -147,6 +155,12 @@ export class FileWatcher {
 	}
 
 	private async enqueuePrimedMove(oldPath: string, file: TFile): Promise<void> {
+		if (!this.dataProvider.isIndexable(file)) {
+			this.dataManager.receiveDocOperation(
+				new DocMoveOperation(oldPath, file.path, file.stat.mtime),
+			);
+			return;
+		}
 		const sourceGeneration = await this.primeCurrentFileText(file);
 		this.dataManager.receiveDocOperation(
 			new DocMoveOperation(oldPath, file.path, sourceGeneration),

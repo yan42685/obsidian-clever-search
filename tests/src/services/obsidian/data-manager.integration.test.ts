@@ -2371,6 +2371,37 @@ describe("DataManager integration", () => {
     restartManager.onunload();
   });
 
+  test("deletes stale lexical documents even when their extension is no longer configured", async () => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = false;
+    const stalePath = "attachments/old.txt";
+    const database = createMockDatabase();
+    const dataProvider = createMockDataProvider({
+      files: new Map<string, TFile>(),
+      texts: new Map<string, string>(),
+    });
+    const lexicalEngine = createMockLexicalEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const hybridEngine = createMockHybridEngine({
+      isEnabled: jest.fn(() => false),
+    });
+
+    registerDataManagerDeps({
+      setting,
+      pluginFiles: [],
+      database,
+      dataProvider,
+      lexicalEngine,
+      fileSnapshotStore,
+      hybridEngine,
+    });
+
+    const manager = resolveDataManager();
+    await (manager as any)["deleteDocuments"]([stalePath]);
+
+    expect(lexicalEngine.deleteDocuments).toHaveBeenCalledWith([stalePath]);
+  });
+
   test("hydrates persisted hybrid recovery rows and requeues durable startup repairs", async () => {
     const nowSpy = jest.spyOn(Date, "now").mockReturnValue(1_000);
 

@@ -43,6 +43,10 @@ jest.mock("src/services/obsidian/user-data/data-manager", () => ({
 	DataManager: class DataManager {},
 }));
 
+jest.mock("src/services/obsidian/user-data/data-provider", () => ({
+	DataProvider: class DataProvider {},
+}));
+
 jest.mock("src/services/search/shared/file-snapshot-store", () => ({
 	FileSnapshotStore: class FileSnapshotStore {},
 }));
@@ -50,6 +54,7 @@ jest.mock("src/services/search/shared/file-snapshot-store", () => ({
 import { App, TFile, TFolder } from "obsidian";
 import { DataManager } from "src/services/obsidian/user-data/data-manager";
 import type { DocMoveOperation } from "src/services/obsidian/user-data/doc-operation-buffer";
+import { DataProvider } from "src/services/obsidian/user-data/data-provider";
 import { FileWatcher } from "src/services/obsidian/user-data/file-watcher";
 import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 
@@ -69,8 +74,12 @@ describe("FileWatcher", () => {
 		const fileSnapshotStore = {
 			readCurrentTexts: jest.fn(async () => new Map()),
 		};
+		const dataProvider = {
+			isIndexable: jest.fn(() => true),
+		};
 		mockInstanceMap.set(App, { vault });
 		mockInstanceMap.set(DataManager, dataManager);
+		mockInstanceMap.set(DataProvider, dataProvider);
 		mockInstanceMap.set(FileSnapshotStore, fileSnapshotStore);
 
 		const createFolder = (path: string) =>
@@ -110,5 +119,43 @@ describe("FileWatcher", () => {
 				sourceGeneration: 300,
 			}),
 		]);
+	});
+
+	test("does not read non-indexable files before enqueueing cleanup", async () => {
+		const handlers = new Map<string, (...args: any[]) => unknown>();
+		const file = Object.assign(Object.create(TFile.prototype), {
+			path: "attachments/archive.zip",
+			stat: { mtime: 400, size: 16_600_000_000 },
+		}) as TFile;
+		const vault = {
+			on: jest.fn((event: string, callback: (...args: any[]) => unknown) => {
+				handlers.set(event, callback);
+			}),
+			off: jest.fn(),
+			getAbstractFileByPath: jest.fn(() => file),
+		};
+		const dataManager = {
+			receiveDocOperation: jest.fn(),
+		};
+		const dataProvider = {
+			isIndexable: jest.fn(() => false),
+		};
+		const fileSnapshotStore = {
+			readCurrentTexts: jest.fn(async () => new Map()),
+		};
+		mockInstanceMap.set(App, { vault });
+		mockInstanceMap.set(DataManager, dataManager);
+		mockInstanceMap.set(DataProvider, dataProvider);
+		mockInstanceMap.set(FileSnapshotStore, fileSnapshotStore);
+
+		const watcher = new FileWatcher();
+		watcher.start();
+		await handlers.get("create")?.(file);
+
+		expect(dataProvider.isIndexable).toHaveBeenCalledWith(file);
+		expect(fileSnapshotStore.readCurrentTexts).not.toHaveBeenCalled();
+		expect(dataManager.receiveDocOperation).toHaveBeenCalledWith(
+			expect.objectContaining({ path: file.path }),
+		);
 	});
 });

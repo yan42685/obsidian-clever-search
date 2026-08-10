@@ -1651,10 +1651,9 @@ export class DataManager {
 
   private async deleteDocuments(paths: string[]) {
     if (paths.length > 0) {
-      const indexablePaths = paths.filter((p) =>
-        this.dataProvider.isIndexable(p),
-      );
-      this.lexicalEngine.deleteDocuments(indexablePaths);
+      // A path can stop being indexable after a settings change. Deletion must
+      // still remove stale documents written under the previous configuration.
+      this.lexicalEngine.deleteDocuments(paths);
     }
   }
 

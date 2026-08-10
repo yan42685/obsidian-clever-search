@@ -23,7 +23,10 @@ export class ViewRegistry {
 	private readonly plugin: CleverSearch = getInstance(THIS_PLUGIN);
 
 	init() {
-		this.fillMap(this.setting.customExtensions.plaintext, ViewType.MARKDOWN);
+		this.fillMap(
+			FileUtil.normalizeExtensions(this.setting.customExtensions.plaintext),
+			ViewType.MARKDOWN,
+		);
 		// this.fillMap(this.pdfExtensions, ViewType.PDF);
 		// this.fillMap(this.canvasExtensions, ViewType.CANVAS);
 		// this.fillMap(this.imageExtensions, ViewType.IMAGE);
@@ -53,7 +56,7 @@ export class ViewRegistry {
 
 	private fillMap(extensions: string[], viewType: ViewType) {
 		for (const ext of extensions) {
-			this.extensionViewMap.set(ext, viewType);
+			this.extensionViewMap.set(FileUtil.normalizeExtension(ext), viewType);
 		}
 	}
 }

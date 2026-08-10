@@ -20,7 +20,21 @@ export class FileUtil {
 	}
 
 	static getExtension(filePath: string): string {
-		return pathUtil.extname(filePath).slice(1);
+		return this.normalizeExtension(pathUtil.extname(filePath).slice(1));
+	}
+
+	static normalizeExtension(extension: string): string {
+		return extension.trim().replace(/^\.+/, "").toLowerCase();
+	}
+
+	static normalizeExtensions(extensions: readonly string[]): string[] {
+		return Array.from(
+			new Set(
+				extensions
+					.map((extension) => this.normalizeExtension(extension))
+					.filter((extension) => extension.length > 0),
+			),
+		);
 	}
 
 	static getFolderPath(filePath: string): string {

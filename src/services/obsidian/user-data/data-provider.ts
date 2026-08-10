@@ -60,15 +60,16 @@ export class DataProvider {
 	init() {
 		this.excludedPaths = new Set(this.setting.excludedPaths);
 		this.supportedExtensions = new Set(
-			this.setting.customExtensions.plaintext,
+			FileUtil.normalizeExtensions(this.setting.customExtensions.plaintext),
 		);
 	}
 
 	async generateAllIndexedDocuments(
 		files: TFile[],
 	): Promise<GeneratedIndexedDocuments> {
+		const indexableFiles = files.filter((file) => this.isIndexable(file));
 		const settled = await Promise.allSettled(
-			files.map(async (file) => await this.buildIndexedDocument(file)),
+			indexableFiles.map(async (file) => await this.buildIndexedDocument(file)),
 		);
 		const documents: IndexedDocument[] = [];
 		const indexedFiles: TFile[] = [];
@@ -76,7 +77,7 @@ export class DataProvider {
 
 		for (let index = 0; index < settled.length; index++) {
 			const result = settled[index];
-			const file = files[index];
+			const file = indexableFiles[index];
 			if (result.status === "fulfilled") {
 				documents.push(result.value);
 				indexedFiles.push(file);

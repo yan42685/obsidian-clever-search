@@ -61,6 +61,7 @@ import {
 } from "./user-data/search-availability";
 import { SearchHistoryService } from "./user-data/search-history-service";
 import { ViewRegistry } from "./view-registry";
+import { FileUtil } from "../../utils/file-util";
 
 type PendingRefreshState = {
 	reloadAssets: boolean;
@@ -2069,12 +2070,10 @@ class CustomExtensionModal extends Modal {
 				textArea.onChange((newValue) => {
 					const extensions = newValue
 						.split(/[\s\n]+/)
-						.map((ext) =>
-							ext.startsWith(".") ? ext.substring(1) : ext,
-						)
-						.filter((ext) => ext.length > 0);
+						.map((ext) => FileUtil.normalizeExtension(ext));
 
-					this.setting.customExtensions.plaintext = extensions;
+					this.setting.customExtensions.plaintext =
+						FileUtil.normalizeExtensions(extensions);
 					this.settingManager.requestLexicalReindex();
 					this.settingManager.requestHybridLocalRefresh({
 						syncFileSetWithoutEmbedding: true,
