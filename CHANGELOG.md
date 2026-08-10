@@ -1,3 +1,7 @@
+## [0.3.10] - 2026-08-10
+
+- fix: skip non-indexable file reads
+
 ## [0.3.9] - 2026-08-03
 
 - ci: install dependencies after selecting node
@@ -56,4 +60,3 @@
 
 - feat: auto release
 - Update README.md
-
