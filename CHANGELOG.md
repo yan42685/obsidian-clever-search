@@ -1,3 +1,9 @@
+## [0.3.11] - 2026-09-08
+
+- fix: approve pnpm dependency build scripts
+- fix: make pnpm workspace config compatible
+- fix: prevent lexical indexing stalls during editing
+
 ## [0.3.10] - 2026-08-10
 
 - fix: skip non-indexable file reads
