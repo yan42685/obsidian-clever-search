@@ -1178,7 +1178,7 @@ describe("DataManager lexical startup reconcile", () => {
       newFile,
       newFile.stat.mtime,
     );
-    expect(harness.manager.addDocuments).toHaveBeenCalledWith([]);
+    expect(harness.manager.addDocuments).not.toHaveBeenCalled();
     expect(harness.manager.deleteDocuments).toHaveBeenCalledWith([]);
     expect(harness.manager.commitIndexedLexicalFiles).toHaveBeenCalledWith([]);
     expect(harness.manager.saveLexicalIndexedFileRefs).toHaveBeenCalledWith([
@@ -1225,7 +1225,7 @@ describe("DataManager lexical startup reconcile", () => {
       newFile,
       newFile.stat.mtime,
     );
-    expect(harness.manager.addDocuments).toHaveBeenCalledWith([]);
+    expect(harness.manager.addDocuments).not.toHaveBeenCalled();
   });
 
   test("treats a same-path newer mtime as update instead of misclassifying it as a move", async () => {

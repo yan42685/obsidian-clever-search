@@ -70,6 +70,7 @@ type AsyncOverlayRangeTable<Row, Key> = AsyncOverlayTable<Row, Key> &
 				lowerBound: readonly [string, number, typeof Dexie.minKey],
 				upperBound: readonly [string, number, typeof Dexie.maxKey],
 			) => {
+				toArray: () => Promise<Row[]>;
 				delete: () => Promise<unknown>;
 			};
 		};
@@ -207,6 +208,20 @@ export class AtomicDexieActiveOverlayJournalStore extends DexieActiveOverlayJour
 		private readonly transactionScope: AsyncTransactionScope,
 	) {
 		super(rangeTable);
+	}
+
+	async loadActiveOverlayEntries(params: {
+		activeShardId: string;
+		activeShardGeneration: number;
+	}): Promise<readonly ActiveOverlayJournalEntry[]> {
+		const entries = await this.rangeTable
+			.where("[activeShardId+activeShardGeneration+sequence]")
+			.between(
+				[params.activeShardId, params.activeShardGeneration, Dexie.minKey],
+				[params.activeShardId, params.activeShardGeneration, Dexie.maxKey],
+			)
+			.toArray();
+		return sortEntries(entries);
 	}
 
 	async appendOverlayEntriesWithInvalidations(params: {

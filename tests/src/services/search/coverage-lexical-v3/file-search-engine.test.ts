@@ -1231,7 +1231,7 @@ describe("coverage lexical v3 file search engine", () => {
 		expect(matchedFiles[0]?.matchedTerms).toContain("projected");
 	});
 
-	test("ignores stale resident rebuild completion after a newer rebuild starts", async () => {
+	test("coalesces resident rebuild requests and ignores stale completion", async () => {
 		const engine = new CoverageLexicalV3FileSearchEngine();
 		let resolveOldRebuild: (documents: IndexedDocument[]) => void = () => undefined;
 		const oldRebuildDocuments = new Promise<IndexedDocument[]>((resolve) => {
@@ -1256,8 +1256,7 @@ describe("coverage lexical v3 file search engine", () => {
 
 		const oldRebuild = (engine as any).rebuildResidentBase();
 		await Promise.resolve();
-		const newRebuild = (engine as any).rebuildResidentBase();
-		await newRebuild;
+		const coalescedRebuild = (engine as any).rebuildResidentBase();
 		resolveOldRebuild([
 			createDocument({
 				docRef: 1,
@@ -1267,10 +1266,11 @@ describe("coverage lexical v3 file search engine", () => {
 				content: "oldtarget",
 			}),
 		]);
-		await oldRebuild;
+		await Promise.all([oldRebuild, coalescedRebuild]);
 
 		const indexView = (engine as any).engine.getResidentIndexView();
 		expect(Array.from(indexView.shards[0].base.docTable.docRefsByDocId)).toEqual([2]);
+		expect(materializeCallCount).toBe(2);
 	});
 
 	test("persists resident artifact and restores it without rebuilding documents", async () => {

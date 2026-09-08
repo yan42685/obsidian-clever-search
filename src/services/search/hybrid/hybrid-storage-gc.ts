@@ -69,6 +69,7 @@ type BatchedTable<Row, Key extends string | number> = {
 export type HybridStorageGcOptions = {
   batchSize?: number;
   reason?: string;
+  snapshotHistoryLimit?: number;
 };
 
 type LiveDocRefState = {
@@ -77,6 +78,7 @@ type LiveDocRefState = {
 
 const DEFAULT_HYBRID_STORAGE_GC_BATCH_SIZE = 512;
 const DEFAULT_HYBRID_STORAGE_GC_REASON = "hybrid-storage-gc";
+const DEFAULT_HYBRID_SNAPSHOT_HISTORY_LIMIT = 4;
 
 export async function runHybridStorageGc(
   database: HybridStorageGcDatabase,
@@ -85,6 +87,14 @@ export async function runHybridStorageGc(
   const gcStartedAt = Date.now();
   const batchSize = options.batchSize ?? DEFAULT_HYBRID_STORAGE_GC_BATCH_SIZE;
   const reason = options.reason ?? DEFAULT_HYBRID_STORAGE_GC_REASON;
+  const requestedSnapshotHistoryLimit =
+    options.snapshotHistoryLimit ?? DEFAULT_HYBRID_SNAPSHOT_HISTORY_LIMIT;
+  const snapshotHistoryLimit = Math.max(
+    0,
+    Number.isFinite(requestedSnapshotHistoryLimit)
+      ? Math.floor(requestedSnapshotHistoryLimit)
+      : DEFAULT_HYBRID_SNAPSHOT_HISTORY_LIMIT,
+  );
   const metrics: HybridStorageGcMetrics = {
     gcMs: 0,
     chunksRemoved: 0,
@@ -128,6 +138,29 @@ export async function runHybridStorageGc(
       metrics.indexedRefsRemoved += staleDocRefs.length;
     },
   );
+
+  const requiredSnapshotGenerationsByDocRef = new Map<number, Set<number>>();
+  // Keep generations needed by the live lexical view and dense recovery tail;
+  // only the unreferenced history is subject to the bounded retention limit.
+  const preserveSnapshotGeneration = (docRef: number, generation: number | undefined) => {
+    if (generation === undefined) {
+      return;
+    }
+    const generations =
+      requiredSnapshotGenerationsByDocRef.get(docRef) ?? new Set<number>();
+    generations.add(generation);
+    requiredSnapshotGenerationsByDocRef.set(docRef, generations);
+  };
+  for (const row of registryRows) {
+    if (!row.deleted) {
+      preserveSnapshotGeneration(row.docRef, row.liveGeneration);
+      preserveSnapshotGeneration(row.docRef, row.denseReadyGeneration);
+      preserveSnapshotGeneration(row.docRef, row.denseTargetGeneration);
+    }
+  }
+  for (const row of indexedRefsByDocRef.values()) {
+    preserveSnapshotGeneration(row.docRef, row.generation);
+  }
 
   const markHnswDirtyBeforeDenseDelete = async () => {
     if (metrics.hnswMarkedDirty) {
@@ -191,16 +224,28 @@ export async function runHybridStorageGc(
     },
   );
 
+  const recentSnapshotRowsByDocRef = new Map<number, HybridFileSnapshotRow[]>();
   await scanRowsInBatches<HybridFileSnapshotRow, string>(
     (lastId) => loadBatch(database.db.fileSnapshots, ":id", lastId, batchSize),
     (row) => row.id,
     async (rows) => {
-      const staleIds = rows
-        // File snapshots are shared by hybrid display, lexical fallback, and
-        // generation-aligned recovery reads. For live docs, keep every stored
-        // snapshot generation instead of guessing a single upper bound here.
-        .filter((row) => !liveDocRefs.has(row.docRef))
-        .map((row) => row.id);
+      const staleIds: string[] = [];
+      for (const row of rows) {
+        if (!liveDocRefs.has(row.docRef)) {
+          staleIds.push(row.id);
+          continue;
+        }
+        if (requiredSnapshotGenerationsByDocRef.get(row.docRef)?.has(row.generation)) {
+          continue;
+        }
+        const recentRows = recentSnapshotRowsByDocRef.get(row.docRef) ?? [];
+        recentRows.push(row);
+        recentRows.sort((left, right) => right.generation - left.generation);
+        while (recentRows.length > snapshotHistoryLimit) {
+          staleIds.push(recentRows.pop()!.id);
+        }
+        recentSnapshotRowsByDocRef.set(row.docRef, recentRows);
+      }
       if (staleIds.length === 0) {
         return;
       }

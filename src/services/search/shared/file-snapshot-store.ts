@@ -354,6 +354,7 @@ export type FileSnapshotAvailabilityDebugInfo = Readonly<{
 @singleton()
 export class FileSnapshotStore {
 	private static readonly INDEXED_SNAPSHOT_SCAN_BATCH_SIZE = 256;
+	private static readonly PERSISTED_SNAPSHOT_HISTORY_LIMIT = 4;
 	private static readonly RUNTIME_REPORT_TOP_ENTRY_LIMIT = 5;
 	private static readonly CURRENT_TEXT_CACHE_CAPACITY_BYTES = 32 * 1024 * 1024;
 	private static readonly STRING_CODE_UNIT_BYTES = 2;
@@ -1278,7 +1279,99 @@ export class FileSnapshotStore {
 			});
 		}
 		await this.preserveIndexedGenerationShadows(candidates);
-		await this.database.db.fileSnapshots.bulkPut(rows);
+		const existingRows = await this.database.db.fileSnapshots.bulkGet(
+			rows.map((row) => row.id),
+		);
+		const changedRows = rows.filter(
+			(row, index) => existingRows[index]?.plainText !== row.plainText,
+		);
+		if (changedRows.length > 0) {
+			await this.database.db.fileSnapshots.bulkPut(changedRows);
+		}
+		await this.trimPersistedSnapshotHistory(candidates);
+	}
+
+	private async trimPersistedSnapshotHistory(
+		files: ReadonlyArray<{ path: string; generation?: number }>,
+	): Promise<void> {
+		const uniquePaths = Array.from(new Set(files.map((file) => file.path)));
+		if (uniquePaths.length === 0) {
+			return;
+		}
+		const registryRows = await this.database.getDocRegistryEntries(uniquePaths);
+		const docRefs = uniquePaths
+			.map((path) => registryRows.get(path)?.docRef)
+			.filter((docRef): docRef is number => docRef !== undefined);
+		if (docRefs.length === 0) {
+			return;
+		}
+		const indexedRefs = await this.database.db.hybridIndexedFileRefs.bulkGet(docRefs);
+		const table = this.database.db.fileSnapshots as unknown as {
+			where?: (index: "docRef") => {
+				equals?: (value: number) => {
+					toArray: () => Promise<PersistedFileSnapshotRow[]>;
+				};
+			};
+		};
+		if (typeof table.where !== "function") {
+			return;
+		}
+		for (let index = 0; index < docRefs.length; index += 1) {
+			const docRef = docRefs[index];
+			const docRefIndex = table.where("docRef");
+			if (typeof docRefIndex.equals !== "function") {
+				return;
+			}
+			const rows = await docRefIndex.equals(docRef).toArray();
+			if (rows.length <= FileSnapshotStore.PERSISTED_SNAPSHOT_HISTORY_LIMIT) {
+				continue;
+			}
+			const requiredGenerations = new Set<number>();
+			const registryRow = uniquePaths
+				.map((path) => registryRows.get(path))
+				.find((row) => row?.docRef === docRef);
+			if (registryRow?.liveGeneration !== undefined) {
+				requiredGenerations.add(registryRow.liveGeneration);
+			}
+			if (registryRow?.denseReadyGeneration !== undefined) {
+				requiredGenerations.add(registryRow.denseReadyGeneration);
+			}
+			if (registryRow?.denseTargetGeneration !== undefined) {
+				requiredGenerations.add(registryRow.denseTargetGeneration);
+			}
+			const file = files.find(
+				(candidate) => registryRows.get(candidate.path)?.docRef === docRef,
+			);
+			if (file?.generation !== undefined) {
+				requiredGenerations.add(file.generation);
+			}
+			const indexedRef = indexedRefs[index];
+			if (indexedRef?.generation !== undefined) {
+				requiredGenerations.add(indexedRef.generation);
+			}
+			const sortedRows = [...rows].sort(
+				(left, right) => right.generation - left.generation,
+			);
+			const keepIds = new Set<string>();
+			let recentCount = 0;
+			for (const row of sortedRows) {
+				if (
+					requiredGenerations.has(row.generation) ||
+					recentCount < FileSnapshotStore.PERSISTED_SNAPSHOT_HISTORY_LIMIT
+				) {
+					keepIds.add(row.id);
+					if (!requiredGenerations.has(row.generation)) {
+						recentCount += 1;
+					}
+				}
+			}
+			const staleIds = sortedRows
+				.filter((row) => !keepIds.has(row.id))
+				.map((row) => row.id);
+			if (staleIds.length > 0) {
+				await this.database.db.fileSnapshots.bulkDelete(staleIds);
+			}
+		}
 	}
 
 	private resolveIndexedPublishCandidate(

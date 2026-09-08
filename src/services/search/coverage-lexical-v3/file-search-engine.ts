@@ -44,8 +44,8 @@ import { bootstrapCoverageLexicalV3Engine } from "./bootstrap";
 import {
 	buildOverlayResidentArtifacts,
 	createAtomicDexieActiveOverlayJournalStore,
-	type ActiveOverlayJournalEntry,
 	type ActiveOverlayJournalStore,
+	type ActiveOverlayResidentArtifacts,
 } from "./active-overlay-journal";
 import {
 	commitActiveOverlayWritePlan,
@@ -330,6 +330,7 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	private readonly pendingDocumentMetadataByPath = new Map<string, PendingDocumentMetadata>();
 	private batchReindexing = false;
 	private pendingResidentRebuild: Promise<void> | null = null;
+	private residentRebuildRequested = false;
 	private pendingOverlayRecovery: Promise<void> = Promise.resolve();
 	private overlayRecoveryGeneration = 0;
 	private residentRebuildGeneration = 0;
@@ -357,11 +358,11 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 
 	clearIndex(): void {
 		this.residentRebuildGeneration += 1;
+		this.residentRebuildRequested = false;
 		this.overlayRecoveryGeneration += 1;
 		this.documentViewsByPath.clear();
 		this.pendingDocumentContentsByPath.clear();
 		this.pendingDocumentMetadataByPath.clear();
-		this.pendingResidentRebuild = null;
 		this.lastRebuildStats = null;
 		this.lastMaintenanceStats = null;
 		this.engine = new CoverageLexicalV3Engine();
@@ -1035,22 +1036,27 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 			return true;
 		}
 		const persistentStores = this.getPersistentStores();
-		const sequenceStart =
-			(await this.getNextOverlaySequence(persistentStores.overlayJournalStore, activeShard));
 		const existingEntries =
 			await persistentStores.overlayJournalStore.loadActiveOverlayEntries({
 				activeShardId: activeShard.shardId,
 				activeShardGeneration: activeShard.generation,
 			});
+		const sequenceStart =
+			existingEntries.reduce((max, entry) => Math.max(max, entry.sequence), 0) + 1;
 		const writePlan = planActiveOverlayChanges({
 			activeShard,
 			changes: overlayChanges,
 			sequenceStart,
 		});
-		await this.publishOverlayEvidenceForEntries(activeShard, [
-			...existingEntries,
-			...writePlan.entries,
-		]);
+		const overlayArtifacts = buildOverlayResidentArtifacts({
+			activeShardId: activeShard.shardId,
+			activeShardGeneration: activeShard.generation,
+			entries: [...existingEntries, ...writePlan.entries],
+			tokenizeDocumentText: (text) => this.getDocumentTerms(text),
+		});
+		await this.publishOverlayEvidenceForArtifacts(
+			overlayArtifacts,
+		);
 		await commitActiveOverlayWritePlan({
 			stores: persistentStores.productionStores,
 			overlayJournalStore: persistentStores.overlayJournalStore,
@@ -1059,7 +1065,11 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		if (recoveryGeneration !== this.overlayRecoveryGeneration) {
 			return true;
 		}
-		await this.reloadOverlayRuntimeState(persistentStores, activeShard);
+		await this.reloadOverlayRuntimeState(
+			persistentStores,
+			activeShard,
+			overlayArtifacts,
+		);
 		for (const path of changes.deletePaths) {
 			this.pendingDocumentContentsByPath.delete(path);
 			this.pendingDocumentMetadataByPath.delete(path);
@@ -1071,16 +1081,9 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		return true;
 	}
 
-	private async publishOverlayEvidenceForEntries(
-		activeShard: ResidentShardDescriptor,
-		entries: readonly ActiveOverlayJournalEntry[],
+	private async publishOverlayEvidenceForArtifacts(
+		overlayArtifacts: ActiveOverlayResidentArtifacts,
 	): Promise<void> {
-		const overlayArtifacts = buildOverlayResidentArtifacts({
-			activeShardId: activeShard.shardId,
-			activeShardGeneration: activeShard.generation,
-			entries,
-			tokenizeDocumentText: (text) => this.getDocumentTerms(text),
-		});
 		const snapshotStore = this.getFileSnapshotStore();
 		await Promise.all([
 			overlayArtifacts.bodyEvidenceRows.length > 0
@@ -1101,35 +1104,27 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 		]);
 	}
 
-	private async getNextOverlaySequence(
-		overlayJournalStore: ActiveOverlayJournalStore,
-		activeShard: ResidentShardDescriptor,
-	): Promise<number> {
-		const entries = await overlayJournalStore.loadActiveOverlayEntries({
-			activeShardId: activeShard.shardId,
-			activeShardGeneration: activeShard.generation,
-		});
-		return entries.reduce((max, entry) => Math.max(max, entry.sequence), 0) + 1;
-	}
-
 	private async reloadOverlayRuntimeState(
 		persistentStores: CoverageLexicalV3PersistentStores,
 		activeShard: ResidentShardDescriptor,
+		overlayArtifacts?: ActiveOverlayResidentArtifacts,
 	): Promise<void> {
 		this.engine.loadShardInvalidations(
 			await persistentStores.productionStores.invalidations.loadInvalidations(),
 		);
-		const entries = await persistentStores.overlayJournalStore.loadActiveOverlayEntries({
-			activeShardId: activeShard.shardId,
-			activeShardGeneration: activeShard.generation,
-		});
-		const overlayArtifacts = buildOverlayResidentArtifacts({
-			activeShardId: activeShard.shardId,
-			activeShardGeneration: activeShard.generation,
-			entries,
-			tokenizeDocumentText: (text) => this.getDocumentTerms(text),
-		});
-		this.engine.loadOverlayResidentShard(overlayArtifacts.shard);
+		const artifacts =
+			overlayArtifacts ??
+			buildOverlayResidentArtifacts({
+				activeShardId: activeShard.shardId,
+				activeShardGeneration: activeShard.generation,
+				entries:
+					await persistentStores.overlayJournalStore.loadActiveOverlayEntries({
+						activeShardId: activeShard.shardId,
+						activeShardGeneration: activeShard.generation,
+					}),
+				tokenizeDocumentText: (text) => this.getDocumentTerms(text),
+			});
+		this.engine.loadOverlayResidentShard(artifacts.shard);
 	}
 
 	private getActiveBaseShardDescriptor(): ResidentShardDescriptor | null {
@@ -1413,12 +1408,23 @@ export class CoverageLexicalV3FileSearchEngine implements FileSearchEngine {
 	private async rebuildResidentBase(
 		onProgress?: (progress: FileSearchRebuildProgress) => void,
 	): Promise<void> {
-		const rebuildGeneration = this.residentRebuildGeneration + 1;
-		this.residentRebuildGeneration = rebuildGeneration;
-		const rebuildPromise = this.rebuildResidentBaseInternal(
-			rebuildGeneration,
-			onProgress,
-		);
+		this.residentRebuildGeneration += 1;
+		this.residentRebuildRequested = true;
+		if (this.pendingResidentRebuild != null) {
+			await this.pendingResidentRebuild;
+			return;
+		}
+
+		const rebuildPromise = (async () => {
+			// Allow synchronous delete/add/recovery calls to coalesce before the
+			// first materialization begins.
+			await Promise.resolve();
+			while (this.residentRebuildRequested) {
+				this.residentRebuildRequested = false;
+				const rebuildGeneration = this.residentRebuildGeneration;
+				await this.rebuildResidentBaseInternal(rebuildGeneration, onProgress);
+			}
+		})();
 		this.pendingResidentRebuild = rebuildPromise;
 		try {
 			await rebuildPromise;

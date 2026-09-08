@@ -18,6 +18,7 @@ export class FileWatcher {
 	private readonly fileSnapshotStore = getInstance(FileSnapshotStore);
 	private readonly app = getInstance(App);
 	private modifyTimers: Map<string, NodeJS.Timeout> = new Map();
+	private compositionActive = false;
 	private started = false;
 
 	start() {
@@ -29,6 +30,10 @@ export class FileWatcher {
 		this.app.vault.on("delete", this.onDelete);
 		this.app.vault.on("rename", this.onRename);
 		this.app.vault.on("modify", this.onModify);
+		if (typeof document !== "undefined") {
+			document.addEventListener("compositionstart", this.onCompositionStart, true);
+			document.addEventListener("compositionend", this.onCompositionEnd, true);
+		}
 		logger.trace("FileWatcher started");
 	}
 
@@ -41,6 +46,11 @@ export class FileWatcher {
 		this.app.vault.off("delete", this.onDelete);
 		this.app.vault.off("rename", this.onRename);
 		this.app.vault.off("modify", this.onModify);
+		if (typeof document !== "undefined") {
+			document.removeEventListener("compositionstart", this.onCompositionStart, true);
+			document.removeEventListener("compositionend", this.onCompositionEnd, true);
+		}
+		this.compositionActive = false;
 		this.clearAllModifyTimers();
 	}
 
@@ -112,18 +122,32 @@ export class FileWatcher {
 		if (!(file instanceof TFile)) return;
 
 		const path = file.path;
-		this.clearModifyTimer(path);
+		this.scheduleModifyTimer(path, 800);
+	};
 
+	private readonly onCompositionStart = () => {
+		this.compositionActive = true;
+	};
+
+	private readonly onCompositionEnd = () => {
+		this.compositionActive = false;
+	};
+
+	private scheduleModifyTimer(path: string, delayMs: number): void {
+		this.clearModifyTimer(path);
 		const timer = setTimeout(() => {
+			if (this.compositionActive) {
+				this.scheduleModifyTimer(path, 100);
+				return;
+			}
 			const currentFile = this.app.vault.getAbstractFileByPath(path);
 			if (currentFile instanceof TFile) {
 				void this.enqueuePrimedUpsert(currentFile);
 			}
 			this.modifyTimers.delete(path);
-		}, 800);
-
+		}, delayMs);
 		this.modifyTimers.set(path, timer);
-	};
+	}
 
 	private clearModifyTimer(path: string): void {
 		const timer = this.modifyTimers.get(path);

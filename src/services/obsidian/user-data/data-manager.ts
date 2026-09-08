@@ -3481,9 +3481,21 @@ export class DataManager {
     logger.trace(`docs to move: ${lexicalStartupMovePlan.docsToMove.length}`);
     logger.trace(`docs to delete: ${deleteList.length}`);
     logger.trace(`docs to add: ${pendingAddFiles.size}`);
-    await this.deleteDocuments(deleteList);
+    const pendingAddFileList = [...pendingAddFiles.values()];
+    const preparedAdd = await this.prepareLexicalDocuments(pendingAddFileList);
+    const overlayAddResult = await this.applyPersistentLexicalRecoveryChanges(
+      deleteList,
+      pendingAddFileList,
+      preparedAdd.documents,
+      preparedAdd.failures,
+    );
+    if (!overlayAddResult) {
+      await this.deleteDocuments(deleteList);
+    }
     await this.fileSnapshotStore.removeFiles(deleteList);
-    const addResult = await this.addDocuments([...pendingAddFiles.values()]);
+    const addResult =
+      overlayAddResult ??
+      (await this.addPreparedLexicalDocuments(pendingAddFileList, preparedAdd));
     await this.commitIndexedLexicalFiles(addResult.indexedFiles);
     const failedPaths = new Set(
       addResult.failures.map((failure) => failure.file.path),

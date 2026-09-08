@@ -249,6 +249,40 @@ describe("runHybridStorageGc", () => {
       "7:11",
     ]);
   });
+
+  test("retains required generations and only a bounded recent snapshot tail", async () => {
+    await db.docRegistry.put({
+      docRef: 8,
+      path: "docs/history.md",
+      deleted: false,
+      liveGeneration: 6,
+      updatedAt: 6,
+    });
+    await db.hybridIndexedFileRefs.put({
+      docRef: 8,
+      generation: 5,
+      state: "ready",
+      chunkCount: 1,
+      vectorPrecision: "int8",
+    });
+    await db.fileSnapshots.bulkPut(
+      [1, 2, 3, 4, 5, 6].map((generation) =>
+        snapshot(`8:${generation}`, 8, generation),
+      ),
+    );
+
+    const metrics = await runHybridStorageGc(
+      { db },
+      { snapshotHistoryLimit: 1 },
+    );
+
+    expect(metrics.snapshotsRemoved).toBe(3);
+    await expect(db.fileSnapshots.orderBy(":id").keys()).resolves.toEqual([
+      "8:4",
+      "8:5",
+      "8:6",
+    ]);
+  });
 });
 
 function chunk(id: number, docRef: number, generation: number) {

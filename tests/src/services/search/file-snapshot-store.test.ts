@@ -989,6 +989,31 @@ describe("FileSnapshotStore", () => {
     expect(nextIndexedRef?.docRef).toBe(indexedRef?.docRef);
   });
 
+  test("does not rewrite an unchanged indexed snapshot generation", async () => {
+    const file = new TFile("docs/unchanged.md", "same body", 220);
+    const { store, database } = createStoreHarness({
+      files: [file],
+      reads: { [file.path]: "same body" },
+    });
+    const registryRow = await store.ensureDocRegistryEntry({
+      path: file.path,
+      generation: 220,
+    });
+    const bulkPut = jest.spyOn(database.db.fileSnapshots, "bulkPut");
+
+    await store.publishIndexedTexts([
+      { path: file.path, generation: 220, text: "same body" },
+    ]);
+    await store.publishIndexedTexts([
+      { path: file.path, generation: 220, text: "same body" },
+    ]);
+
+    expect(bulkPut).toHaveBeenCalledTimes(1);
+    await expect(database.db.fileSnapshots.get(`${registryRow.docRef}:220`)).resolves.toEqual(
+      expect.objectContaining({ plainText: "same body" }),
+    );
+  });
+
 test("publishes and reloads lexical fuzzy rescue payloads", async () => {
     const { store, database } = createStoreHarness();
 
