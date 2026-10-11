@@ -1,3 +1,7 @@
+## [0.3.12] - 2026-10-11
+
+- fix: prevent rename races from dropping indexed files
+
 ## [0.3.11] - 2026-09-08
 
 - fix: approve pnpm dependency build scripts
