@@ -89,18 +89,26 @@ export class FileWatcher {
 	};
 
 	private readonly onRename = async (file: TAbstractFile, oldPath: string) => {
-		logger.debug(`renamed: ${oldPath} => ${file.path}`);
+		const newPath = file.path;
+		logger.debug(`renamed: ${oldPath} => ${newPath}`);
 		if (file instanceof TFile) {
-			await this.enqueuePrimedMove(oldPath, file);
+			this.clearModifyTimer(oldPath);
+			this.clearModifyTimer(newPath);
+			await this.enqueuePrimedMove(oldPath, file, newPath);
 			return;
 		}
 		if (file instanceof TFolder) {
 			for (const descendant of this.collectDescendantFiles(file)) {
-				const relativePath = descendant.path.slice(file.path.length + 1);
+				const descendantPath = descendant.path;
+				const relativePath = descendantPath.slice(newPath.length + 1);
 				const oldDescendantPath = `${oldPath}/${relativePath}`;
 				this.clearModifyTimer(oldDescendantPath);
-				this.clearModifyTimer(descendant.path);
-				await this.enqueuePrimedMove(oldDescendantPath, descendant);
+				this.clearModifyTimer(descendantPath);
+				await this.enqueuePrimedMove(
+					oldDescendantPath,
+					descendant,
+					descendantPath,
+				);
 			}
 		}
 	};
@@ -173,33 +181,61 @@ export class FileWatcher {
 			return;
 		}
 		const sourceGeneration = await this.primeCurrentFileText(file);
+		if (sourceGeneration === null) {
+			return;
+		}
 		this.dataManager.receiveDocOperation(
 			new DocUpsertOperation(file.path, sourceGeneration),
 		);
 	}
 
-	private async enqueuePrimedMove(oldPath: string, file: TFile): Promise<void> {
+	private async enqueuePrimedMove(
+		oldPath: string,
+		file: TFile,
+		expectedPath: string,
+	): Promise<void> {
+		if (file.path !== expectedPath) {
+			return;
+		}
 		if (!this.dataProvider.isIndexable(file)) {
 			this.dataManager.receiveDocOperation(
-				new DocMoveOperation(oldPath, file.path, file.stat.mtime),
+				new DocMoveOperation(oldPath, expectedPath, file.stat.mtime),
 			);
 			return;
 		}
-		const sourceGeneration = await this.primeCurrentFileText(file);
+		const sourceGeneration = await this.primeCurrentFileText(
+			file,
+			expectedPath,
+		);
+		if (sourceGeneration === null) {
+			return;
+		}
 		this.dataManager.receiveDocOperation(
-			new DocMoveOperation(oldPath, file.path, sourceGeneration),
+			new DocMoveOperation(oldPath, expectedPath, sourceGeneration),
 		);
 	}
 
-	private async primeCurrentFileText(file: TFile): Promise<number> {
+	private async primeCurrentFileText(
+		file: TFile,
+		expectedPath?: string,
+	): Promise<number | null> {
 		while (true) {
+			if (expectedPath !== undefined && file.path !== expectedPath) {
+				return null;
+			}
 			const sourcePath = file.path;
 			const sourceGeneration = file.stat.mtime;
 			try {
 				await this.fileSnapshotStore.readCurrentTexts([file]);
 			} catch (error) {
+				if (expectedPath !== undefined && file.path !== expectedPath) {
+					return null;
+				}
 				logger.warn(`failed to prime current file text for ${file.path}:`, error);
 				return sourceGeneration;
+			}
+			if (expectedPath !== undefined && file.path !== expectedPath) {
+				return null;
 			}
 			if (file.path === sourcePath && file.stat.mtime === sourceGeneration) {
 				return sourceGeneration;

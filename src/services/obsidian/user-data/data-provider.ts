@@ -227,34 +227,71 @@ export class DataProvider {
 	}
 
 	private async buildIndexedDocument(file: TFile): Promise<IndexedDocument> {
-		if (this.isContentIndexable(file)) {
-			const metaData = this.app.metadataCache.getFileCache(file);
-			if (
-				this.viewRegistry.viewTypeByPath(file.path) ===
-				ViewType.MARKDOWN
-			) {
+		while (true) {
+			const sourcePath = file.path;
+			const sourceGeneration = file.stat.mtime;
+
+			if (this.isContentIndexable(file)) {
+				if (
+					this.viewRegistry.viewTypeByPath(file.path) !==
+					ViewType.MARKDOWN
+				) {
+					throw new Error(TO_BE_IMPL);
+				}
+
+				let content: string;
+				try {
+					content = await this.readPlainText(file);
+				} catch (error) {
+					if (
+						file.path !== sourcePath ||
+						file.stat.mtime !== sourceGeneration
+					) {
+						continue;
+					}
+					throw error;
+				}
+				if (
+					file.path !== sourcePath ||
+					file.stat.mtime !== sourceGeneration
+				) {
+					continue;
+				}
+
+				const metaData = this.app.metadataCache.getFileCache(file);
+				if (
+					file.path !== sourcePath ||
+					file.stat.mtime !== sourceGeneration
+				) {
+					continue;
+				}
 				return {
-					path: file.path,
-					generation: file.stat.mtime,
+					path: sourcePath,
+					generation: sourceGeneration,
 					size: file.stat.size,
 					basename: file.basename,
-					folder: FileUtil.getFolderPath(file.path),
+					folder: FileUtil.getFolderPath(sourcePath),
 					aliases: this.parseAliases(metaData),
 					tags: this.parseTags(metaData),
 					headings: this.parseHeadings(metaData),
-					content: await this.readPlainText(file),
+					content,
 				} as IndexedDocument;
 			}
-			throw new Error(TO_BE_IMPL);
-		}
 
-		return {
-			path: file.path,
-			generation: file.stat.mtime,
-			size: file.stat.size,
-			basename: file.basename,
-			folder: FileUtil.getFolderPath(file.path),
-		};
+			if (
+				file.path !== sourcePath ||
+				file.stat.mtime !== sourceGeneration
+			) {
+				continue;
+			}
+			return {
+				path: sourcePath,
+				generation: sourceGeneration,
+				size: file.stat.size,
+				basename: file.basename,
+				folder: FileUtil.getFolderPath(sourcePath),
+			};
+		}
 	}
 
 	private parseHeadingOutline(

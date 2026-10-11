@@ -1741,6 +1741,10 @@ export class DataManager {
     file: TFile,
     generation = file.stat.mtime,
   ): Promise<boolean> {
+    if (oldPath === file.path) {
+      return await this.commitLexicalFileState(file, generation);
+    }
+
     const { documents, indexedFiles, failures } =
       await this.dataProvider.generateAllIndexedDocuments([file]);
     if (
@@ -2601,6 +2605,13 @@ export class DataManager {
     requiresReindex: boolean,
     sourceGeneration?: number,
   ): Promise<void> {
+    if (oldPath === newPath) {
+      this.cancelHybridRepair(oldPath);
+      this.clearLexicalIndexFailures([oldPath]);
+      await this.handleUpsertOperation(newPath, sourceGeneration);
+      return;
+    }
+
     const canAttemptHybridMoveReuse =
       !requiresReindex &&
       this.hybridEngine.isEnabled() &&
