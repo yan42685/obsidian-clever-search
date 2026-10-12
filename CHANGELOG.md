@@ -1,3 +1,7 @@
+## [0.3.13] - 2026-10-12
+
+- feat: refine in-file floating search window
+
 ## [0.3.12] - 2026-10-11
 
 - fix: prevent rename races from dropping indexed files
