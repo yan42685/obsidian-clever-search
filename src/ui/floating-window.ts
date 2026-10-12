@@ -35,8 +35,11 @@ abstract class FloatingWindow {
 	private isResizing = false;
 	private resizeStartX = 0;
 	private resizeStartY = 0;
+	private resizeStartLeft = 0;
+	private resizeStartTop = 0;
 	private resizeStartWidth = 0;
 	private resizeStartHeight = 0;
+	private resizeCorner = "se";
 	protected uiSetting = getInstance(OuterSetting).ui;
 	protected containerEl: HTMLDivElement;
 	private frameEl: HTMLDivElement;
@@ -69,17 +72,23 @@ abstract class FloatingWindow {
 		this.containerEl.style.borderRadius = "10px";
 		// avoid the frameEl overflowing so that borderRadius of containerEl is covered
 		this.containerEl.style.overflow = "hidden";
+		this.containerEl.style.display = "flex";
+		this.containerEl.style.flexDirection = "column";
+		this.containerEl.style.boxSizing = "border-box";
 		this.containerEl.style.boxShadow = "0 2px 4px rgba(0,0,0,0.2)";
 
 		this.frameEl.style.width = "100%";
-		this.frameEl.style.height = "20px";
+		this.frameEl.style.height = "25px";
+		this.frameEl.style.flex = "0 0 25px";
+		this.frameEl.style.minHeight = "0";
+		this.frameEl.style.boxSizing = "border-box";
 		this.frameEl.style.backgroundColor = "#333";
 		this.frameEl.style.cursor = "move";
 		this.frameEl.style.color = "#fff";
 		this.frameEl.style.display = "flex";
 		this.frameEl.style.alignItems = "center";
 		this.frameEl.style.justifyContent = "right";
-		this.frameEl.style.padding = "10px 0 10px 10px";
+		this.frameEl.style.padding = "0 0 0 10px";
 
 		// 关闭按钮
 		const closeButton = this.frameEl.createSpan();
@@ -90,7 +99,7 @@ abstract class FloatingWindow {
 		</svg>`;
 		closeButton.style.cursor = "pointer";
 		closeButton.style.padding = "2px";
-		closeButton.style.margin = "5px";
+		closeButton.style.margin = "0 3px 0 5px";
 		closeButton.style.display = "flex";
 		closeButton.style.alignItems = "center";
 		closeButton.style.justifyContent = "center";
@@ -105,23 +114,19 @@ abstract class FloatingWindow {
 		closeButton.addEventListener("click", this.onClose);
 		this.frameEl.appendChild(closeButton);
 
-		this.contentEl.style.padding = "10px 0 10px 10px";
-		// 添加滚动条支持
-		// this.contentEl.style.overflow = "auto";
-		// this.contentEl.style.height = "calc(100% - 40px)"; // 减去标题栏高度
+		this.contentEl.style.padding = "0 10px 10px";
+		this.contentEl.addClass("cs-floating-window-content");
+		this.contentEl.style.flex = "1 1 auto";
+		this.contentEl.style.minHeight = "0";
+		this.contentEl.style.overflow = "hidden";
 		this.contentEl.style.boxSizing = "border-box";
 
-		// 添加调整大小的手柄
-		const resizeHandle = this.containerEl.createDiv();
-		resizeHandle.addClass("cs-resize-handle");
-		resizeHandle.style.position = "absolute";
-		resizeHandle.style.right = "0";
-		resizeHandle.style.bottom = "0";
-		resizeHandle.style.width = "10px";
-		resizeHandle.style.height = "10px";
-		resizeHandle.style.cursor = "se-resize";
-		
-		resizeHandle.addEventListener("mousedown", this.handleResizeStart);
+		for (const corner of ["nw", "ne", "sw", "se"]) {
+			const resizeHandle = this.containerEl.createDiv();
+			resizeHandle.addClass("cs-resize-handle", `cs-resize-${corner}`);
+			resizeHandle.dataset.corner = corner;
+			resizeHandle.addEventListener("mousedown", this.handleResizeStart);
+		}
 		document.addEventListener("mousemove", this.handleResize);
 		document.addEventListener("mouseup", this.handleResizeEnd);
 
@@ -179,37 +184,44 @@ abstract class FloatingWindow {
 	};
 
 	private handleResizeStart = (e: MouseEvent) => {
+		const corner = (e.currentTarget as HTMLElement).dataset.corner;
+		if (!corner) return;
+
 		this.isResizing = true;
-		this.resizeStartX = e.pageX;
-		this.resizeStartY = e.pageY;
+		this.resizeCorner = corner;
+		this.resizeStartX = e.clientX;
+		this.resizeStartY = e.clientY;
+		const rect = this.containerEl.getBoundingClientRect();
+		this.resizeStartLeft = rect.left;
+		this.resizeStartTop = rect.top;
 		this.resizeStartWidth = this.containerEl.offsetWidth;
 		this.resizeStartHeight = this.containerEl.offsetHeight;
+		e.stopPropagation();
 		e.preventDefault();
 	};
 
 	private handleResize = (e: MouseEvent) => {
 		if (!this.isResizing) return;
-		
-		const newWidth = this.resizeStartWidth + (e.pageX - this.resizeStartX);
-		const newHeight = this.resizeStartHeight + (e.pageY - this.resizeStartY);
-		
-		// 设置最小尺寸限制
-		const width = Math.max(200, newWidth);
-		const height = Math.max(100, newHeight);
-		
-		// 确保调整大小时不会超出视口
-		const viewportWidth = window.innerWidth;
-		const viewportHeight = window.innerHeight;
-		const rect = this.containerEl.getBoundingClientRect();
+		const fromLeft = this.resizeCorner.includes("w");
+		const fromTop = this.resizeCorner.includes("n");
+		const deltaX = e.clientX - this.resizeStartX;
+		const deltaY = e.clientY - this.resizeStartY;
+		const maxWidth = fromLeft
+			? this.resizeStartLeft + this.resizeStartWidth
+			: window.innerWidth - this.resizeStartLeft;
+		const maxHeight = fromTop
+			? this.resizeStartTop + this.resizeStartHeight
+			: window.innerHeight - this.resizeStartTop;
+		const width = Math.min(maxWidth, Math.max(200, this.resizeStartWidth + (fromLeft ? -deltaX : deltaX)));
+		const height = Math.min(maxHeight, Math.max(100, this.resizeStartHeight + (fromTop ? -deltaY : deltaY)));
 
-		// 设置一个尺寸比例限制，让浮动窗口可以一定程度超出范围
-		const ratio = 0.5;
-		
-		if (rect.left * ratio + width <= viewportWidth) {
-			this.containerEl.style.width = `${width}px`;
+		this.containerEl.style.width = `${width}px`;
+		this.containerEl.style.height = `${height}px`;
+		if (fromLeft) {
+			this.containerEl.style.left = `${this.resizeStartLeft + this.resizeStartWidth - width}px`;
 		}
-		if (rect.top * ratio + height <= viewportHeight) {
-			this.containerEl.style.height = `${height}px`;
+		if (fromTop) {
+			this.containerEl.style.top = `${this.resizeStartTop + this.resizeStartHeight - height}px`;
 		}
 	};
 

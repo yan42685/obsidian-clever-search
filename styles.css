@@ -123,16 +123,33 @@ settings:
 
 .cs-resize-handle {
     position: absolute;
-    right: 0;
-    bottom: 0;
-    width: 10px;
-    height: 10px;
-    background-color: #666;
-    cursor: se-resize;
+    z-index: 2;
+    width: 14px;
+    height: 14px;
 }
 
-.cs-resize-handle:hover {
-    background-color: #888;
+.cs-resize-nw {
+    top: 0;
+    left: 0;
+    cursor: nw-resize;
+}
+
+.cs-resize-ne {
+    top: 0;
+    right: 0;
+    cursor: ne-resize;
+}
+
+.cs-resize-sw {
+    bottom: 0;
+    left: 0;
+    cursor: sw-resize;
+}
+
+.cs-resize-se {
+    right: 0;
+    bottom: 0;
+    cursor: se-resize;
 }
 
 /* 浮动窗口的亮色模式 */
@@ -214,40 +231,54 @@ settings:
 	background-color: var(--cs-pane-bgc, var(--background-primary));
 }
   
-/* 浮动窗口的滚动条 */
-.cs-floating-window-container {
-	overflow-y: auto !important;
-}
-  
 /* CS  的文件内浮动搜索框，限制大小 */
 .cs-floating-window-container .search-container {
-  
-	/* overflow-y: scroll !important; */
-  
+	display: flex !important;
+	width: 100% !important;
+	height: 100% !important;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+
 	.left-pane {
+		flex: 1 1 auto;
+		min-height: 0;
 		max-width: 100% !important;
 		width: 100% !important;
 	}
   
 	button {
-		max-width: calc(100% - 1.5em) !important;
-		margin-left: 1em !important;
+		width: calc(100% - 0.5em) !important;
+		max-width: calc(100% - 0.5em) !important;
+		box-sizing: border-box;
+		margin-left: 0.2em !important;
+		margin-right: 0.3em !important;
 	}
   
-	/* sticky header */
 	.search-bar {
+		position: relative !important;
+		flex: 0 0 auto;
+		width: 100% !important;
+		margin: 0 !important;
+		align-self: center;
+
 		input {
 			border-radius: 6px !important;
 		}
-		position: absolute !important;
-		margin-left: 10px !important;
-		margin-top: 20px !important;
-		top: 10px !important;
-		width: calc(100% - 30px) !important;
-		/* top: 20px !important; */
 	}
   
 	.result-items {
-		margin-top: 30px !important;
+		flex: 1 1 auto;
+		min-height: 0;
+		height: auto !important;
+		margin-top: 0.15em !important;
+		overflow-x: hidden;
+		overflow-y: auto;
+
+		ul {
+			width: 100% !important;
+			box-sizing: border-box;
+			padding-right: 0 !important;
+		}
 	}
 }

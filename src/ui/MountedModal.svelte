@@ -420,7 +420,9 @@
 			currSubItemIndex,
 			queryText,
 		);
-		await searchHistoryService.recordQuery(queryText);
+		if (uiType !== "floatingWindow") {
+			await searchHistoryService.recordQuery(queryText);
+		}
 	}
 
 	async function handleConfirmInBackground() {
@@ -545,6 +547,7 @@
 			bind:this={historyInputRef}
 			bind:queryText
 			{matchCountText}
+			completionMode={uiType === "floatingWindow" ? "plain" : "history"}
 			on:querychange={handleInput}
 			on:enter={handleManualSearch}
 		/>
