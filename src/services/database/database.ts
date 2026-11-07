@@ -574,6 +574,35 @@ export class Database {
     );
   }
 
+  async resetPersistentSearchIndexes(includeHybrid: boolean): Promise<void> {
+    if (includeHybrid) {
+      await this.resetTargetedPersistentIndexState();
+      return;
+    }
+
+    await Promise.all([
+      this.db.lexicalSearchSnapshots.clear(),
+      this.db.lexicalIndexedFileRefs.clear(),
+      this.db.lexicalIndexedMetadata.clear(),
+      this.db.lexicalFuzzyRescue.clear(),
+      this.db.lexicalBodyEvidence.clear(),
+      this.db.lexicalHanDocEvidence.clear(),
+      this.db.lexicalHanBodyEvidence.clear(),
+      this.db.coverageLexicalV3ShardRegistry.clear(),
+      this.db.coverageLexicalV3Invalidations.clear(),
+      this.db.coverageLexicalV3ResidentShardArtifacts.clear(),
+      this.db.coverageLexicalV3ActiveOverlayJournal.clear(),
+      this.db.coverageLexicalV3CompactJobs.clear(),
+      this.db.coverageLexicalV3CompactTempArtifacts.clear(),
+      this.db.coverageLexicalV3SnapshotManifests.clear(),
+      this.db.docRegistryMeta.delete(DexieWrapper.lexicalQueryEvidenceReadyKey),
+      this.db.indexRecoveryState.where("engine").equals("lexical").delete(),
+      this.db.indexArtifactState.where("engine").equals("lexical").delete(),
+      this.db.lexicalMutationJournal.where("engine").equals("lexical").delete(),
+      this.db.pendingDocOperations.where("engine").equals("lexical").delete(),
+    ]);
+  }
+
   // it may finished some time later even if using await
   async setLexicalSearchSnapshot(data: SerializedFileSearchIndex) {
     await this.db.transaction(

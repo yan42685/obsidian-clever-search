@@ -1356,14 +1356,20 @@ export class DataManager {
 
   async refreshLexicalStateAsync() {
     this.setLexicalBootstrapState("healing");
+    const rebuildHybrid = this.hybridEngine.isEnabled();
     const heapBeforeLexicalRefresh = isDevEnvironment
       ? await this.sampleDevJsHeapUsage()
       : null;
     this.latestLexicalHeapDelta = null;
     getInstance(FileWatcher).stop();
     try {
+      await this.database.resetPersistentSearchIndexes(rebuildHybrid);
+      this.fileSnapshotStore.resetRuntimeState();
       await this.reindexLexicalEngineWithCurrFiles();
       await this.persistLexicalSearchSnapshotIfAvailable();
+      if (rebuildHybrid) {
+        await this.refreshHybridStateAsync({ forceRefresh: true });
+      }
       if (isDevEnvironment) {
         await MyLib.sleep(0);
         this.latestLexicalHeapDelta = await this.summarizeDevLexicalHeapDelta(

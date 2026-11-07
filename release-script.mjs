@@ -69,7 +69,7 @@ function normalizeReleaseType(rawType) {
 
 function parseReleaseOptions(args) {
 	let releaseType = DEFAULT_RELEASE_TYPE;
-	let useLlm = true;
+	let useLlm = false;
 
 	for (const arg of args) {
 		if (arg === "--no-ai" || arg === "--no-llm") {

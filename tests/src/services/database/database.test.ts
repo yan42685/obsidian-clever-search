@@ -336,6 +336,127 @@ describe("Database Dexie upgrade recovery", () => {
     database.db.close();
   });
 
+  test("lexical-only rebuild reset preserves shared and hybrid index state", async () => {
+    const appId = `db-lexical-reset-${Date.now()}`;
+    const dbName = `clever-search/${appId}`;
+    createdDbNames.push(dbName);
+    const database = createDatabaseHarness(appId);
+    await database.openAndConsumeSchemaUpgradeReport();
+
+    await database.db.lexicalSearchSnapshots.add({ data: {} as any });
+    await database.db.coverageLexicalV3Invalidations.put({
+      id: "stale-invalidation",
+      shardId: "base-0",
+      shardGeneration: 1,
+      docRef: 1,
+      docGeneration: 1,
+      reason: "superseded",
+      createdAt: Date.now(),
+    });
+    await database.db.docRegistry.put({
+      docRef: 1,
+      path: "notes/alpha.md",
+      deleted: false,
+      liveGeneration: 1,
+      updatedAt: Date.now(),
+    });
+    await database.db.docRegistryMeta.put({ key: "nextDocRef", value: 2 });
+    await database.db.fileSnapshots.put({
+      id: "1@1",
+      docRef: 1,
+      generation: 1,
+      plainText: "shared text",
+    } as any);
+    await database.db.hybridChunks.add({
+      docRef: 1,
+      generation: 1,
+      chunkIndex: 0,
+      text: "hybrid chunk",
+    } as any);
+    await database.db.indexRecoveryState.put({
+      id: "lexical:notes/alpha.md",
+      engine: "lexical",
+      path: "notes/alpha.md",
+      state: "failed",
+    } as any);
+    await database.db.indexRecoveryState.put({
+      id: "hybrid:notes/alpha.md",
+      engine: "hybrid",
+      path: "notes/alpha.md",
+      state: "failed",
+    } as any);
+    await database.db.lexicalMutationJournal.put({
+      id: "lexical-op",
+      engine: "lexical",
+      kind: "replace",
+      path: "notes/alpha.md",
+      createdAt: Date.now(),
+    });
+
+    await database.resetPersistentSearchIndexes(false);
+
+    await expect(database.db.lexicalSearchSnapshots.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3Invalidations.count()).resolves.toBe(0);
+    await expect(database.db.docRegistry.count()).resolves.toBe(1);
+    await expect(database.db.docRegistryMeta.get("nextDocRef")).resolves.toEqual({
+      key: "nextDocRef",
+      value: 2,
+    });
+    await expect(database.db.fileSnapshots.count()).resolves.toBe(1);
+    await expect(database.db.hybridChunks.count()).resolves.toBe(1);
+    await expect(database.db.indexRecoveryState.count()).resolves.toBe(1);
+    await expect(database.db.indexRecoveryState.get("hybrid:notes/alpha.md")).resolves.toBeDefined();
+    await expect(database.db.lexicalMutationJournal.count()).resolves.toBe(0);
+
+    database.db.close();
+  });
+
+  test("full rebuild reset clears lexical and hybrid state when Hybrid is enabled", async () => {
+    const appId = `db-full-index-reset-${Date.now()}`;
+    const dbName = `clever-search/${appId}`;
+    createdDbNames.push(dbName);
+    const database = createDatabaseHarness(appId);
+    await database.openAndConsumeSchemaUpgradeReport();
+
+    await database.db.docRegistry.put({
+      docRef: 1,
+      path: "notes/alpha.md",
+      deleted: false,
+      liveGeneration: 1,
+      updatedAt: Date.now(),
+    });
+    await database.db.fileSnapshots.put({
+      id: "1@1",
+      docRef: 1,
+      generation: 1,
+      plainText: "old text",
+    } as any);
+    await database.db.hybridChunks.add({
+      docRef: 1,
+      generation: 1,
+      chunkIndex: 0,
+      text: "old chunk",
+    } as any);
+    await database.db.coverageLexicalV3Invalidations.put({
+      id: "stale-invalidation",
+      shardId: "base-0",
+      shardGeneration: 1,
+      docRef: 1,
+      docGeneration: 1,
+      reason: "superseded",
+      createdAt: Date.now(),
+    });
+
+    await database.resetPersistentSearchIndexes(true);
+
+    await expect(database.db.docRegistry.count()).resolves.toBe(0);
+    await expect(database.db.fileSnapshots.count()).resolves.toBe(0);
+    await expect(database.db.hybridChunks.count()).resolves.toBe(0);
+    await expect(database.db.coverageLexicalV3Invalidations.count()).resolves.toBe(0);
+
+    database.db.close();
+  });
+
   test("returns a targeted-reset recovery report when the retry succeeds after clearing index state", async () => {
     const open = jest
       .fn()
