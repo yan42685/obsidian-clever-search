@@ -88,13 +88,13 @@ export class FileWatcher {
 		this.dataManager.receiveDocOperation(new DocDeleteOperation(file.path));
 	};
 
-	private readonly onRename = async (file: TAbstractFile, oldPath: string) => {
+	private readonly onRename = (file: TAbstractFile, oldPath: string) => {
 		const newPath = file.path;
 		logger.debug(`renamed: ${oldPath} => ${newPath}`);
 		if (file instanceof TFile) {
 			this.clearModifyTimer(oldPath);
 			this.clearModifyTimer(newPath);
-			await this.enqueuePrimedMove(oldPath, file, newPath);
+			this.enqueueMove(oldPath, file, newPath);
 			return;
 		}
 		if (file instanceof TFolder) {
@@ -104,11 +104,7 @@ export class FileWatcher {
 				const oldDescendantPath = `${oldPath}/${relativePath}`;
 				this.clearModifyTimer(oldDescendantPath);
 				this.clearModifyTimer(descendantPath);
-				await this.enqueuePrimedMove(
-					oldDescendantPath,
-					descendant,
-					descendantPath,
-				);
+				this.enqueueMove(oldDescendantPath, descendant, descendantPath);
 			}
 		}
 	};
@@ -189,29 +185,16 @@ export class FileWatcher {
 		);
 	}
 
-	private async enqueuePrimedMove(
+	private enqueueMove(
 		oldPath: string,
 		file: TFile,
 		expectedPath: string,
-	): Promise<void> {
+	): void {
 		if (file.path !== expectedPath) {
 			return;
 		}
-		if (!this.dataProvider.isIndexable(file)) {
-			this.dataManager.receiveDocOperation(
-				new DocMoveOperation(oldPath, expectedPath, file.stat.mtime),
-			);
-			return;
-		}
-		const sourceGeneration = await this.primeCurrentFileText(
-			file,
-			expectedPath,
-		);
-		if (sourceGeneration === null) {
-			return;
-		}
 		this.dataManager.receiveDocOperation(
-			new DocMoveOperation(oldPath, expectedPath, sourceGeneration),
+			new DocMoveOperation(oldPath, expectedPath, file.stat.mtime),
 		);
 	}
 

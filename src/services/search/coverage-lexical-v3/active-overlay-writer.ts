@@ -76,11 +76,33 @@ export function planActiveOverlayChanges(params: {
 			createdAt: now,
 		};
 	});
+	const movedActiveOverlayVersions = new Set(
+		entries
+			.filter((entry) => entry.operation === "append" && entry.document != null)
+			.map((entry) => {
+				const previousVersion = entry.previousVersion;
+				const document = entry.document;
+				if (
+					previousVersion == null ||
+					document == null ||
+					previousVersion.shardId !== buildOverlayShardId(params.activeShard.shardId) ||
+					previousVersion.shardGeneration !== params.activeShard.generation ||
+					previousVersion.docRef !== document.docRef ||
+					previousVersion.docGeneration !== document.generation
+				) {
+					return null;
+				}
+				return buildOverlayVersionKey(previousVersion);
+			})
+			.filter((key): key is string => key != null),
+	);
 	const invalidations = entries.flatMap((entry) => {
 		const previousVersion = entry.previousVersion;
 		if (
 			previousVersion == null ||
-			isSameOverlayDocumentVersion(params.activeShard, entry, previousVersion)
+			isSameOverlayDocumentVersion(params.activeShard, entry, previousVersion) ||
+			(entry.operation === "delete" &&
+				movedActiveOverlayVersions.has(buildOverlayVersionKey(previousVersion)))
 		) {
 			return [];
 		}
@@ -96,6 +118,15 @@ export function planActiveOverlayChanges(params: {
 		];
 	});
 	return { entries, invalidations };
+}
+
+function buildOverlayVersionKey(version: {
+	shardId: string;
+	shardGeneration: number;
+	docRef: number;
+	docGeneration: number;
+}): string {
+	return `${version.shardId}@${version.shardGeneration}:${version.docRef}@${version.docGeneration}`;
 }
 
 function isSameOverlayDocumentVersion(

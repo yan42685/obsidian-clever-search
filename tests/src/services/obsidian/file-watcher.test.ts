@@ -59,7 +59,7 @@ import { FileWatcher } from "src/services/obsidian/user-data/file-watcher";
 import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 
 describe("FileWatcher", () => {
-	test("expands a folder rename into descendant file moves", async () => {
+	test("records folder rename moves synchronously in descendant order", async () => {
 		const handlers = new Map<string, (...args: any[]) => unknown>();
 		const vault = {
 			on: jest.fn((event: string, callback: (...args: any[]) => unknown) => {
@@ -102,7 +102,7 @@ describe("FileWatcher", () => {
 		await handlers.get("rename")?.(root, "notes");
 
 		expect(vault.on).toHaveBeenCalledTimes(4);
-		expect(fileSnapshotStore.readCurrentTexts).toHaveBeenCalledTimes(2);
+		expect(fileSnapshotStore.readCurrentTexts).not.toHaveBeenCalled();
 		expect(dataManager.receiveDocOperation).toHaveBeenCalledTimes(2);
 		const operations = dataManager.receiveDocOperation.mock.calls.map(
 			([operation]) => operation,
@@ -119,6 +119,42 @@ describe("FileWatcher", () => {
 				sourceGeneration: 300,
 			}),
 		]);
+	});
+
+	test("records rapid consecutive file renames in event order", async () => {
+		const handlers = new Map<string, (...args: any[]) => unknown>();
+		const vault = {
+			on: jest.fn((event: string, callback: (...args: any[]) => unknown) => {
+				handlers.set(event, callback);
+			}),
+			off: jest.fn(),
+		};
+		const dataManager = { receiveDocOperation: jest.fn() };
+		const fileSnapshotStore = { readCurrentTexts: jest.fn() };
+		const dataProvider = { isIndexable: jest.fn(() => true) };
+		mockInstanceMap.set(App, { vault });
+		mockInstanceMap.set(DataManager, dataManager);
+		mockInstanceMap.set(DataProvider, dataProvider);
+		mockInstanceMap.set(FileSnapshotStore, fileSnapshotStore);
+
+		const file = Object.assign(Object.create(TFile.prototype), {
+			path: "notes/a.md",
+			stat: { mtime: 500, size: 1 },
+		}) as TFile;
+		const watcher = new FileWatcher();
+		watcher.start();
+		const onRename = handlers.get("rename");
+
+		file.path = "notes/b.md";
+		void onRename?.(file, "notes/a.md");
+		file.path = "notes/c.md";
+		void onRename?.(file, "notes/b.md");
+
+		expect(dataManager.receiveDocOperation.mock.calls.map(([operation]) => operation)).toEqual([
+			expect.objectContaining({ oldPath: "notes/a.md", path: "notes/b.md" }),
+			expect.objectContaining({ oldPath: "notes/b.md", path: "notes/c.md" }),
+		]);
+		expect(fileSnapshotStore.readCurrentTexts).not.toHaveBeenCalled();
 	});
 
 	test("does not read non-indexable files before enqueueing cleanup", async () => {

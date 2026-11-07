@@ -3886,8 +3886,11 @@ describe("DataManager integration", () => {
     const manager = resolveDataManager();
 
     await expect(
-      (manager as any).canReuseMovedHybridState(file.path),
+      (manager as any).canReuseMovedHybridState(file.path, "moved body"),
     ).resolves.toBe(true);
+    await expect(
+      (manager as any).canReuseMovedHybridState(file.path, "edited body"),
+    ).resolves.toBe(false);
 
     manager.onunload();
   });

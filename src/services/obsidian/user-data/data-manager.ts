@@ -1758,6 +1758,7 @@ export class DataManager {
       return false;
     }
 
+    const indexedGeneration = documents[0].generation ?? generation;
     const plainText = documents[0].content ?? "";
     const contentFingerprint = hashStableText(plainText);
     const metadata = this.dataProvider.getIndexedDocumentMetadata(file);
@@ -1766,7 +1767,7 @@ export class DataManager {
       oldPath,
       file.path,
       {
-        generation,
+        generation: indexedGeneration,
         contentFingerprint,
       },
     );
@@ -1774,14 +1775,14 @@ export class DataManager {
       movedRegistryEntry ??
       (await this.ensureLexicalDocRegistryEntry({
         path: file.path,
-        generation,
+        generation: indexedGeneration,
         deleted: false,
         contentFingerprint,
       }));
     const nextDocument = {
       ...documents[0],
       docRef: docRegistryEntry?.docRef ?? previousDocRef ?? documents[0].docRef,
-      generation,
+      generation: indexedGeneration,
       content: plainText,
       aliases: metadata.aliases ?? documents[0].aliases ?? "",
       tags: metadata.tags ?? documents[0].tags ?? "",
@@ -1790,7 +1791,7 @@ export class DataManager {
     await this.fileSnapshotStore.publishIndexedMetadata([
       {
         path: file.path,
-        generation,
+        generation: indexedGeneration,
         aliasesText: nextDocument.aliases ?? "",
         tagsText: nextDocument.tags ?? "",
         headingsText: nextDocument.headings ?? "",
@@ -1799,7 +1800,7 @@ export class DataManager {
     await this.fileSnapshotStore.publishIndexedTexts([
       {
         path: file.path,
-        generation,
+        generation: indexedGeneration,
         text: plainText,
       },
     ]);
@@ -1812,11 +1813,11 @@ export class DataManager {
     this.notifyLexicalIndexedTextsCommitted([
       {
         path: file.path,
-        generation,
+        generation: indexedGeneration,
       },
     ]);
     await this.deleteLexicalIndexedFileRefs([oldPath]);
-    await this.upsertLexicalIndexedFileRef(file, generation);
+    await this.upsertLexicalIndexedFileRef(file, indexedGeneration);
     await this.fileSnapshotStore.removeFiles([oldPath]);
     await this.markLexicalSnapshotDirty([oldPath, file.path]);
     return true;
@@ -2613,9 +2614,7 @@ export class DataManager {
     }
 
     const canAttemptHybridMoveReuse =
-      !requiresReindex &&
-      this.hybridEngine.isEnabled() &&
-      (await this.canReuseMovedHybridState(oldPath));
+      !requiresReindex && this.hybridEngine.isEnabled();
 
     this.cancelHybridRepair(oldPath);
     this.cancelHybridRepair(newPath);
@@ -2623,9 +2622,8 @@ export class DataManager {
 
     const file = this.dataProvider.getFileByPath(newPath);
     if (!file || !this.dataProvider.isIndexable(file)) {
-      await this.deleteLexicalFileState([oldPath, newPath]);
+      await this.deleteLexicalFileState([oldPath]);
       await this.clearFailedHybridEmbedding(oldPath);
-      await this.clearFailedHybridEmbedding(newPath);
       await this.handleDeleteOperation(newPath);
       if (this.hybridEngine.isEnabled()) {
         await this.hybridEngine.deleteFile(oldPath);
@@ -2633,7 +2631,10 @@ export class DataManager {
       return;
     }
 
-    await this.primeCurrentFileText(file, sourceGeneration);
+    const currentPlainText = await this.primeCurrentFileText(file, sourceGeneration);
+    const canReuseHybridState =
+      canAttemptHybridMoveReuse &&
+      (await this.canReuseMovedHybridState(oldPath, currentPlainText));
     const movedLexical = await this.commitMovedLexicalFileState(
       oldPath,
       file,
@@ -2660,7 +2661,7 @@ export class DataManager {
     const basenameChanged =
       FileUtil.getBasename(oldPath) !== FileUtil.getBasename(newPath);
     const moved =
-      canAttemptHybridMoveReuse && !basenameChanged
+      canReuseHybridState && !basenameChanged
         ? await this.hybridEngine.moveFile(oldPath, newPath, file.stat.mtime)
         : false;
 
@@ -2684,7 +2685,10 @@ export class DataManager {
     });
   }
 
-  private async canReuseMovedHybridState(path: string): Promise<boolean> {
+  private async canReuseMovedHybridState(
+    path: string,
+    currentPlainText: string,
+  ): Promise<boolean> {
     const indexedFileRef = await this.fileSnapshotStore.getHybridIndexedFileRef(path);
     if (!indexedFileRef || indexedFileRef.generation === undefined) {
       return false;
@@ -2703,7 +2707,10 @@ export class DataManager {
       return false;
     }
 
-    return snapshotRow.generation === indexedFileRef.generation;
+    return (
+      snapshotRow.generation === indexedFileRef.generation &&
+      hashStableText(snapshotRow.plainText) === hashStableText(currentPlainText)
+    );
   }
 
   private async primeCurrentFileText(

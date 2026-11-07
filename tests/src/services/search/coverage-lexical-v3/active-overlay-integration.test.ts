@@ -8,6 +8,7 @@ import { writeActiveOverlayChanges } from "src/services/search/coverage-lexical-
 import { buildResidentHotBaseArtifacts } from "src/services/search/coverage-lexical-v3/build";
 import { CoverageLexicalV3Engine } from "src/services/search/coverage-lexical-v3/engine";
 import { EMPTY_RESIDENT_FUZZY_RESCUE_INDEX } from "src/services/search/coverage-lexical-v3/layout/fuzzy-rescue";
+import { getDocPath } from "src/services/search/coverage-lexical-v3/recall/access";
 import type { ResidentIndexView } from "src/services/search/coverage-lexical-v3/layout/types";
 import type { ResidentShardDescriptor } from "src/services/search/coverage-lexical-v3/shards";
 import { createMemoryCoverageLexicalV3ProductionStores } from "src/services/search/coverage-lexical-v3/stores";
@@ -190,6 +191,73 @@ describe("coverage lexical v3 active overlay integration", () => {
 		);
 
 		expect(engine.search("project fresh target").recallState.candidateDocs).toHaveLength(1);
+	});
+
+	test("same-generation overlay move keeps the new path searchable", async () => {
+		const engine = new CoverageLexicalV3Engine();
+		engine.loadResidentIndexView({
+			version: 1,
+			shards: [buildShard("active-1", 1, [])],
+		});
+		const stores = createMemoryCoverageLexicalV3ProductionStores();
+		const overlayStore = new MemoryActiveOverlayJournalStore();
+		const previous = doc("notes/oldname.md", "project renamed target", 19, 1);
+		const moved = doc("notes/newname.md", "project renamed target", 19, 1);
+		const previousVersion = {
+			shardId: "active-1:overlay",
+			shardGeneration: 1,
+			docRef: 19,
+			docGeneration: 1,
+		};
+
+		await writeActiveOverlayChanges({
+			stores,
+			overlayJournalStore: overlayStore,
+			activeShard: activeDescriptor(),
+			changes: [{ document: previous }],
+			sequenceStart: 1,
+			now: 30,
+		});
+		await writeActiveOverlayChanges({
+			stores,
+			overlayJournalStore: overlayStore,
+			activeShard: activeDescriptor(),
+			changes: [
+				{ document: previous, deleted: true, previousVersion },
+				{ document: moved, previousVersion },
+			],
+			sequenceStart: 2,
+			now: 31,
+		});
+
+		const entries = await overlayStore.loadActiveOverlayEntries({
+			activeShardId: "active-1",
+			activeShardGeneration: 1,
+		});
+		expect(materializeOverlayDocuments(entries)).toEqual([moved]);
+		const invalidations = await stores.invalidations.loadInvalidations();
+		expect(invalidations).toEqual([]);
+		engine.loadShardInvalidations(invalidations);
+		engine.loadOverlayResidentShard(
+			buildOverlayResidentShard({
+				activeShardId: "active-1",
+				activeShardGeneration: 1,
+				entries,
+			}),
+		);
+
+		const overlayBase = engine
+			.getResidentIndexView()
+			?.shards.find((shard) => shard.shardId === "active-1:overlay")?.base;
+		expect(overlayBase).toBeDefined();
+		const candidatePaths = (query: string) =>
+			engine
+				.search(query)
+				.recallState.candidateDocs.map((candidate) =>
+					getDocPath(overlayBase!, candidate.docId),
+				);
+		expect(candidatePaths("newname")).toEqual(["notes/newname.md"]);
+		expect(candidatePaths("oldname")).toEqual([]);
 	});
 
 	test("external fuzzy rescue still applies to the base shard while overlay is loaded", async () => {
