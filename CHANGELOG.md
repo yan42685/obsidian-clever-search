@@ -1,3 +1,7 @@
+## [0.3.15] - 2026-11-07
+
+- fix: reset persisted indexes on full rebuild
+
 ## [0.3.13] - 2026-10-12
 
 - feat: refine in-file floating search window
