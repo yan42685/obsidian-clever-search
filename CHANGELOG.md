@@ -1,3 +1,7 @@
+## [0.3.16] - 2026-11-19
+
+- fix: correct feature request template spelling
+
 ## [0.3.15] - 2026-11-07
 
 - fix: reset persisted indexes on full rebuild
