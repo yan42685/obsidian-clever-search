@@ -1,8 +1,7 @@
 import { execSync } from "child_process";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 
-const RELEASE_TYPES = new Set(["major", "minor", "patch"]);
-const DEFAULT_RELEASE_TYPE = "patch";
+const RELEASE_VERSION_PATTERN = /^(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}$/;
 const OPENAI_MODEL = "gpt-5.4";
 const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1";
 const OPENAI_TIMEOUT_MS = 60_000;
@@ -16,19 +15,21 @@ const ENV_CANDIDATE_PATHS = [
 
 async function main() {
 	const options = parseReleaseOptions(process.argv.slice(2));
-	const releaseType = normalizeReleaseType(options.releaseType);
 
 	ensureCleanWorktree();
-
-	const releaseNotesBody = await generateReleaseNotesBody({
-		useLlm: options.useLlm,
-	});
 
 	const manifestPath = "manifest.json";
 	const originalManifestText = readFileSync(manifestPath, "utf8");
 	const manifest = JSON.parse(originalManifestText);
 	const oldVersion = manifest.version;
-	const newVersion = bumpVersion(oldVersion, releaseType);
+	const newVersion = resolveReleaseVersion(oldVersion, options.versionTarget);
+	if (runCommand("git tag --list " + newVersion).trim()) {
+		throw new Error("Release tag already exists: " + newVersion);
+	}
+	const releaseNotesBody = await generateReleaseNotesBody({
+		useLlm: options.useLlm,
+	});
+
 	manifest.version = newVersion;
 	writeJson(manifestPath, manifest);
 	console.log(`Version bumped: ${oldVersion} -> ${newVersion}`);
@@ -60,47 +61,41 @@ async function main() {
 	console.log(`Release completed: ${newVersion}`);
 }
 
-function normalizeReleaseType(rawType) {
-	if (RELEASE_TYPES.has(rawType)) {
-		return rawType;
-	}
-	return DEFAULT_RELEASE_TYPE;
-}
-
 function parseReleaseOptions(args) {
-	let releaseType = DEFAULT_RELEASE_TYPE;
-	let useLlm = false;
+	let versionTarget;
 
 	for (const arg of args) {
 		if (arg === "--no-ai" || arg === "--no-llm") {
-			useLlm = false;
-			continue;
-		}
-		if (RELEASE_TYPES.has(arg)) {
-			releaseType = arg;
 			continue;
 		}
 		if (arg === "--help" || arg === "-h") {
 			printUsageAndExit();
 		}
-		throw new Error(`Unknown release option: ${arg}`);
+		if (arg !== "patch" && !RELEASE_VERSION_PATTERN.test(arg)) {
+			throw new Error("Invalid release argument: " + arg + ". Use patch or an exact version (x.x.x).");
+		}
+		if (versionTarget !== undefined) {
+			throw new Error("Specify only one release target.");
+		}
+		versionTarget = arg;
 	}
 
 	return {
-		releaseType,
-		useLlm,
+		versionTarget: versionTarget ?? "patch",
+		useLlm: false,
 	};
 }
 
 function printUsageAndExit() {
 	console.log(
 		[
-			"Usage: pnpm run release [major|minor|patch] [--no-ai]",
+			"Usage: pnpm run release [patch|x.x.x] [--no-ai]",
 			"",
 			"Options:",
-			"  major|minor|patch  Version bump type. Defaults to patch.",
-			"  --no-ai            Skip LLM changelog summarization and use commit subjects directly.",
-			"  --no-llm           Alias for --no-ai.",
+			"  patch     Increment the patch version (default).",
+			"  x.x.x     Set an exact version greater than the current version.",
+			"  --no-ai   Use commit subjects for the changelog (default).",
+			"  --no-llm  Alias for --no-ai.",
 		].join("\n"),
 	);
 	process.exit(0);
@@ -399,24 +394,23 @@ function buildChangelogEntry(version, date, releaseNotesBody) {
 	return `## [${version}] - ${date}\n\n${releaseNotesBody}\n\n`;
 }
 
-function bumpVersion(oldVersion, releaseType) {
-	const parts = oldVersion.split(".").map(Number);
-	if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
+function resolveReleaseVersion(oldVersion, versionTarget) {
+	if (typeof oldVersion !== "string" || !RELEASE_VERSION_PATTERN.test(oldVersion)) {
 		throw new Error(`Invalid manifest version: ${oldVersion}`);
 	}
 
-	if (releaseType === "major") {
-		parts[0] += 1;
-		parts[1] = 0;
-		parts[2] = 0;
-	} else if (releaseType === "minor") {
-		parts[1] += 1;
-		parts[2] = 0;
-	} else {
-		parts[2] += 1;
+	const current = oldVersion.split(".").map(BigInt);
+	if (versionTarget === "patch") {
+		current[2] += 1n;
+		return current.join(".");
 	}
 
-	return parts.join(".");
+	const target = versionTarget.split(".").map(BigInt);
+	const firstDifference = target.findIndex((part, index) => part !== current[index]);
+	if (firstDifference === -1 || target[firstDifference] < current[firstDifference]) {
+		throw new Error("Release version " + versionTarget + " must be greater than " + oldVersion + ".");
+	}
+	return versionTarget;
 }
 
 function prependFile(filePath, newContent) {
