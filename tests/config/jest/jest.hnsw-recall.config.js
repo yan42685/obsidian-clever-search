@@ -1,4 +1,5 @@
 module.exports = {
+	rootDir: "../../..",
 	clearMocks: true,
 	collectCoverage: false,
 	moduleDirectories: ["node_modules", "<rootDir>"],

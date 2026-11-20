@@ -39,7 +39,7 @@ const result = spawnSync(
 	[
 		jestBin,
 		"--config",
-		"jest.config.js",
+		"tests/config/jest/jest.config.js",
 		"--runInBand",
 		"--runTestsByPath",
 		exportTestPath,

@@ -342,7 +342,7 @@ Validation completed for this update:
 - `npm run benchmark:coverage-lexical:startup:vault` passes on 2026-04-28
 - startup benchmark is isolated in
   `tests/src/services/search/coverage-lexical-v3-startup-benchmark.bench.ts`
-  and uses `jest.coverage-lexical-startup-benchmark.config.js`, so query
+  and uses `tests/config/jest/jest.coverage-lexical-startup-benchmark.config.js`, so query
   benchmark runs remain quality/ranking-only.
 
 Local TestVault startup/index benchmark anchor captured on 2026-04-28 with

@@ -47,7 +47,7 @@ export const DEFAULT_LATEST_REPORT = path.join(
 export const DEFAULT_BENCHMARK_ARGS = [
 	"node_modules/jest/bin/jest.js",
 	"--config",
-	"jest.coverage-lexical-benchmark.config.js",
+	"tests/config/jest/jest.coverage-lexical-benchmark.config.js",
 	"--runInBand",
 ];
 

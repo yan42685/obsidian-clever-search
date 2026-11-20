@@ -1679,7 +1679,7 @@ reconstructing them from query-time pseudo spacing:
 Validation completed for this phase:
 
 - `npm run typecheck:build` passes on 2026-04-17
-- `node node_modules/jest/bin/jest.js --config jest.config.js --runInBand --runTestsByPath tests/src/services/search/coverage-lexical-v3/query-text.test.ts tests/src/services/search/coverage-lexical-v3/resident-base.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/witness-split.test.ts`
+- `node node_modules/jest/bin/jest.js --config tests/config/jest/jest.config.js --runInBand --runTestsByPath tests/src/services/search/coverage-lexical-v3/query-text.test.ts tests/src/services/search/coverage-lexical-v3/resident-base.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/witness-split.test.ts`
   passes on 2026-04-17
 
 ### Phase 31
@@ -1742,7 +1742,7 @@ tie-breaker:
 Validation completed for this phase:
 
 - `npm run typecheck:build` passes on 2026-04-18
-- `node node_modules/jest/bin/jest.js --config jest.config.js --runInBand --runTestsByPath tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-renderer.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts --testNamePattern "Han|metadata opaque rescue|adjacent Han chunk boundary|completed Han surface witness|mixed latin plus Han|bridge bigrams|multiple Han surface groups|global Han family matches|body-only Han rescue|fully covered Han real terms|family-verified Han recall planning|whole-surface Han tokenizer terms|stable Han query cover|han rescue summary"`
+- `node node_modules/jest/bin/jest.js --config tests/config/jest/jest.config.js --runInBand --runTestsByPath tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-renderer.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts --testNamePattern "Han|metadata opaque rescue|adjacent Han chunk boundary|completed Han surface witness|mixed latin plus Han|bridge bigrams|multiple Han surface groups|global Han family matches|body-only Han rescue|fully covered Han real terms|family-verified Han recall planning|whole-surface Han tokenizer terms|stable Han query cover|han rescue summary"`
   passes on 2026-04-18
 
 ### Phase 33
@@ -1772,7 +1772,7 @@ document while same-band ranking continues to prefer true standalone prefixes:
 Validation completed for this phase:
 
 - `npm run typecheck:build` passes on 2026-04-18
-- `node node_modules/jest/bin/jest.js --config jest.config.js --runInBand --runTestsByPath tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/query-text.test.ts tests/src/services/search/coverage-lexical-v3/resident-base.test.ts tests/src/services/search/coverage-lexical-v3/family-lookup.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-shortlist.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-residual-support.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/position-lanes.test.ts tests/src/services/search/coverage-lexical-v3/witness-split.test.ts`
+- `node node_modules/jest/bin/jest.js --config tests/config/jest/jest.config.js --runInBand --runTestsByPath tests/src/services/search/coverage-lexical-v3/engine.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/query-text.test.ts tests/src/services/search/coverage-lexical-v3/resident-base.test.ts tests/src/services/search/coverage-lexical-v3/family-lookup.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-shortlist.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-residual-support.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/position-lanes.test.ts tests/src/services/search/coverage-lexical-v3/witness-split.test.ts`
   passes on 2026-04-18
 ### Phase 34
 
@@ -1819,7 +1819,7 @@ Validation completed for this phase:
   passes on 2026-04-18
 - `npm test -- --runInBand tests/src/services/search/coverage-lexical-v3/engine.test.ts`
   passes on 2026-04-18
-- `node node_modules/jest/bin/jest.js --config jest.config.js --runInBand --roots tests/src --roots tmp --runTestsByPath tmp/coverage-lexical-v3-prefix-fanout-stress.test.ts`
+- `node node_modules/jest/bin/jest.js --config tests/config/jest/jest.config.js --runInBand --roots tests/src --roots tmp --runTestsByPath tmp/coverage-lexical-v3-prefix-fanout-stress.test.ts`
   passes on 2026-04-18, confirming:
   - the light synthetic fanout case stays below the guard and remains unchanged
   - heavy mixed / high-block fanout cases are trimmed back to the active body
@@ -1867,7 +1867,7 @@ ordering while results can still show concrete snippet/highlight evidence:
 Validation completed for this phase:
 
 - `npm run typecheck:build` passes on 2026-04-19
-- `node node_modules/jest/bin/jest.js --config jest.config.js --runInBand --runTestsByPath tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-renderer.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/metadata-highlights-fuzzy.test.ts tests/src/services/search/coverage-lexical-v3/prefix-fanout-guard.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts`
+- `node node_modules/jest/bin/jest.js --config tests/config/jest/jest.config.js --runInBand --runTestsByPath tests/src/services/search/coverage-lexical-v3/query-analysis.test.ts tests/src/services/search/coverage-lexical-v3/han-route.test.ts tests/src/services/search/coverage-lexical-v3/comparator.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-resolver.test.ts tests/src/services/search/coverage-lexical-v3/direct-subitems-renderer.test.ts tests/src/services/search/coverage-lexical-v3/file-search-engine.test.ts tests/src/services/search/coverage-lexical-v3/metadata-highlights-fuzzy.test.ts tests/src/services/search/coverage-lexical-v3/prefix-fanout-guard.test.ts tests/src/services/search/coverage-lexical-v3/engine.test.ts`
   passes on 2026-04-19
 
 ### Phase 36
