@@ -1,3 +1,10 @@
+## [0.3.17] - 2026-11-21
+
+- fix: require explicit versions for major and minor releases
+- docs: remove obsolete coverage subitems todo
+- chore: organize Jest config files
+- Fix index rebuild and preserve file changes during refresh
+
 ## [0.3.16] - 2026-11-19
 
 - fix: correct feature request template spelling
