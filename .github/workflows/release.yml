@@ -66,7 +66,7 @@ jobs:
 
           # 3. 创建打包目录并复制必要文件
           mkdir ${{ env.PLUGIN_NAME }}
-          cp dist/main.js ./styles.css ./manifest.json dist/cs-search-worker.js ${{ env.PLUGIN_NAME }}
+          cp dist/main.js ./styles.css ./manifest.json ${{ env.PLUGIN_NAME }}
 
           # 4. 压缩成带版本号的 ZIP 包
           zip -r ${{ env.PLUGIN_NAME }}-$TAG_NAME.zip ${{ env.PLUGIN_NAME }}
@@ -88,6 +88,5 @@ jobs:
             dist/main.js
             manifest.json
             styles.css
-            dist/cs-search-worker.js
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

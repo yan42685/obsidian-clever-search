@@ -3,8 +3,6 @@ import { logger } from "src/utils/logger";
 import { getInstance } from "src/utils/my-lib";
 import { singleton } from "tsyringe";
 import { DataManager } from "./data-manager";
-import { DataProvider } from "./data-provider";
-import { FileSnapshotStore } from "src/services/search/shared/file-snapshot-store";
 import {
 	DocDeleteOperation,
 	DocMoveOperation,
@@ -14,8 +12,6 @@ import {
 @singleton()
 export class FileWatcher {
 	private readonly dataManager = getInstance(DataManager);
-	private readonly dataProvider = getInstance(DataProvider);
-	private readonly fileSnapshotStore = getInstance(FileSnapshotStore);
 	private readonly app = getInstance(App);
 	private modifyTimers: Map<string, NodeJS.Timeout> = new Map();
 	private compositionActive = false;
@@ -67,7 +63,7 @@ export class FileWatcher {
 		for (const path of pendingPaths) {
 			const currentFile = this.app.vault.getAbstractFileByPath(path);
 			if (currentFile instanceof TFile) {
-				await this.enqueuePrimedUpsert(currentFile);
+				this.enqueueUpsert(currentFile);
 			}
 		}
 	}
@@ -77,7 +73,7 @@ export class FileWatcher {
 	private readonly onCreate = (file: TAbstractFile) => {
 		logger.debug(`created: ${file.path}`);
 		if (file instanceof TFile) {
-			void this.enqueuePrimedUpsert(file);
+			this.enqueueUpsert(file);
 			return;
 		}
 		this.dataManager.receiveDocOperation(new DocUpsertOperation(file.path));
@@ -146,7 +142,7 @@ export class FileWatcher {
 			}
 			const currentFile = this.app.vault.getAbstractFileByPath(path);
 			if (currentFile instanceof TFile) {
-				void this.enqueuePrimedUpsert(currentFile);
+				this.enqueueUpsert(currentFile);
 			}
 			this.modifyTimers.delete(path);
 		}, delayMs);
@@ -169,19 +165,9 @@ export class FileWatcher {
 		this.modifyTimers.clear();
 	}
 
-	private async enqueuePrimedUpsert(file: TFile): Promise<void> {
-		if (!this.dataProvider.isIndexable(file)) {
-			this.dataManager.receiveDocOperation(
-				new DocUpsertOperation(file.path, file.stat.mtime),
-			);
-			return;
-		}
-		const sourceGeneration = await this.primeCurrentFileText(file);
-		if (sourceGeneration === null) {
-			return;
-		}
+	private enqueueUpsert(file: TFile): void {
 		this.dataManager.receiveDocOperation(
-			new DocUpsertOperation(file.path, sourceGeneration),
+			new DocUpsertOperation(file.path, file.stat.mtime),
 		);
 	}
 
@@ -198,31 +184,4 @@ export class FileWatcher {
 		);
 	}
 
-	private async primeCurrentFileText(
-		file: TFile,
-		expectedPath?: string,
-	): Promise<number | null> {
-		while (true) {
-			if (expectedPath !== undefined && file.path !== expectedPath) {
-				return null;
-			}
-			const sourcePath = file.path;
-			const sourceGeneration = file.stat.mtime;
-			try {
-				await this.fileSnapshotStore.readCurrentTexts([file]);
-			} catch (error) {
-				if (expectedPath !== undefined && file.path !== expectedPath) {
-					return null;
-				}
-				logger.warn(`failed to prime current file text for ${file.path}:`, error);
-				return sourceGeneration;
-			}
-			if (expectedPath !== undefined && file.path !== expectedPath) {
-				return null;
-			}
-			if (file.path === sourcePath && file.stat.mtime === sourceGeneration) {
-				return sourceGeneration;
-			}
-		}
-	}
 }

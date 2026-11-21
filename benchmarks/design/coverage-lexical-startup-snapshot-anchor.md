@@ -124,6 +124,15 @@ The startup benchmark should run three distinct modes once binary persistence ex
 
 ## Current Anchor State
 
+- Manual vault rebuild clears the selected persisted indexes before scanning
+  vault text. It rebuilds Hybrid only when enabled and retains shared Hybrid
+  data during a Lexical-only rebuild. File changes are captured and replayed
+  before completion, and the completion notice follows successful persistence.
+- Changes to file inclusion use the active overlay to add and remove affected
+  Lexical documents. Hybrid file-set sync retains vectors for unaffected files.
+  The active overlay journal determines which document versions are live, so
+  same-generation re-inclusion remains searchable after snapshot restore.
+
 - Coverage V3 startup/rebuild update:
   - V3 restore dirty tracking now preserves the ready marker for persistent V3 snapshots when runtime file changes mark the snapshot dirty.
   - production V3 rebuild now uses a two-pass segmented streaming builder instead of retaining a full-vault `PreparedDocument[]` in the streaming path.

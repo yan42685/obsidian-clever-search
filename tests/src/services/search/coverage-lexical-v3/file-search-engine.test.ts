@@ -1618,7 +1618,7 @@ describe("coverage lexical v3 file search engine", () => {
 		).resolves.toMatchObject({ status: "up_to_date" });
 	});
 
-	test("restored overlay deletes do not reappear in persistent recovery", async () => {
+	test("exclusion and same-generation re-inclusion survive snapshot restore", async () => {
 		const productionStores = createMemoryCoverageLexicalV3ProductionStores();
 		const artifactStore = createDexieCoverageLexicalV3ResidentShardArtifactStore(
 			new FakeArtifactTable((row) => row.id),
@@ -1692,6 +1692,39 @@ describe("coverage lexical v3 file search engine", () => {
 			status: "up_to_date",
 			docsToDelete: [],
 		});
+
+		const readmitted = createDocument({
+			docRef: 32,
+			path: "notes/deleted.md",
+			basename: "deleted",
+			folder: "notes",
+			content: "deleted target",
+			generation: 1,
+		});
+		for (let cycle = 0; cycle < 2; cycle += 1) {
+			await restoredEngine.applyPersistentRecoveryChanges({
+				deletePaths: [readmitted.path],
+				upsertDocuments: [],
+			});
+			await restoredEngine.applyPersistentRecoveryChanges({
+				deletePaths: [],
+				upsertDocuments: [readmitted],
+			});
+			expect(restoredEngine.getIndexedDocumentCount()).toBe(2);
+		}
+		await restoredEngine.persistFileIndexArtifact();
+		const reopened = new CoverageLexicalV3FileSearchEngine();
+		(reopened as any).getPersistentStores = () => persistentStores;
+		(reopened as any).getFileSnapshotStore = () => evidenceSnapshotStore;
+		await expect(reopened.restorePersistedFileIndex()).resolves.toBe(true);
+		expect(reopened.getIndexedDocumentCount()).toBe(2);
+		const results = await reopened.searchFiles({
+			queryText: "deleted",
+			isPrefixMatch: false,
+			isFuzzy: false,
+			maxItemResults: 5,
+		});
+		expect(results.map((result) => result.path)).toContain(readmitted.path);
 	});
 
 	test("serializes overlay recovery writes so concurrent heals keep distinct journal sequences", async () => {

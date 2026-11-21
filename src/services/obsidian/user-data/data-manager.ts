@@ -481,6 +481,9 @@ export class DataManager {
   private hybridBootstrapState: SearchBootstrapState = "blocked";
   private searchBootstrapMetrics: SearchBootstrapMetrics | null = null;
   private searchBootstrapCommitTask: Promise<void> | null = null;
+  private indexRefreshQueue: Promise<void> = Promise.resolve();
+  private fullRebuildTask: Promise<void> | null = null;
+  private refreshingIndexes = false;
   private readonly hybridRepairQueue = new Map<string, HybridRepairTask>();
   private readonly hybridRepairInFlightPaths = new Set<string>();
   private readonly hybridRepairPendingPersistPaths = new Set<string>();
@@ -1172,6 +1175,10 @@ export class DataManager {
 
   @monitorDecorator
   async initAsync(options: DataManagerInitOptions = {}) {
+    await this.queueIndexRefresh(() => this.initializeIndexes(options));
+  }
+
+  private async initializeIndexes(options: DataManagerInitOptions) {
     this.isUnloaded = false;
     this.lexicalStartupFailureRetryPending = false;
     this.lexicalStartupPendingOperations = [];
@@ -1339,64 +1346,213 @@ export class DataManager {
     };
   }
 
-  async refreshAllAsync() {
-    this.shouldForceRefresh = true;
-    this.cancelActiveHybridRepairs("force-refresh-all");
-    this.clearHybridFailedEmbeddingState();
-    this.setHybridRuntimeQueryGate("blocked");
-    getInstance(FileWatcher).stop();
+  private queueIndexRefresh(task: () => Promise<void>): Promise<void> {
+    const next = this.indexRefreshQueue.then(async () => {
+      await this.searchBootstrapCommitTask;
+      if (!this.isUnloaded) {
+        await task();
+      }
+    });
+    this.indexRefreshQueue = next.catch(() => undefined);
+    return next;
+  }
+
+  private async runIndexRefresh(
+    refresh: () => Promise<void>,
+    options: { rebuildHybrid?: boolean } = {},
+  ): Promise<void> {
+    this.captureLexicalStartupOperations = true;
+    this.refreshingIndexes = true;
     try {
-      await this.initAsync({ suppressCompletionNotice: true });
-      new MyNotice(t("Indexing finished"), 5000);
+      await this.docOperationsBuffer.forceFlush();
+      if (options.rebuildHybrid) {
+        this.cancelActiveHybridRepairs("force-refresh");
+      }
+      await this.hybridRepairWorker?.catch((error) => {
+        logger.warn("Previous Hybrid repair failed:", error);
+      });
+      await this.lexicalSnapshotCoordinator.pauseAutomaticFlush().catch((error) => {
+        logger.warn("Previous Lexical snapshot write failed:", error);
+      });
+      await refresh();
+      while (!this.isUnloaded) {
+        await getInstance(FileWatcher).flushPendingModifications();
+        const operations = this.lexicalStartupCapturedOperations.slice();
+        if (operations.length === 0) {
+          break;
+        }
+        await this.docOperationsHandler({
+          rawOperations: operations,
+          reducedBatch: reduceDocOperations(operations),
+        });
+        this.lexicalStartupCapturedOperations.splice(0, operations.length);
+        await this.persistLexicalSearchSnapshotIfAvailable();
+        if (options.rebuildHybrid) {
+          await this.flushHybridRepairQueue(true);
+        }
+      }
     } finally {
-      this.shouldForceRefresh = false;
-      getInstance(FileWatcher).start();
+      this.releaseCapturedLexicalOperationsToRuntimeBuffer();
+      this.refreshingIndexes = false;
+      if (!this.isUnloaded) {
+        this.lexicalSnapshotCoordinator.resumeAutomaticFlush();
+        this.scheduleHybridRepairFlush();
+      }
     }
   }
 
-  async refreshLexicalStateAsync() {
-    this.setLexicalBootstrapState("healing");
-    const rebuildHybrid = this.hybridEngine.isEnabled();
-    const heapBeforeLexicalRefresh = isDevEnvironment
-      ? await this.sampleDevJsHeapUsage()
-      : null;
-    this.latestLexicalHeapDelta = null;
-    getInstance(FileWatcher).stop();
-    try {
-      await this.database.resetPersistentSearchIndexes(rebuildHybrid);
-      this.fileSnapshotStore.resetRuntimeState();
-      await this.reindexLexicalEngineWithCurrFiles();
-      await this.persistLexicalSearchSnapshotIfAvailable();
-      if (rebuildHybrid) {
-        await this.refreshHybridStateAsync({ forceRefresh: true });
-      }
-      if (isDevEnvironment) {
-        await MyLib.sleep(0);
-        this.latestLexicalHeapDelta = await this.summarizeDevLexicalHeapDelta(
-          heapBeforeLexicalRefresh,
-          await this.sampleDevJsHeapUsage(),
-        );
-        await this.noticeDevStorageStats();
-      }
-      new MyNotice(t("Indexing finished"), 5000);
-      this.setLexicalBootstrapState("searchable");
-    } catch (error) {
-      this.setLexicalBootstrapState("failed");
-      throw error;
-    } finally {
-      getInstance(FileWatcher).start();
+  refreshAllAsync(): Promise<void> {
+    if (!this.fullRebuildTask) {
+      this.fullRebuildTask = this.queueLexicalRebuild(true).finally(() => {
+        this.fullRebuildTask = null;
+      });
     }
+    return this.fullRebuildTask;
+  }
+
+  refreshLexicalStateAsync(): Promise<void> {
+    return this.queueLexicalRebuild(false);
+  }
+
+  private queueLexicalRebuild(includeHybrid: boolean): Promise<void> {
+    return this.queueIndexRefresh(async () => {
+      const rebuildHybrid = includeHybrid && this.hybridEngine.isEnabled();
+      let hybridComplete = true;
+      this.setLexicalBootstrapState("healing");
+      try {
+        await this.runIndexRefresh(async () => {
+          if (rebuildHybrid) {
+            this.clearHybridFailedEmbeddingState();
+            this.setHybridRuntimeQueryGate("blocked");
+          }
+          await this.pendingLexicalOperationPersistence;
+          await this.database.resetPersistentSearchIndexes(rebuildHybrid);
+          // Events captured before the reset may have lost their durable rows.
+          for (const operation of this.lexicalStartupCapturedOperations.slice()) {
+            await this.persistPendingLexicalDocOperation(operation, true);
+          }
+          this.resetLexicalSnapshotTracking();
+          this.lexicalIndexedFileRefsLoaded = false;
+          this.lexicalIndexedFileRefsByPath.clear();
+          this.lexicalIndexFailuresByPath.clear();
+          this.hideLexicalIndexFailureNotice();
+          this.fileSnapshotStore.resetRuntimeState();
+          await this.reindexLexicalEngineWithCurrFiles({
+            readFresh: true,
+            pruneSharedFiles: rebuildHybrid,
+          });
+          await this.persistLexicalSearchSnapshotIfAvailable();
+          if (rebuildHybrid) {
+            hybridComplete = await this.rebuildHybridForFullRefresh();
+          }
+        }, { rebuildHybrid });
+        this.setLexicalBootstrapState("searchable");
+        if (
+          hybridComplete &&
+          this.lexicalIndexFailuresByPath.size === 0 &&
+          (!rebuildHybrid || !this.hybridRecoveryCoordinator.hasFailures())
+        ) {
+          new MyNotice(t("Indexing finished"), 5000);
+        }
+      } catch (error) {
+        this.setLexicalBootstrapState("failed");
+        await this.invalidateLexicalQueryEvidenceReadyMarker().catch((markerError) => {
+          logger.warn("Failed to invalidate Lexical snapshot after rebuild:", markerError);
+        });
+        this.noticeIndexRefreshFailure(error);
+      }
+    });
+  }
+
+  async refreshLexicalFileSetAsync(): Promise<void> {
+    await this.queueIndexRefresh(async () => {
+      try {
+        await this.runIndexRefresh(async () => {
+          await this.ensureLexicalIndexedFileRefsLoaded();
+          const currentFiles = this.dataProvider.allFilesToBeIndexed();
+          const currentPaths = new Set(currentFiles.map((file) => file.path));
+          const deletePaths = [...this.lexicalIndexedFileRefsByPath.keys()]
+            .filter((path) => !currentPaths.has(path));
+          const changedFiles = currentFiles.filter((file) => {
+            const ref = this.lexicalIndexedFileRefsByPath.get(file.path);
+            return ref == null || this.hasIndexedFileRefChanged(file, ref);
+          });
+          const prepared = await this.prepareLexicalDocuments(changedFiles);
+          if (deletePaths.length === 0 && prepared.documents.length === 0) {
+            this.addLexicalIndexFailures(prepared.failures);
+            return;
+          }
+          const applied = await this.applyPersistentLexicalRecoveryChanges(
+            deletePaths,
+            prepared.indexedFiles,
+            prepared.documents,
+          );
+          if (!applied) {
+            await this.deleteDocuments(deletePaths);
+            await this.addPreparedLexicalDocuments(prepared.indexedFiles, prepared);
+          }
+          if (deletePaths.length > 0) {
+            await this.database.db.lexicalIndexedMetadata.bulkDelete(deletePaths);
+            await this.deleteLexicalIndexedFileRefs(deletePaths);
+          }
+          this.clearLexicalIndexFailures(deletePaths);
+          await this.commitIndexedLexicalFiles(prepared.indexedFiles);
+          this.clearLexicalIndexFailures(prepared.documents.map((document) => document.path));
+          this.addLexicalIndexFailures(prepared.failures);
+          await this.markLexicalSnapshotDirty(deletePaths);
+          await this.persistLexicalSearchSnapshotIfAvailable();
+        });
+      } catch (error) {
+        this.noticeIndexRefreshFailure(error);
+      }
+    });
+  }
+
+  private async rebuildHybridForFullRefresh(): Promise<boolean> {
+    this.shouldForceRefresh = true;
+    this.setHybridBootstrapState("healing");
+    try {
+      const result = await this.initHybridEngine();
+      await this.hybridEngine.persistIndicesForBatch();
+      await this.maintainHybridFreshness();
+      this.setHybridBootstrapState("searchable");
+      return result != null && result.failedFiles === 0 && !result.fallbackNoticeKey;
+    } catch (error) {
+      this.setHybridBootstrapState("failed");
+      this.setHybridRuntimeQueryGate("blocked");
+      this.noticeIndexRefreshFailure(error);
+      new MyNotice(t("hybridNotice.indexFallbackToLexical"), 7000);
+      return false;
+    } finally {
+      this.shouldForceRefresh = false;
+    }
+  }
+
+  private noticeIndexRefreshFailure(error: unknown): void {
+    logger.warn("Search index refresh failed:", error);
+    new MyNotice(t("searchNotice.indexRefreshFailed"), 7000);
   }
 
   async refreshHybridStateAsync(options: HybridRefreshOptions = {}) {
-    if (options.forceRefresh) {
-      this.cancelActiveHybridRepairs("force-refresh");
+    await this.queueIndexRefresh(async () => {
+      try {
+        await this.runIndexRefresh(
+          () => this.refreshHybridState(options),
+          { rebuildHybrid: options.forceRefresh },
+        );
+      } catch (error) {
+        this.noticeIndexRefreshFailure(error);
+      }
+    });
+  }
+
+  private async refreshHybridState(options: HybridRefreshOptions): Promise<void> {
+    if (!options.syncFileSetWithoutEmbedding || options.forceRefresh) {
+      this.clearHybridFailedEmbeddingState();
     }
-    this.clearHybridFailedEmbeddingState();
     this.setHybridRuntimeQueryGate("blocked");
     const previousForceRefresh = this.shouldForceRefresh;
     let refreshResult: HybridRefreshResult | null = null;
-    getInstance(FileWatcher).stop();
     try {
       if (options.forceRefresh) {
         this.shouldForceRefresh = true;
@@ -1439,7 +1595,6 @@ export class DataManager {
     } finally {
       this.shouldForceRefresh = previousForceRefresh;
       this.notifyHybridRuntimeStatusChanged();
-      getInstance(FileWatcher).start();
     }
   }
 
@@ -1490,6 +1645,7 @@ export class DataManager {
         await this.hybridEngine
           .deleteFile(path, {
             persistIndices: false,
+            preserveDocRegistry: this.dataProvider.isIndexable(path),
           })
           .catch((error) =>
             logger.warn(
@@ -1580,6 +1736,7 @@ export class DataManager {
 
   private async prepareLexicalDocuments(
     files: readonly TAbstractFile[],
+    readFresh = false,
   ): Promise<PreparedLexicalDocumentsResult> {
     if (files.length === 0) {
       return {
@@ -1596,6 +1753,7 @@ export class DataManager {
     const { documents, indexedFiles, failures } =
       await this.dataProvider.generateAllIndexedDocuments(
         tFiles.filter((f) => this.dataProvider.isIndexable(f)),
+        readFresh,
       );
     return {
       documents,
@@ -1889,13 +2047,36 @@ export class DataManager {
     await this.lexicalSnapshotCoordinator.persistCurrentArtifact();
   }
 
+  private async publishRebuiltLexicalSnapshots(
+    documents: readonly IndexedDocument[],
+  ): Promise<void> {
+    await this.fileSnapshotStore.publishIndexedTexts(
+      documents.map(({ path, generation, content }) => ({
+        path,
+        generation,
+        text: content ?? "",
+      })),
+    );
+    await this.fileSnapshotStore.publishIndexedMetadata(
+      documents.map(({ path, generation, aliases, tags, headings }) => ({
+        path,
+        generation,
+        aliasesText: aliases,
+        tagsText: tags,
+        headingsText: headings,
+      })),
+    );
+  }
+
   private async writeLexicalSearchSnapshotArtifact(): Promise<void> {
     if (this.lexicalEngine.supportsPersistentFileIndex()) {
       await this.lexicalEngine.persistFileIndexArtifact();
       await this.database.setLexicalQueryEvidenceReadyMarker(
         LEXICAL_QUERY_EVIDENCE_READY_VERSION,
       );
-      await this.clearPersistedLexicalMutationJournalEntries();
+      if (!this.refreshingIndexes) {
+        await this.clearPersistedLexicalMutationJournalEntries();
+      }
       return;
     }
     const lexicalIndexData = this.lexicalEngine.serializeFileIndex();
@@ -1904,7 +2085,9 @@ export class DataManager {
       await this.database.setLexicalQueryEvidenceReadyMarker(
         LEXICAL_QUERY_EVIDENCE_READY_VERSION,
       );
-      await this.clearPersistedLexicalMutationJournalEntries();
+      if (!this.refreshingIndexes) {
+        await this.clearPersistedLexicalMutationJournalEntries();
+      }
       return;
     }
     await this.database.deleteLexicalSearchSnapshot();
@@ -2020,6 +2203,7 @@ export class DataManager {
 
   private async persistPendingLexicalDocOperation(
     operation: DocOperation,
+    pathOnly = false,
   ): Promise<void> {
     const database = this.database as Database & {
       putPendingDocOperation?: (row: PendingDocOperationRow) => Promise<void>;
@@ -2028,7 +2212,7 @@ export class DataManager {
       return;
     }
     try {
-      const docRef = await this.resolveLexicalDocOperationDocRef(operation);
+      const docRef = pathOnly ? undefined : await this.resolveLexicalDocOperationDocRef(operation);
       await database.putPendingDocOperation(
         toPendingDocOperationRow(operation, docRef),
       );
@@ -2855,7 +3039,7 @@ export class DataManager {
   }
 
   private scheduleHybridRepairFlush(): void {
-    if (this.hybridRepairWorker) {
+    if (this.refreshingIndexes || this.hybridRepairWorker) {
       return;
     }
     const delayMs = this.getNextHybridRepairDelayMs();
@@ -2882,7 +3066,10 @@ export class DataManager {
     return Math.max(0, earliestAt - Date.now());
   }
 
-  private async flushHybridRepairQueue(): Promise<void> {
+  private async flushHybridRepairQueue(duringRefresh = false): Promise<void> {
+    if (this.refreshingIndexes && !duringRefresh) {
+      return;
+    }
     if (this.hybridRepairWorker) {
       return await this.hybridRepairWorker;
     }
@@ -3146,7 +3333,10 @@ export class DataManager {
     return await this.hybridBootstrapCoordinator.healPlan(plan);
   }
 
-  private async reindexLexicalEngineWithCurrFiles() {
+  private async reindexLexicalEngineWithCurrFiles({
+    readFresh = false,
+    pruneSharedFiles = true,
+  } = {}) {
     logger.trace("Indexing the whole vault...");
     const filesToIndex = this.dataProvider.allFilesToBeIndexed();
     const indexedPaths = new Set<string>(filesToIndex.map((file) => file.path));
@@ -3165,6 +3355,7 @@ export class DataManager {
       );
     }
     const successfulFiles: TFile[] = [];
+    const rebuiltRefs: BaseIndexedFileRef[] = [];
     const failures: LexicalIndexFailure[] = [];
     let processedFiles = 0;
     const reindexBatches = this.buildLexicalReindexBatches(filesToIndex);
@@ -3173,9 +3364,24 @@ export class DataManager {
       try {
         for (let index = 0; index < reindexBatches.length; index += 1) {
           const batchFiles = reindexBatches[index];
-          const batchResult = await this.addDocuments(batchFiles);
-          successfulFiles.push(...batchResult.indexedFiles);
-          failures.push(...batchResult.failures);
+          if (readFresh) {
+            const prepared = await this.prepareLexicalDocuments(batchFiles, true);
+            const documents = await this.attachLexicalDocRefs(prepared.documents);
+            if (documents.length > 0) {
+              await this.lexicalEngine.addDocuments(documents);
+              await this.publishRebuiltLexicalSnapshots(documents);
+              for (const { path, generation, docRef, size } of documents) {
+                if (generation !== undefined) {
+                  rebuiltRefs.push({ path, generation, docRef, size });
+                }
+              }
+            }
+            failures.push(...prepared.failures);
+          } else {
+            const batchResult = await this.addDocuments(batchFiles);
+            successfulFiles.push(...batchResult.indexedFiles);
+            failures.push(...batchResult.failures);
+          }
           processedFiles += batchFiles.length;
           progressNotice.update({
             stage: "reading",
@@ -3201,9 +3407,17 @@ export class DataManager {
         throw error;
       }
       progressNotice.update({ stage: "writing_snapshot" });
-      await this.saveLexicalIndexedFileRefs(successfulFiles);
-      await this.commitIndexedLexicalFiles(successfulFiles);
-      await this.fileSnapshotStore.retainOnlyFiles(indexedPaths);
+      if (readFresh) {
+        await this.database.setLexicalIndexedFileRefs(rebuiltRefs);
+        await this.reloadLexicalIndexedFileRefs();
+        this.notifyLexicalIndexedTextsCommitted(rebuiltRefs);
+      } else {
+        await this.saveLexicalIndexedFileRefs(successfulFiles);
+        await this.commitIndexedLexicalFiles(successfulFiles);
+      }
+      if (pruneSharedFiles) {
+        await this.fileSnapshotStore.retainOnlyFiles(indexedPaths);
+      }
       await this.markLexicalSnapshotDirty();
       this.clearLexicalIndexFailures(Array.from(indexedPaths));
       if (failures.length > 0) {

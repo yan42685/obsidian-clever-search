@@ -1229,6 +1229,8 @@ function createMockDataProvider(params: {
     generateAllIndexedDocuments: jest.fn(async (inputFiles: TFile[]) => {
       const documents = inputFiles.map((file) => ({
         path: file.path,
+        generation: file.stat.mtime,
+        size: file.stat.size,
         basename: file.basename,
         folder: file.path.includes("/")
           ? file.path.slice(0, file.path.lastIndexOf("/"))
@@ -1432,6 +1434,126 @@ describe("DataManager integration", () => {
     await (manager as any).searchBootstrapCommitTask;
 
     expect(database.openAndConsumeSchemaUpgradeReport).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([false, true])("rebuilds from vault text, replays changes and waits for the snapshot (Hybrid enabled: %s)", async (hybridEnabled) => {
+    const setting = cloneSetting();
+    setting.hybrid.enabled = hybridEnabled;
+    const original = createFile("docs/before.md", "original text", 100);
+    const renamed = createFile("docs/after.md", "edited text", 200);
+    const files = new Map([[original.path, original]]);
+    const texts = new Map([[original.path, "original text"]]);
+    const reset = jest.fn(async () => {});
+    const database = createMockDatabase({ resetPersistentSearchIndexes: reset });
+    const dataProvider = createMockDataProvider({ files, texts });
+    let markPersistStarted: () => void;
+    const persistStarted = new Promise<void>((resolve) => { markPersistStarted = resolve; });
+    let finishPersist: () => void;
+    const persistBlocked = new Promise<void>((resolve) => { finishPersist = resolve; });
+    const persist = jest.fn(async () => {}).mockImplementationOnce(async () => {
+      markPersistStarted();
+      await persistBlocked;
+    });
+    const lexicalEngine = createMockLexicalEngine({
+      supportsPersistentFileIndex: () => true,
+      persistFileIndexArtifact: persist,
+    });
+    const hybridEngine = createMockHybridEngine({ isEnabled: () => hybridEnabled });
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    const { fileWatcher } = registerDataManagerDeps({
+      setting, pluginFiles: [original], database, dataProvider,
+      lexicalEngine, fileSnapshotStore, hybridEngine,
+    });
+    const manager = resolveDataManager();
+    // Hybrid bootstrap and embedding are exercised in their own suites.
+    const rebuildHybrid = jest.spyOn(manager as any, "initHybridEngine")
+      .mockResolvedValue({ hadWork: true, failedFiles: 0, fallbackNoticeKey: null });
+    jest.spyOn(manager as any, "flushHybridRepairQueue").mockResolvedValue(undefined);
+    const rebuild = manager.refreshAllAsync();
+    expect(manager.refreshAllAsync()).toBe(rebuild);
+    await persistStarted;
+    try {
+      expect(MyNotice.messages).not.toContain("Indexing finished");
+      files.delete(original.path);
+      files.set(renamed.path, renamed);
+      texts.set(renamed.path, "edited text");
+      manager.receiveDocOperation(new DocMoveOperation(original.path, renamed.path));
+      manager.receiveDocOperation(new DocUpsertOperation(renamed.path));
+    } finally {
+      finishPersist();
+    }
+    await rebuild;
+
+    expect(reset).toHaveBeenCalledTimes(1);
+    expect(reset).toHaveBeenCalledWith(hybridEnabled);
+    expect(dataProvider.generateAllIndexedDocuments).toHaveBeenCalledWith([original], true);
+    expect(rebuildHybrid).toHaveBeenCalledTimes(hybridEnabled ? 1 : 0);
+    expect(fileSnapshotStore.retainOnlyFiles).toHaveBeenCalledTimes(hybridEnabled ? 1 : 0);
+    expect(fileWatcher.stop).not.toHaveBeenCalled();
+    await expect(database.getLexicalIndexedFileRefs()).resolves.toEqual([
+      expect.objectContaining({ path: renamed.path, generation: 200 }),
+    ]);
+    expect(fileSnapshotStore.persisted.get(renamed.path)?.text).toBe("edited text");
+    expect(persist).toHaveBeenCalledTimes(2);
+    expect(MyNotice.messages).toContain("Indexing finished");
+  });
+
+  test("reports a rebuild snapshot write failure and allows a retry", async () => {
+    const reset = jest.fn(async () => {});
+    const database = createMockDatabase({ resetPersistentSearchIndexes: reset });
+    const file = createFile("docs/live.md", "live text", 100);
+    const dataProvider = createMockDataProvider({
+      files: new Map([[file.path, file]]), texts: new Map([[file.path, "live text"]]),
+    });
+    const persist = jest.fn(async () => {}).mockRejectedValueOnce(new Error("disk full"));
+    registerDataManagerDeps({
+      setting: cloneSetting(), pluginFiles: [file], database, dataProvider,
+      lexicalEngine: createMockLexicalEngine({
+        supportsPersistentFileIndex: () => true, persistFileIndexArtifact: persist,
+      }),
+      fileSnapshotStore: createMockFileSnapshotStore(),
+      hybridEngine: createMockHybridEngine({ isEnabled: () => false }),
+    });
+    const manager = resolveDataManager();
+    await manager.refreshAllAsync();
+    expect(MyNotice.messages).toContain("searchNotice.indexRefreshFailed");
+    expect(MyNotice.messages).not.toContain("Indexing finished");
+    await manager.refreshAllAsync();
+    expect(reset).toHaveBeenCalledTimes(2);
+    expect(MyNotice.messages).toContain("Indexing finished");
+  });
+
+  test("syncs file inclusion without rebuilding or touching unaffected file refs", async () => {
+    const keep = createFile("docs/keep.md", "keep", 100);
+    const add = createFile("docs/new.txt", "new", 200);
+    const database = createMockDatabase({ resetPersistentSearchIndexes: jest.fn() });
+    await database.setLexicalIndexedFileRefs([
+      { path: keep.path, generation: keep.stat.mtime, size: keep.stat.size },
+      { path: "excluded/old.md", generation: 100, size: 3 },
+    ]);
+    const metadataDelete = jest.fn(async () => {});
+    database.db.lexicalIndexedMetadata = { bulkDelete: metadataDelete };
+    const dataProvider = createMockDataProvider({
+      files: new Map([[keep.path, keep], [add.path, add]]),
+      texts: new Map([[keep.path, "keep"], [add.path, "new"]]),
+    });
+    dataProvider.isIndexable.mockReturnValue(true);
+    const lexicalEngine = createMockLexicalEngine();
+    const hybridEngine = createMockHybridEngine();
+    const fileSnapshotStore = createMockFileSnapshotStore();
+    registerDataManagerDeps({
+      setting: cloneSetting(), pluginFiles: [keep, add], database, dataProvider,
+      lexicalEngine, fileSnapshotStore, hybridEngine,
+    });
+    await resolveDataManager().refreshLexicalFileSetAsync();
+    expect(lexicalEngine.beginBatchReindex).not.toHaveBeenCalled();
+    expect(database.resetPersistentSearchIndexes).not.toHaveBeenCalled();
+    expect(dataProvider.generateAllIndexedDocuments).toHaveBeenCalledWith([add], false);
+    expect(lexicalEngine.deleteDocuments).toHaveBeenCalledWith(["excluded/old.md"]);
+    expect(metadataDelete).toHaveBeenCalledWith(["excluded/old.md"]);
+    expect(database.putLexicalIndexedFileRef).toHaveBeenCalledTimes(1);
+    expect(hybridEngine.clearAll).not.toHaveBeenCalled();
+    expect(fileSnapshotStore.removeFiles).not.toHaveBeenCalled();
   });
 
   test("coalesces rename plus modify burst into the final new-path lexical and snapshot state", async () => {

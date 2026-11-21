@@ -8,6 +8,7 @@ export default {
 	"searchBootstrap.failed": "\u542f\u52a8\u7d22\u5f15\u5931\u8d25\uff0c\u641c\u7d22\u5f53\u524d\u4e0d\u53ef\u7528\u3002\u8bf7\u67e5\u770b\u63a7\u5236\u53f0\u6216\u624b\u52a8\u91cd\u5efa\u7d22\u5f15\u3002",
 	"Reindexing...": "正在重建索引...",
 	"Indexing finished": "索引完成",
+	"searchNotice.indexRefreshFailed": "\u641c\u7d22\u7d22\u5f15\u66f4\u65b0\u5931\u8d25\uff0c\u8bf7\u67e5\u770b\u63a7\u5236\u53f0\u83b7\u53d6\u8be6\u60c5\u3002",
 	"Database has been updated, a reindex is required":
 		"数据库版本已更新，需要重新建立索引",
 	"Hybrid search": "混合搜索",

@@ -460,11 +460,13 @@ export class HybridEngine {
 
   async deleteFile(
     filePath: string,
-    option: HybridWriteOption = {},
+    option: HybridWriteOption & { preserveDocRegistry?: boolean } = {},
   ): Promise<void> {
     await this.withFileWriteLock(filePath, async () => {
       await this.deleteStoredHybridPrivateData(filePath, option);
-      await this.fileSnapshotStore.markDocRegistryDeleted(filePath);
+      if (!option.preserveDocRegistry) {
+        await this.fileSnapshotStore.markDocRegistryDeleted(filePath);
+      }
     });
   }
 

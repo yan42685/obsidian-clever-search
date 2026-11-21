@@ -186,9 +186,8 @@ describe("FileWatcher", () => {
 
 		const watcher = new FileWatcher();
 		watcher.start();
-		await handlers.get("create")?.(file);
+		handlers.get("create")?.(file);
 
-		expect(dataProvider.isIndexable).toHaveBeenCalledWith(file);
 		expect(fileSnapshotStore.readCurrentTexts).not.toHaveBeenCalled();
 		expect(dataManager.receiveDocOperation).toHaveBeenCalledWith(
 			expect.objectContaining({ path: file.path }),

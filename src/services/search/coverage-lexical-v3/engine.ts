@@ -202,7 +202,11 @@ export class CoverageLexicalV3Engine {
 	}
 
 	loadShardInvalidations(entries: readonly ShardInvalidationEntry[]): void {
-		this.invalidatedCandidateKeys = buildShardInvalidationSet(entries);
+		// The active overlay is rebuilt from its journal. A later append can
+		// restore the same document generation after an earlier journal delete.
+		this.invalidatedCandidateKeys = buildShardInvalidationSet(
+			entries.filter((entry) => !entry.shardId.endsWith(":overlay")),
+		);
 	}
 
 	clearShardInvalidations(): void {

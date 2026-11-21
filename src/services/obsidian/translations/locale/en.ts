@@ -13,6 +13,7 @@ export default {
 	// notification
 	"Reindexing...": "Reindexing...",
 	"Indexing finished": "Indexing finished",
+	"searchNotice.indexRefreshFailed": "Could not finish updating the search index. See the console for details.",
 	"searchNotice.lexicalIndexingProgressPrefix": "Indexed ",
 	"searchNotice.lexicalIndexingProgressSuffix": "",
 	"searchNotice.hybridIndexFinished": "Hybrid indexing finished",

@@ -32,6 +32,7 @@ export class DirtyArtifactCoordinator {
   private dirtyPersisted = false;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private persistWorker: Promise<void> | null = null;
+  private automaticFlushPaused = false;
   private mutationVersion = 0;
 
   constructor(private readonly options: DirtyArtifactCoordinatorOptions) {}
@@ -48,6 +49,17 @@ export class DirtyArtifactCoordinator {
 
   dispose(): void {
     this.clearFlushTimer();
+  }
+
+  async pauseAutomaticFlush(): Promise<void> {
+    this.automaticFlushPaused = true;
+    this.clearFlushTimer();
+    await this.persistWorker;
+  }
+
+  resumeAutomaticFlush(): void {
+    this.automaticFlushPaused = false;
+    this.scheduleFlush();
   }
 
   async hasPersistedDirtyMarker(): Promise<boolean> {
@@ -81,6 +93,9 @@ export class DirtyArtifactCoordinator {
       this.dirtyPersisted = true;
     }
 
+    if (this.automaticFlushPaused) {
+      return;
+    }
     if (this.shouldFlushNow(now)) {
       void this.flushIfDirty(true);
       return;
@@ -158,7 +173,7 @@ export class DirtyArtifactCoordinator {
   }
 
   private scheduleFlush(): void {
-    if (!this.dirtyPersisted || !this.options.supportsDirtyTracking()) {
+    if (this.automaticFlushPaused || !this.dirtyPersisted || !this.options.supportsDirtyTracking()) {
       return;
     }
     if (this.persistWorker) {

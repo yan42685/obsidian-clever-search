@@ -66,6 +66,7 @@ import { FileUtil } from "../../utils/file-util";
 type PendingRefreshState = {
 	reloadAssets: boolean;
 	lexicalReindex: boolean;
+	lexicalSyncFileSet: boolean;
 	hybridRuntimeRefresh: boolean;
 	hybridSyncFileSetWithoutEmbedding: boolean;
 	hybridFullReindex: boolean;
@@ -75,6 +76,7 @@ function createPendingRefreshState(): PendingRefreshState {
 	return {
 		reloadAssets: false,
 		lexicalReindex: false,
+		lexicalSyncFileSet: false,
 		hybridRuntimeRefresh: false,
 		hybridSyncFileSetWithoutEmbedding: false,
 		hybridFullReindex: false,
@@ -130,6 +132,8 @@ export class SettingManager {
 		const dataManager = getInstance(DataManager);
 		if (pendingRefresh.lexicalReindex) {
 			await dataManager.refreshLexicalStateAsync();
+		} else if (pendingRefresh.lexicalSyncFileSet) {
+			await dataManager.refreshLexicalFileSetAsync();
 		}
 		if (pendingRefresh.hybridFullReindex) {
 			await dataManager.refreshHybridStateAsync({ forceRefresh: true });
@@ -190,6 +194,11 @@ export class SettingManager {
 
 	requestHybridRuntimeRefresh(): void {
 		this.pendingRefresh.hybridRuntimeRefresh = true;
+	}
+
+	requestIndexFileSetSync(): void {
+		this.pendingRefresh.lexicalSyncFileSet = true;
+		this.pendingRefresh.hybridSyncFileSetWithoutEmbedding = true;
 	}
 
 	requestHybridLocalRefresh(options: {
@@ -1967,10 +1976,7 @@ class ExcludePathModal extends Modal {
 					.setValue(this.setting.followObsidianExcludedFiles)
 					.onChange((v) => {
 						this.setting.followObsidianExcludedFiles = v;
-						this.settingManager.requestLexicalReindex();
-						this.settingManager.requestHybridLocalRefresh({
-							syncFileSetWithoutEmbedding: true,
-						});
+						this.settingManager.requestIndexFileSetSync();
 					}),
 			);
 		contentEl.createEl("h2", { text: t("Excluded files") });
@@ -2023,10 +2029,7 @@ class ExcludePathModal extends Modal {
 			span.style.cursor = "pointer";
 			span.onClickEvent(() => {
 				this.excludedPaths.splice(index, 1);
-				this.settingManager.requestLexicalReindex();
-				this.settingManager.requestHybridLocalRefresh({
-					syncFileSetWithoutEmbedding: true,
-				});
+				this.settingManager.requestIndexFileSetSync();
 				this.renderExcludedList(listEl);
 			});
 		});
@@ -2038,10 +2041,7 @@ class ExcludePathModal extends Modal {
 				new MyNotice(`Path doesn't exist: ${inputPath}`, 5000);
 			} else {
 				this.excludedPaths.push(inputPath);
-				this.settingManager.requestLexicalReindex();
-				this.settingManager.requestHybridLocalRefresh({
-					syncFileSetWithoutEmbedding: true,
-				});
+				this.settingManager.requestIndexFileSetSync();
 				this.renderExcludedList(this.excludesEl);
 			}
 		}
@@ -2074,10 +2074,7 @@ class CustomExtensionModal extends Modal {
 
 					this.setting.customExtensions.plaintext =
 						FileUtil.normalizeExtensions(extensions);
-					this.settingManager.requestLexicalReindex();
-					this.settingManager.requestHybridLocalRefresh({
-						syncFileSetWithoutEmbedding: true,
-					});
+					this.settingManager.requestIndexFileSetSync();
 				});
 			});
 

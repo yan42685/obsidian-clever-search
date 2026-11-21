@@ -66,10 +66,11 @@ export class DataProvider {
 
 	async generateAllIndexedDocuments(
 		files: TFile[],
+		readFresh = false,
 	): Promise<GeneratedIndexedDocuments> {
 		const indexableFiles = files.filter((file) => this.isIndexable(file));
 		const settled = await Promise.allSettled(
-			indexableFiles.map(async (file) => await this.buildIndexedDocument(file)),
+			indexableFiles.map((file) => this.buildIndexedDocument(file, readFresh)),
 		);
 		const documents: IndexedDocument[] = [];
 		const indexedFiles: TFile[] = [];
@@ -226,7 +227,7 @@ export class DataProvider {
 		return metadata?.headings?.map((h) => h.heading).join(" ") || "";
 	}
 
-	private async buildIndexedDocument(file: TFile): Promise<IndexedDocument> {
+	private async buildIndexedDocument(file: TFile, readFresh: boolean): Promise<IndexedDocument> {
 		while (true) {
 			const sourcePath = file.path;
 			const sourceGeneration = file.stat.mtime;
@@ -241,7 +242,9 @@ export class DataProvider {
 
 				let content: string;
 				try {
-					content = await this.readPlainText(file);
+					content = readFresh
+						? (await this.fileSnapshotStore.readFreshCurrentTexts([file])).get(file.path) ?? ""
+						: await this.readPlainText(file);
 				} catch (error) {
 					if (
 						file.path !== sourcePath ||
