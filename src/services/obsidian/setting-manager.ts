@@ -427,7 +427,7 @@ class LexicalSearchModal extends Modal {
 	private readonly setting = getInstance(OuterSetting);
 
 	onOpen() {
-		this.modalEl.style.width = "52vw";
+		this.modalEl.style.width = "62.4vw";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
 		const { contentEl } = this;
 		contentEl.empty();
@@ -1012,7 +1012,7 @@ class HybridSearchModal extends Modal {
 	}
 
 	onOpen() {
-		this.modalEl.style.width = "52vw";
+		this.modalEl.style.width = "70vw";
 		this.modalEl.style.marginBottom = "5em";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
 		this.setting.hybrid.embeddingProvider = normalizeEmbeddingProvider(
