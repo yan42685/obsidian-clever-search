@@ -20,16 +20,18 @@ const RERANK_TIMEOUT_MS = 15_000;
 const MIN_RERANK_SCORE_RELATIVE_TO_TOP = 0.35;
 const LLM_RERANK_MAX_RESULTS = 3;
 export const SEARCH_QWEN_RERANK_TOKEN_KEY = '[search] qwen-flash';
+export const SEARCH_QWEN3_RERANK_TOKEN_KEY = '[search] qwen3-rerank';
 export const SEARCH_OPENAI_RERANK_TOKEN_KEY = '[search] gpt-5.4-nano';
 export const SEARCH_GEMINI_RERANK_TOKEN_KEY = '[search] gemini-3.1-flash-lite-preview';
 export const SEARCH_RERANK_TOKEN_KEY = SEARCH_QWEN_RERANK_TOKEN_KEY;
 export const SEARCH_RERANK_TOKEN_KEYS = [
 	SEARCH_QWEN_RERANK_TOKEN_KEY,
+	SEARCH_QWEN3_RERANK_TOKEN_KEY,
 	SEARCH_OPENAI_RERANK_TOKEN_KEY,
 	SEARCH_GEMINI_RERANK_TOKEN_KEY,
 ] as const;
 export const SEARCH_EMBED_TOKEN_KEY = '[search] embedding';
-type RerankProvider = 'qwen' | 'openai' | 'gemini';
+type RerankProvider = 'qwen' | 'qwen3' | 'openai' | 'gemini';
 
 export type HybridRerankFailureKind = HybridProviderFailureKind;
 
@@ -228,7 +230,9 @@ export class HybridReranker {
 	}
 
 	private getResultLimit(_provider: RerankProvider, topK: number): number {
-		return Math.min(topK, LLM_RERANK_MAX_RESULTS);
+		return _provider === 'qwen3'
+			? topK
+			: Math.min(topK, LLM_RERANK_MAX_RESULTS);
 	}
 
 	private async fetchRerankResponse(
@@ -265,6 +269,8 @@ export class HybridReranker {
 						? this.buildOpenAIRerankRequest(query, documents, topK)
 						: provider === 'gemini'
 							? this.buildGeminiRerankRequest(query, documents, topK)
+							: provider === 'qwen3'
+								? this.buildQwen3RerankRequest(query, documents, topK)
 							: this.buildQwenRerankRequest(query, documents, topK),
 				),
 				signal: controller.signal,
@@ -291,6 +297,7 @@ export class HybridReranker {
 	private extractRankedItems(json: {
 		output?: {
 			content?: Array<{ type?: string; text?: string }>;
+			results?: Array<{ index: number; relevance_score?: number; score?: number }>;
 		} | Array<{ content?: Array<{ type?: string; text?: string }> }>;
 		output_text?: string;
 		candidates?: Array<{
@@ -304,6 +311,14 @@ export class HybridReranker {
 			};
 		}>;
 	}, provider: RerankProvider = this.provider): Array<{ index: number; score: number; start?: number; end?: number }> {
+		if (provider === 'qwen3') {
+			return (Array.isArray(json.output) ? [] : json.output?.results ?? [])
+				.filter((item) => Number.isInteger(item.index) && Number.isFinite(item.relevance_score ?? item.score))
+				.map((item) => ({
+					index: item.index,
+					score: item.relevance_score ?? item.score ?? Number.NEGATIVE_INFINITY,
+				}));
+		}
 		if (provider === 'openai') {
 			return this.extractOpenAIRankedItems(json);
 		}
@@ -311,6 +326,19 @@ export class HybridReranker {
 			return this.extractGeminiRankedItems(json);
 		}
 		return this.extractQwenRankedItems(json);
+	}
+
+	private buildQwen3RerankRequest(
+		query: string,
+		documents: string[],
+		topK: number,
+	): { model: string; query: string; documents: string[]; top_n: number } {
+		return {
+			model: getEmbeddingProviderSpec('qwen3').rerankModel,
+			query,
+			documents,
+			top_n: topK,
+		};
 	}
 
 	private buildQwenRerankRequest(
@@ -566,6 +594,9 @@ export class HybridReranker {
 }
 
 function getSearchRerankTokenKey(provider: RerankProvider): string {
+	if (provider === 'qwen3') {
+		return SEARCH_QWEN3_RERANK_TOKEN_KEY;
+	}
 	if (provider === 'openai') {
 		return SEARCH_OPENAI_RERANK_TOKEN_KEY;
 	}

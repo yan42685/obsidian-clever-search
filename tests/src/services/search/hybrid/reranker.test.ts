@@ -26,32 +26,40 @@ jest.mock("src/utils/logger", () => ({
 }));
 
 jest.mock("src/services/search/hybrid/embedder", () => ({
-	buildProviderApiUrl: jest.fn((provider: string) =>
+	buildProviderApiUrl: jest.fn((provider: string, _domain?: string, apiType?: string) =>
 		provider === "openai"
 			? "https://api.openai.com/v1/responses"
 			: provider === "gemini"
 				? "https://api.vectorengine.ai/v1beta/models/gemini-3.1-flash-lite-preview:generateContent"
+				: provider === "qwen3" && apiType === "rerank"
+					? "https://dashscope.aliyuncs.com/compatible-api/v1/reranks"
 				: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
 	),
 	getEmbeddingProviderSpec: jest.fn((provider: string) => ({
-		id: provider === "openai" ? "openai" : provider === "gemini" ? "gemini" : "qwen",
+		id: provider,
 		label:
 			provider === "openai"
 				? "OpenAI text-embedding-3-large"
 				: provider === "gemini"
 					? "Gemini embedding-2-preview + Gemini 3.1 Flash Lite Preview"
-				: "Qwen text-embedding-v4",
+				: provider === "qwen3"
+					? "Qwen3.7 Text Embedding + Qwen3 Rerank"
+					: "Qwen text-embedding-v4",
 		embeddingModel:
 			provider === "openai"
 				? "text-embedding-3-large"
 				: provider === "gemini"
 					? "gemini-embedding-2-preview"
-				: "text-embedding-v4",
+				: provider === "qwen3"
+					? "qwen3.7-text-embedding"
+					: "text-embedding-v4",
 		rerankModel:
 			provider === "openai"
 				? "gpt-5.4-nano"
 				: provider === "gemini"
 					? "gemini-3.1-flash-lite-preview"
+				: provider === "qwen3"
+					? "qwen3-rerank"
 					: "qwen-flash",
 		defaultDomain:
 			provider === "openai"
@@ -61,7 +69,7 @@ jest.mock("src/services/search/hybrid/embedder", () => ({
 					: "dashscope.aliyuncs.com",
 	})),
 	normalizeEmbeddingProvider: jest.fn((provider: string) =>
-		provider === "openai" || provider === "gemini" ? provider : "qwen",
+		provider === "openai" || provider === "gemini" || provider === "qwen3" ? provider : "qwen",
 	),
 	NoApiKeyError: class NoApiKeyError extends Error {
 		constructor() {
@@ -419,6 +427,47 @@ describe("HybridReranker", () => {
 			"[search] qwen-flash",
 			15,
 		);
+	});
+
+	test("uses the native Qwen3 rerank API and model", async () => {
+		const { HybridReranker } = require("src/services/search/hybrid/reranker");
+		mockInstanceMap.set(require("src/globals/plugin-setting").OuterSetting, {
+			hybrid: {
+				apiKey: "test-key",
+				apiDomain: "dashscope.aliyuncs.com",
+				embeddingProvider: "qwen3",
+			},
+		});
+		(global as any).fetch = jest.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			headers: { get: jest.fn(() => null) },
+			json: jest.fn().mockResolvedValue({
+				output: { results: [{ index: 0, relevance_score: 0.91 }] },
+				usage: { total_tokens: 9 },
+			}),
+		});
+
+		const reranker = new HybridReranker();
+		await expect(reranker.rerank("alpha", [{
+			id: 7,
+			filePath: "notes/a.md",
+			text: "relevant passage",
+			startLine: 0,
+			startCol: 0,
+			endLine: 0,
+			recallScore: 0.5,
+		}], 1)).resolves.toEqual([{ id: 7, score: 0.91, start: undefined, end: undefined }]);
+
+		const [url, init] = (global as any).fetch.mock.calls[0];
+		expect(url).toBe("https://dashscope.aliyuncs.com/compatible-api/v1/reranks");
+		expect(JSON.parse(init.body)).toEqual({
+			model: "qwen3-rerank",
+			query: "alpha",
+			documents: ["relevant passage"],
+			top_n: 1,
+		});
+		expect(mockRecordTokenUsage).toHaveBeenCalledWith("[search] qwen3-rerank", 9);
 	});
 
 	test("uses Gemini generateContent rerank with Gemini flash lite preview", async () => {

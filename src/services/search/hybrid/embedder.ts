@@ -17,11 +17,15 @@ import {
 } from './hybrid-profiler';
 import { AsyncRateGate, retryAsync } from './runtime-control';
 
-const DEFAULT_DASHSCOPE_DOMAIN = 'dashscope.aliyuncs.com';
-const DEFAULT_OPENAI_DOMAIN = 'api.openai.com';
-const DEFAULT_GEMINI_DOMAIN = 'api.vectorengine.ai';
+const DEFAULT_DASHSCOPE_DOMAIN = 'https://dashscope.aliyuncs.com';
+const DEFAULT_QWEN3_API_BASE = 'https://dashscope.aliyuncs.com';
+const DEFAULT_OPENAI_DOMAIN = 'https://api.openai.com';
+const DEFAULT_GEMINI_DOMAIN = 'https://api.vectorengine.ai';
 const QWEN_EMBED_MODEL = 'text-embedding-v4';
 const QWEN_RERANK_MODEL = 'qwen-flash';
+const QWEN3_EMBED_MODEL = 'qwen3.7-text-embedding';
+const QWEN3_RERANK_MODEL = 'qwen3-rerank';
+const QWEN3_QUERY_INSTRUCT = 'Given a user query, retrieve relevant passages that answer the query or share the same semantic meaning';
 const OPENAI_EMBED_MODEL = 'text-embedding-3-large';
 const GEMINI_EMBED_MODEL = 'gemini-embedding-2-preview';
 const GEMINI_RERANK_MODEL = 'gemini-3.1-flash-lite-preview';
@@ -38,6 +42,7 @@ type EmbedBatchOptions = {
 	maxAttempts?: number;
 	interactive?: boolean;
 	provider?: HybridEmbeddingProvider;
+	textType?: 'document' | 'query';
 };
 
 type EmbeddingRequestProfile = Readonly<{
@@ -62,6 +67,13 @@ export const EMBEDDING_PROVIDER_SPECS: Record<HybridEmbeddingProvider, Embedding
 		embeddingModel: QWEN_EMBED_MODEL,
 		rerankModel: QWEN_RERANK_MODEL,
 		defaultDomain: DEFAULT_DASHSCOPE_DOMAIN,
+	},
+	qwen3: {
+		id: 'qwen3',
+		label: 'Qwen3.7 Text Embedding + Qwen3 Rerank',
+		embeddingModel: QWEN3_EMBED_MODEL,
+		rerankModel: QWEN3_RERANK_MODEL,
+		defaultDomain: DEFAULT_QWEN3_API_BASE,
 	},
 	openai: {
 		id: 'openai',
@@ -116,6 +128,7 @@ type EmbeddingQueueItem = {
 	owner: Embedder;
 	provider: HybridEmbeddingProvider;
 	text: string;
+	textType: 'document' | 'query';
 	precision: VectorPrecision;
 	filePath: string;
 	estimatedTokens: number;
@@ -296,14 +309,18 @@ class EmbeddingQueue {
 				}
 				return a.order - b.order;
 			})
-			.slice(0, this.profile.maxBatchSize)
 			.map(({ item }) => item);
-		const selected = new Set(prioritized.map((item) => item.id));
+		const batchTextType = prioritized[0]?.textType;
+		const compatibleItems = this.provider === 'qwen3'
+			? prioritized.filter((item) => item.textType === batchTextType)
+			: prioritized;
+		const selectedItems = compatibleItems.slice(0, this.profile.maxBatchSize);
+		const selected = new Set(selectedItems.map((item) => item.id));
 		this.pending = this.pending.filter((item) => !selected.has(item.id));
-		for (const item of prioritized) {
+		for (const item of selectedItems) {
 			item.state = 'in-flight';
 		}
-		return prioritized;
+		return selectedItems;
 	}
 
 	private async processBatch(batch: EmbeddingQueueItem[]): Promise<void> {
@@ -331,6 +348,7 @@ class EmbeddingQueue {
 					await liveBatch[0].owner.fetchQueuedEmbeddings(
 						liveBatch.map((item) => item.text),
 						this.provider,
+						liveBatch[0].textType,
 						maxAttempts,
 						batchAbort.signal,
 					),
@@ -540,7 +558,7 @@ export class Embedder {
 			precision,
 			filePath,
 			signal,
-			{ maxAttempts: 1, interactive: true },
+			{ maxAttempts: 1, interactive: true, textType: 'query' },
 		);
 		this.setCache(text, precision, result);
 		return result;
@@ -590,6 +608,7 @@ export class Embedder {
 			owner: this,
 			provider,
 			text,
+			textType: options.textType ?? (filePath === '<query>' ? 'query' : 'document'),
 			precision,
 			filePath,
 			estimatedTokens: estimateTextTokenUsage(text),
@@ -624,12 +643,14 @@ export class Embedder {
 	async fetchQueuedEmbeddings(
 		texts: string[],
 		provider: HybridEmbeddingProvider,
+		textType: 'document' | 'query',
 		maxAttempts: number,
 		externalSignal?: AbortSignal,
 	): Promise<{ embeddings: number[][]; tokensUsed: number }> {
 		return await this.fetchEmbeddings(texts, externalSignal, {
 			maxAttempts,
 			provider,
+			textType,
 		});
 	}
 
@@ -671,7 +692,9 @@ export class Embedder {
 							'Content-Type': 'application/json',
 							Authorization: `Bearer ${this.apiKey}`,
 						},
-						body: JSON.stringify(buildEmbeddingRequestBody(provider, texts)),
+						body: JSON.stringify(
+							buildEmbeddingRequestBody(provider, texts, options.textType),
+						),
 						signal: controller.signal,
 					});
 
@@ -865,7 +888,7 @@ export class Embedder {
 	}
 
 	private buildCacheKey(text: string, precision: VectorPrecision): string {
-		return `${precision}:${text}`;
+		return `${this.provider}:${precision}:${text}`;
 	}
 }
 
@@ -1123,7 +1146,7 @@ async function getTotalTokensStrict(fromDate: string, toDate: string): Promise<n
 export function normalizeEmbeddingProvider(
 	provider: unknown,
 ): HybridEmbeddingProvider {
-	if (provider === 'openai' || provider === 'gemini') {
+	if (provider === 'openai' || provider === 'gemini' || provider === 'qwen3') {
 		return provider;
 	}
 	return 'qwen';
@@ -1136,7 +1159,12 @@ export function getEmbeddingProviderSpec(
 }
 
 export function normalizeApiDomain(domain?: string): string {
-	return normalizeProviderApiDomain('qwen', domain);
+	const raw = domain?.trim();
+	if (!raw) {
+		return DEFAULT_DASHSCOPE_DOMAIN.replace(/^https?:\/\//i, '');
+	}
+	return raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '').split('/')[0] ||
+		DEFAULT_DASHSCOPE_DOMAIN.replace(/^https?:\/\//i, '');
 }
 
 export function normalizeProviderApiDomain(
@@ -1149,17 +1177,19 @@ export function normalizeProviderApiDomain(
 		return spec.defaultDomain;
 	}
 
-	const withoutProtocol = raw.replace(/^https?:\/\//, '').replace(/\/+$/, '');
-	const compatibleIndex = withoutProtocol.search(/\/compatible-(mode|api)\b/i);
-	const openAiV1Index = withoutProtocol.search(/\/v1\b/i);
-	const hostAndMaybePath =
-		compatibleIndex >= 0
-			? withoutProtocol.slice(0, compatibleIndex)
-			: openAiV1Index >= 0
-				? withoutProtocol.slice(0, openAiV1Index)
-			: withoutProtocol;
+	const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+	return withProtocol.replace(/\/+$/, '');
+}
 
-	return hostAndMaybePath.split('/')[0] || spec.defaultDomain;
+function appendEndpointPath(baseUrl: string, endpointPath: string): string {
+	return `${baseUrl.replace(/\/+$/, '')}/${endpointPath.replace(/^\/+/, '')}`;
+}
+
+function appendVersionedEndpoint(baseUrl: string, version: 'v1' | 'v1beta', endpointPath: string): string {
+	const versionedBase = baseUrl.endsWith(`/${version}`)
+		? baseUrl
+		: appendEndpointPath(baseUrl, version);
+	return appendEndpointPath(versionedBase, endpointPath);
 }
 
 export function buildDashScopeApiUrl(
@@ -1179,15 +1209,24 @@ export function buildEmbeddingApiUrl(
 	domain: string | undefined,
 ): string {
 	const normalizedProvider = normalizeEmbeddingProvider(provider);
+	const apiBase = normalizeProviderApiDomain(normalizedProvider, domain);
 	if (normalizedProvider === 'gemini') {
-		const host = normalizeProviderApiDomain(normalizedProvider, domain);
-		return `https://${host}/v1beta/models/${GEMINI_EMBED_MODEL}:batchEmbedContents`;
+		return appendVersionedEndpoint(apiBase, 'v1beta', `models/${GEMINI_EMBED_MODEL}:batchEmbedContents`);
 	}
 	if (normalizedProvider === 'openai') {
-		const host = normalizeProviderApiDomain(normalizedProvider, domain);
-		return `https://${host}/v1/embeddings`;
+		return appendVersionedEndpoint(apiBase, 'v1', 'embeddings');
 	}
-	return buildDashScopeApiUrl(domain, 'embedding');
+	if (normalizedProvider === 'qwen3') {
+		if (apiBase === EMBEDDING_PROVIDER_SPECS.qwen3.defaultDomain) {
+			return buildDashScopeApiUrl(domain, 'embedding');
+		}
+		return appendVersionedEndpoint(apiBase, 'v1', 'embeddings');
+	}
+	if (apiBase === EMBEDDING_PROVIDER_SPECS.qwen.defaultDomain ||
+		!new URL(apiBase).pathname.replace(/\/$/, '')) {
+		return buildDashScopeApiUrl(domain, 'embedding');
+	}
+	return appendVersionedEndpoint(apiBase, 'v1', 'embeddings');
 }
 
 export function buildProviderApiUrl(
@@ -1200,26 +1239,41 @@ export function buildProviderApiUrl(
 		return buildEmbeddingApiUrl(normalizedProvider, domain);
 	}
 	if (normalizedProvider === 'openai') {
-		const host = normalizeProviderApiDomain(normalizedProvider, domain);
-		return `https://${host}/v1/responses`;
+		const apiBase = normalizeProviderApiDomain(normalizedProvider, domain);
+		return appendVersionedEndpoint(apiBase, 'v1', 'responses');
 	}
 	if (normalizedProvider === 'gemini') {
-		const host = normalizeProviderApiDomain(normalizedProvider, domain);
-		return `https://${host}/v1beta/models/${GEMINI_RERANK_MODEL}:generateContent`;
+		const apiBase = normalizeProviderApiDomain(normalizedProvider, domain);
+		return appendVersionedEndpoint(apiBase, 'v1beta', `models/${GEMINI_RERANK_MODEL}:generateContent`);
 	}
-	const host = normalizeProviderApiDomain(normalizedProvider, domain);
-	return `https://${host}/compatible-mode/v1/chat/completions`;
+	if (normalizedProvider === 'qwen3') {
+		const apiBase = normalizeProviderApiDomain(normalizedProvider, domain);
+		if (apiBase === EMBEDDING_PROVIDER_SPECS.qwen3.defaultDomain) {
+			return buildDashScopeApiUrl(domain, 'rerank');
+		}
+		return appendVersionedEndpoint(apiBase, 'v1', 'rerank');
+	}
+	const apiBase = normalizeProviderApiDomain(normalizedProvider, domain);
+	if (apiBase === EMBEDDING_PROVIDER_SPECS.qwen.defaultDomain ||
+		!new URL(apiBase).pathname.replace(/\/$/, '')) {
+		const host = normalizeApiDomain(apiBase);
+		return `https://${host}/compatible-mode/v1/chat/completions`;
+	}
+	return appendVersionedEndpoint(apiBase, 'v1', 'chat/completions');
 }
 
 export function buildEmbeddingRequestBody(
 	provider: unknown,
 	texts: string[],
+	textType: 'document' | 'query' = 'document',
 ):
 	| {
 		model: string;
 		input: string[];
 		dimensions: number;
 		encoding_format: 'float';
+		text_type?: 'document' | 'query';
+		instruct?: string;
 	}
 	| {
 		requests: Array<{
@@ -1239,6 +1293,16 @@ export function buildEmbeddingRequestBody(
 				},
 				outputDimensionality: EMBED_DIM,
 			})),
+		};
+	}
+	if (normalizeEmbeddingProvider(provider) === 'qwen3') {
+		return {
+			model: QWEN3_EMBED_MODEL,
+			input: texts,
+			dimensions: EMBED_DIM,
+			encoding_format: 'float',
+			text_type: textType,
+			...(textType === 'query' ? { instruct: QWEN3_QUERY_INSTRUCT } : {}),
 		};
 	}
 	return {

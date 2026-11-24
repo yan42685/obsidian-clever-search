@@ -441,6 +441,49 @@ describe("DashScope API domain normalization", () => {
 		expect(normalizeApiDomain(input)).toBe(expected);
 	});
 
+	test("preserves the full Qwen3 custom API base URL", () => {
+		const {
+			normalizeProviderApiDomain,
+			buildEmbeddingApiUrl,
+			buildProviderApiUrl,
+		} = require("src/services/search/hybrid/embedder");
+		const apiBase = "https://geekai.co/api/v1";
+
+		expect(normalizeProviderApiDomain("qwen3", apiBase)).toBe(apiBase);
+		expect(buildEmbeddingApiUrl("qwen3", apiBase)).toBe(
+			"https://geekai.co/api/v1/embeddings",
+		);
+		expect(buildProviderApiUrl("qwen3", apiBase, "rerank")).toBe(
+			"https://geekai.co/api/v1/rerank",
+		);
+	});
+
+	test.each(["qwen", "qwen3", "openai", "gemini"])(
+		"uses the same full-URL normalization for %s",
+		(provider) => {
+			const { normalizeProviderApiDomain } = require("src/services/search/hybrid/embedder");
+			expect(
+				normalizeProviderApiDomain(provider, "https://proxy.example/api/v1///"),
+			).toBe("https://proxy.example/api/v1");
+		},
+	);
+
+	test("appends provider routes without duplicating version path segments", () => {
+		const { buildEmbeddingApiUrl, buildProviderApiUrl } = require("src/services/search/hybrid/embedder");
+		expect(buildEmbeddingApiUrl("openai", "https://proxy.example/v1")).toBe(
+			"https://proxy.example/v1/embeddings",
+		);
+		expect(buildEmbeddingApiUrl("gemini", "https://proxy.example/v1beta")).toBe(
+			"https://proxy.example/v1beta/models/gemini-embedding-2-preview:batchEmbedContents",
+		);
+		expect(buildEmbeddingApiUrl("qwen3", "https://geekai.co/api/v1")).toBe(
+			"https://geekai.co/api/v1/embeddings",
+		);
+		expect(buildProviderApiUrl("qwen3", "https://geekai.co/api/v1", "rerank")).toBe(
+			"https://geekai.co/api/v1/rerank",
+		);
+	});
+
 	test("builds compatible-mode path for embeddings from the normalized host", () => {
 		const { buildDashScopeApiUrl } = require("src/services/search/hybrid/embedder");
 
@@ -471,6 +514,21 @@ describe("DashScope API domain normalization", () => {
 			dimensions: EMBED_DIM,
 			encoding_format: "float",
 		});
+		expect(buildEmbeddingRequestBody("qwen3", ["passage"], "document")).toEqual({
+			model: "qwen3.7-text-embedding",
+			input: ["passage"],
+			dimensions: EMBED_DIM,
+			encoding_format: "float",
+			text_type: "document",
+		});
+		expect(buildEmbeddingRequestBody("qwen3", ["question"], "query")).toEqual({
+			model: "qwen3.7-text-embedding",
+			input: ["question"],
+			dimensions: EMBED_DIM,
+			encoding_format: "float",
+			text_type: "query",
+			instruct: "Given a user query, retrieve relevant passages that answer the query or share the same semantic meaning",
+		});
 		expect(buildEmbeddingRequestBody("openai", ["alpha"])).toEqual({
 			model: "text-embedding-3-large",
 			input: ["alpha"],
@@ -487,6 +545,24 @@ describe("DashScope API domain normalization", () => {
 					outputDimensionality: EMBED_DIM,
 				},
 			],
+		});
+	});
+
+	test("keeps Qwen3 query and document embedding requests separate", async () => {
+		const { Embedder } = require("src/services/search/hybrid/embedder");
+		setHybridSetting({ embeddingProvider: "qwen3" });
+		const fetchMock = createEmbeddingFetchMock();
+		(global as any).fetch = fetchMock;
+		const embedder = new Embedder();
+		const documentPromise = embedder.embedBatch(["passage"], "int8", "note.md");
+		const queryPromise = embedder.embedQuery("question");
+		await Promise.all([documentPromise, queryPromise]);
+
+		const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body ?? "{}"));
+		expect(bodies).toHaveLength(2);
+		expect(bodies.find((body) => body.text_type === "document")).not.toHaveProperty("instruct");
+		expect(bodies.find((body) => body.text_type === "query")).toMatchObject({
+			instruct: "Given a user query, retrieve relevant passages that answer the query or share the same semantic meaning",
 		});
 	});
 });
@@ -615,6 +691,7 @@ describe('Embedder token accounting', () => {
 			{ filePath: 'note-b.md', dateKey: '2026-04-08', tokens: 30 },
 			{ filePath: 'older.md', dateKey: '2026-03-15', tokens: 50 },
 		]);
+
 		mockInstanceMap.set(Database, { db: mockDb.db });
 
 		const {

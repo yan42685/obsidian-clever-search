@@ -992,7 +992,7 @@ class HybridSearchModal extends Modal {
 	private statsEl: HTMLElement;
 	private openedApiDomain = "";
 	private openedApiKey = "";
-	private openedEmbeddingProvider: "qwen" | "openai" | "gemini" = "qwen";
+	private openedEmbeddingProvider: "qwen" | "qwen3" | "openai" | "gemini" = "qwen";
 	private currentFailedEmbeddingSummary: HybridFailedEmbeddingSummary | null = null;
 	private currentDeferredEmbeddingSummary: HybridDeferredEmbeddingSummary | null = null;
 	private failedEmbeddingStatusTimer: number | null = null;
@@ -1052,6 +1052,7 @@ class HybridSearchModal extends Modal {
 				dropdown
 					.addOptions({
 						qwen: EMBEDDING_PROVIDER_SPECS.qwen.label,
+						qwen3: EMBEDDING_PROVIDER_SPECS.qwen3.label,
 						openai: EMBEDDING_PROVIDER_SPECS.openai.label,
 						gemini: EMBEDDING_PROVIDER_SPECS.gemini.label,
 					})
@@ -1405,8 +1406,8 @@ class HybridSearchModal extends Modal {
 	}
 
 	private updateApiDomainForProviderChange(
-		previousProvider: "qwen" | "openai" | "gemini",
-		nextProvider: "qwen" | "openai" | "gemini",
+		previousProvider: "qwen" | "qwen3" | "openai" | "gemini",
+		nextProvider: "qwen" | "qwen3" | "openai" | "gemini",
 	): void {
 		const currentDomain = this.hybridApiDomainInputEl?.value?.trim() ??
 			this.setting.hybrid.apiDomain ??
