@@ -1,3 +1,9 @@
+## [0.3.18] - 2026-11-24
+
+- style: widen search settings modals
+- feat: add Qwen3 embedding provider
+- refactor: remove Gemini embedding provider
+
 ## [0.3.17] - 2026-11-21
 
 - fix: require explicit versions for major and minor releases
