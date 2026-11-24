@@ -178,52 +178,6 @@ describe("Embedder response validation", () => {
 		).rejects.toThrow("contentType=text/html");
 	});
 
-	test("parses Gemini batchEmbedContents embedding responses", async () => {
-		setHybridSetting({ embeddingProvider: "gemini" });
-		const { Embedder } = require("src/services/search/hybrid/embedder");
-		const { EMBED_DIM } = require("src/services/search/hybrid/hybrid-types");
-		(global as any).fetch = jest.fn().mockResolvedValue(
-			createJsonFetchResponse({
-				embeddings: [
-					{ values: createEmbedding(0, EMBED_DIM) },
-					{ values: createEmbedding(1, EMBED_DIM) },
-				],
-				usageMetadata: {
-					totalTokenCount: 7,
-				},
-			}),
-		);
-
-		const embedder = new Embedder();
-		const result = await (embedder as any).fetchEmbeddings(["alpha", "beta"]);
-
-		expect(result.embeddings).toHaveLength(2);
-		expect(result.embeddings[0]).toHaveLength(EMBED_DIM);
-		expect(result.embeddings[1][1]).toBe(2);
-		expect(result.tokensUsed).toBe(7);
-		const [, init] = (global as any).fetch.mock.calls[0] as [
-			string,
-			{ body: string },
-		];
-		expect(JSON.parse(init.body)).toEqual({
-			requests: [
-				{
-					model: "models/gemini-embedding-2-preview",
-					content: {
-						parts: [{ text: "alpha" }],
-					},
-					outputDimensionality: EMBED_DIM,
-				},
-				{
-					model: "models/gemini-embedding-2-preview",
-					content: {
-						parts: [{ text: "beta" }],
-					},
-					outputDimensionality: EMBED_DIM,
-				},
-			],
-		});
-	});
 });
 
 describe("Embedder chunk queue", () => {
@@ -458,7 +412,7 @@ describe("DashScope API domain normalization", () => {
 		);
 	});
 
-	test.each(["qwen", "qwen3", "openai", "gemini"])(
+	test.each(["qwen", "qwen3", "openai"])(
 		"uses the same full-URL normalization for %s",
 		(provider) => {
 			const { normalizeProviderApiDomain } = require("src/services/search/hybrid/embedder");
@@ -472,9 +426,6 @@ describe("DashScope API domain normalization", () => {
 		const { buildEmbeddingApiUrl, buildProviderApiUrl } = require("src/services/search/hybrid/embedder");
 		expect(buildEmbeddingApiUrl("openai", "https://proxy.example/v1")).toBe(
 			"https://proxy.example/v1/embeddings",
-		);
-		expect(buildEmbeddingApiUrl("gemini", "https://proxy.example/v1beta")).toBe(
-			"https://proxy.example/v1beta/models/gemini-embedding-2-preview:batchEmbedContents",
 		);
 		expect(buildEmbeddingApiUrl("qwen3", "https://geekai.co/api/v1")).toBe(
 			"https://geekai.co/api/v1/embeddings",
@@ -505,9 +456,6 @@ describe("DashScope API domain normalization", () => {
 		expect(buildEmbeddingApiUrl("openai", undefined)).toBe(
 			"https://api.openai.com/v1/embeddings",
 		);
-		expect(buildEmbeddingApiUrl("gemini", undefined)).toBe(
-			"https://api.vectorengine.ai/v1beta/models/gemini-embedding-2-preview:batchEmbedContents",
-		);
 		expect(buildEmbeddingRequestBody("qwen", ["alpha"])).toEqual({
 			model: "text-embedding-v4",
 			input: ["alpha"],
@@ -534,17 +482,6 @@ describe("DashScope API domain normalization", () => {
 			input: ["alpha"],
 			dimensions: EMBED_DIM,
 			encoding_format: "float",
-		});
-		expect(buildEmbeddingRequestBody("gemini", ["alpha"])).toEqual({
-			requests: [
-				{
-					model: "models/gemini-embedding-2-preview",
-					content: {
-						parts: [{ text: "alpha" }],
-					},
-					outputDimensionality: EMBED_DIM,
-				},
-			],
 		});
 	});
 

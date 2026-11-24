@@ -22,16 +22,14 @@ const LLM_RERANK_MAX_RESULTS = 3;
 export const SEARCH_QWEN_RERANK_TOKEN_KEY = '[search] qwen-flash';
 export const SEARCH_QWEN3_RERANK_TOKEN_KEY = '[search] qwen3-rerank';
 export const SEARCH_OPENAI_RERANK_TOKEN_KEY = '[search] gpt-5.4-nano';
-export const SEARCH_GEMINI_RERANK_TOKEN_KEY = '[search] gemini-3.1-flash-lite-preview';
 export const SEARCH_RERANK_TOKEN_KEY = SEARCH_QWEN_RERANK_TOKEN_KEY;
 export const SEARCH_RERANK_TOKEN_KEYS = [
 	SEARCH_QWEN_RERANK_TOKEN_KEY,
 	SEARCH_QWEN3_RERANK_TOKEN_KEY,
 	SEARCH_OPENAI_RERANK_TOKEN_KEY,
-	SEARCH_GEMINI_RERANK_TOKEN_KEY,
 ] as const;
 export const SEARCH_EMBED_TOKEN_KEY = '[search] embedding';
-type RerankProvider = 'qwen' | 'qwen3' | 'openai' | 'gemini';
+type RerankProvider = 'qwen' | 'qwen3' | 'openai';
 
 export type HybridRerankFailureKind = HybridProviderFailureKind;
 
@@ -169,12 +167,6 @@ export class HybridReranker {
 				};
 				output_text?: string;
 				usage?: { total_tokens?: number; input_tokens?: number };
-				usageMetadata?: { totalTokenCount?: number; promptTokenCount?: number };
-				candidates?: Array<{
-					content?: {
-						parts?: Array<{ text?: string }>;
-					};
-				}>;
 				choices?: Array<{
 					message?: {
 						content?: string;
@@ -184,8 +176,6 @@ export class HybridReranker {
 			const tokensUsed =
 				json.usage?.total_tokens ??
 				json.usage?.input_tokens ??
-				json.usageMetadata?.totalTokenCount ??
-				json.usageMetadata?.promptTokenCount ??
 				0;
 			if (tokensUsed > 0) {
 				await recordTokenUsage(getSearchRerankTokenKey(provider), tokensUsed);
@@ -267,10 +257,8 @@ export class HybridReranker {
 				body: JSON.stringify(
 					provider === 'openai'
 						? this.buildOpenAIRerankRequest(query, documents, topK)
-						: provider === 'gemini'
-							? this.buildGeminiRerankRequest(query, documents, topK)
-							: provider === 'qwen3'
-								? this.buildQwen3RerankRequest(query, documents, topK)
+						: provider === 'qwen3'
+							? this.buildQwen3RerankRequest(query, documents, topK)
 							: this.buildQwenRerankRequest(query, documents, topK),
 				),
 				signal: controller.signal,
@@ -295,16 +283,12 @@ export class HybridReranker {
 	}
 
 	private extractRankedItems(json: {
+		results?: Array<{ index: number; relevance_score?: number; score?: number }>;
 		output?: {
 			content?: Array<{ type?: string; text?: string }>;
 			results?: Array<{ index: number; relevance_score?: number; score?: number }>;
 		} | Array<{ content?: Array<{ type?: string; text?: string }> }>;
 		output_text?: string;
-		candidates?: Array<{
-			content?: {
-				parts?: Array<{ text?: string }>;
-			};
-		}>;
 		choices?: Array<{
 			message?: {
 				content?: string;
@@ -312,7 +296,10 @@ export class HybridReranker {
 		}>;
 	}, provider: RerankProvider = this.provider): Array<{ index: number; score: number; start?: number; end?: number }> {
 		if (provider === 'qwen3') {
-			return (Array.isArray(json.output) ? [] : json.output?.results ?? [])
+			const results = Array.isArray(json.output)
+				? json.results ?? []
+				: json.output?.results ?? json.results ?? [];
+			return results
 				.filter((item) => Number.isInteger(item.index) && Number.isFinite(item.relevance_score ?? item.score))
 				.map((item) => ({
 					index: item.index,
@@ -321,9 +308,6 @@ export class HybridReranker {
 		}
 		if (provider === 'openai') {
 			return this.extractOpenAIRankedItems(json);
-		}
-		if (provider === 'gemini') {
-			return this.extractGeminiRankedItems(json);
 		}
 		return this.extractQwenRankedItems(json);
 	}
@@ -388,38 +372,6 @@ export class HybridReranker {
 		};
 	}
 
-	private buildGeminiRerankRequest(
-		query: string,
-		documents: string[],
-		topK: number,
-	): {
-		contents: Array<{
-			parts: Array<{ text: string }>;
-		}>;
-		generationConfig: {
-			responseMimeType: 'application/json';
-		};
-	} {
-		const candidates = documents.map((text, index) => ({
-			index,
-			text,
-		}));
-		return {
-			contents: [
-				{
-					parts: [
-						{
-							text: this.buildLlmRerankPrompt(query, candidates, topK),
-						},
-					],
-				},
-			],
-			generationConfig: {
-				responseMimeType: 'application/json',
-			},
-		};
-	}
-
 	private buildLlmRerankPrompt(
 		query: string,
 		candidates: Array<{ index: number; text: string }>,
@@ -460,21 +412,6 @@ export class HybridReranker {
 	}): Array<{ index: number; score: number; start?: number; end?: number }> {
 		const text = (json.choices ?? [])
 			.map((choice) => choice.message?.content)
-			.filter((value): value is string => Boolean(value))
-			.join('\n');
-		return this.extractLlmRankedItemsFromText(text);
-	}
-
-	private extractGeminiRankedItems(json: {
-		candidates?: Array<{
-			content?: {
-				parts?: Array<{ text?: string }>;
-			};
-		}>;
-	}): Array<{ index: number; score: number; start?: number; end?: number }> {
-		const text = (json.candidates ?? [])
-			.flatMap((candidate) => candidate.content?.parts ?? [])
-			.map((part) => part.text)
 			.filter((value): value is string => Boolean(value))
 			.join('\n');
 		return this.extractLlmRankedItemsFromText(text);
@@ -599,9 +536,6 @@ function getSearchRerankTokenKey(provider: RerankProvider): string {
 	}
 	if (provider === 'openai') {
 		return SEARCH_OPENAI_RERANK_TOKEN_KEY;
-	}
-	if (provider === 'gemini') {
-		return SEARCH_GEMINI_RERANK_TOKEN_KEY;
 	}
 	return SEARCH_QWEN_RERANK_TOKEN_KEY;
 }

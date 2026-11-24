@@ -10,7 +10,7 @@ export type HybridProviderFailureKind =
 	| 'network'
 	| 'unknown';
 
-type HybridProviderId = 'qwen' | 'qwen3' | 'openai' | 'gemini';
+type HybridProviderId = 'qwen' | 'qwen3' | 'openai';
 
 export type HybridProviderErrorDetails = {
 	kind: HybridProviderFailureKind;

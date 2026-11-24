@@ -166,7 +166,7 @@ export type ReleaseAnnouncementSetting = {
 	seenVersions: string[];
 };
 
-export type HybridEmbeddingProvider = "qwen" | "qwen3" | "openai" | "gemini";
+export type HybridEmbeddingProvider = "qwen" | "qwen3" | "openai";
 
 export type HybridVectorCompression = "int8" | "float16";
 

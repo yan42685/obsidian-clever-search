@@ -992,7 +992,7 @@ class HybridSearchModal extends Modal {
 	private statsEl: HTMLElement;
 	private openedApiDomain = "";
 	private openedApiKey = "";
-	private openedEmbeddingProvider: "qwen" | "qwen3" | "openai" | "gemini" = "qwen";
+	private openedEmbeddingProvider: string = "qwen";
 	private currentFailedEmbeddingSummary: HybridFailedEmbeddingSummary | null = null;
 	private currentDeferredEmbeddingSummary: HybridDeferredEmbeddingSummary | null = null;
 	private failedEmbeddingStatusTimer: number | null = null;
@@ -1015,10 +1015,12 @@ class HybridSearchModal extends Modal {
 		this.modalEl.style.width = "70vw";
 		this.modalEl.style.marginBottom = "5em";
 		this.modalEl.querySelector(".modal-close-button")?.remove();
+		this.openedEmbeddingProvider = String(
+			this.setting.hybrid.embeddingProvider ?? "qwen",
+		);
 		this.setting.hybrid.embeddingProvider = normalizeEmbeddingProvider(
 			this.setting.hybrid.embeddingProvider,
 		);
-		this.openedEmbeddingProvider = this.setting.hybrid.embeddingProvider;
 		this.openedApiDomain = this.setting.hybrid.apiDomain ?? "";
 		this.openedApiKey = this.setting.hybrid.apiKey ?? "";
 		eventBus.on(
@@ -1054,7 +1056,6 @@ class HybridSearchModal extends Modal {
 						qwen: EMBEDDING_PROVIDER_SPECS.qwen.label,
 						qwen3: EMBEDDING_PROVIDER_SPECS.qwen3.label,
 						openai: EMBEDDING_PROVIDER_SPECS.openai.label,
-						gemini: EMBEDDING_PROVIDER_SPECS.gemini.label,
 					})
 					.setValue(this.setting.hybrid.embeddingProvider)
 					.onChange(async (value) => {
@@ -1406,8 +1407,8 @@ class HybridSearchModal extends Modal {
 	}
 
 	private updateApiDomainForProviderChange(
-		previousProvider: "qwen" | "qwen3" | "openai" | "gemini",
-		nextProvider: "qwen" | "qwen3" | "openai" | "gemini",
+		previousProvider: "qwen" | "qwen3" | "openai",
+		nextProvider: "qwen" | "qwen3" | "openai",
 	): void {
 		const currentDomain = this.hybridApiDomainInputEl?.value?.trim() ??
 			this.setting.hybrid.apiDomain ??

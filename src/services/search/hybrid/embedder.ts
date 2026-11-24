@@ -20,15 +20,12 @@ import { AsyncRateGate, retryAsync } from './runtime-control';
 const DEFAULT_DASHSCOPE_DOMAIN = 'https://dashscope.aliyuncs.com';
 const DEFAULT_QWEN3_API_BASE = 'https://dashscope.aliyuncs.com';
 const DEFAULT_OPENAI_DOMAIN = 'https://api.openai.com';
-const DEFAULT_GEMINI_DOMAIN = 'https://api.vectorengine.ai';
 const QWEN_EMBED_MODEL = 'text-embedding-v4';
 const QWEN_RERANK_MODEL = 'qwen-flash';
 const QWEN3_EMBED_MODEL = 'qwen3.7-text-embedding';
 const QWEN3_RERANK_MODEL = 'qwen3-rerank';
 const QWEN3_QUERY_INSTRUCT = 'Given a user query, retrieve relevant passages that answer the query or share the same semantic meaning';
 const OPENAI_EMBED_MODEL = 'text-embedding-3-large';
-const GEMINI_EMBED_MODEL = 'gemini-embedding-2-preview';
-const GEMINI_RERANK_MODEL = 'gemini-3.1-flash-lite-preview';
 const CACHE_MAX = 50;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
 const REQUEST_TIMEOUT_MS = 45_000;
@@ -82,13 +79,6 @@ export const EMBEDDING_PROVIDER_SPECS: Record<HybridEmbeddingProvider, Embedding
 		rerankModel: 'gpt-5.4-nano',
 		defaultDomain: DEFAULT_OPENAI_DOMAIN,
 	},
-	gemini: {
-		id: 'gemini',
-		label: 'Gemini embedding-2-preview + Gemini 3.1 Flash Lite Preview',
-		embeddingModel: GEMINI_EMBED_MODEL,
-		rerankModel: GEMINI_RERANK_MODEL,
-		defaultDomain: DEFAULT_GEMINI_DOMAIN,
-	},
 };
 
 export { NoApiKeyError, WeeklyTokenLimitExceededError } from './provider-error';
@@ -102,15 +92,10 @@ export class HybridDisabledError extends Error {
 
 type ProviderEmbeddingResponse = {
 	data?: Array<{ index?: number; embedding?: number[] }>;
-	embeddings?: Array<{ values?: number[] }>;
 	usage?: {
 		total_tokens?: number;
 		input_tokens?: number;
 		prompt_tokens?: number;
-	};
-	usageMetadata?: {
-		promptTokenCount?: number;
-		totalTokenCount?: number;
 	};
 };
 
@@ -188,14 +173,6 @@ export function getEmbeddingRequestProfile(
 	provider: unknown,
 ): EmbeddingRequestProfile {
 	const normalizedProvider = normalizeEmbeddingProvider(provider);
-	if (normalizedProvider === 'gemini') {
-		return {
-			maxBatchSize: 100,
-			minSpacingMs: 0,
-			flushDelayMs: 300,
-			concurrency: 1,
-		};
-	}
 	if (normalizedProvider === 'openai') {
 		return {
 			maxBatchSize: 100,
@@ -740,8 +717,6 @@ export class Embedder {
 						json.usage?.total_tokens ??
 						json.usage?.input_tokens ??
 						json.usage?.prompt_tokens ??
-						json.usageMetadata?.totalTokenCount ??
-						json.usageMetadata?.promptTokenCount ??
 						0;
 					return {
 						embeddings: this.validateEmbeddingResponse(texts, json, provider),
@@ -780,19 +755,6 @@ export class Embedder {
 		json: ProviderEmbeddingResponse,
 		provider: HybridEmbeddingProvider,
 	): number[][] {
-		if (provider === 'gemini') {
-			if (!Array.isArray(json.embeddings)) {
-				throw new Error('Embedding response missing embeddings array');
-			}
-			if (json.embeddings.length !== texts.length) {
-				throw new Error(
-					`Embedding response count mismatch: expected ${texts.length}, received ${json.embeddings.length}`,
-				);
-			}
-			return json.embeddings.map((embedding, index) =>
-				validateEmbeddingVector(embedding?.values, index),
-			);
-		}
 		if (!Array.isArray(json.data)) {
 			throw new Error('Embedding response missing data array');
 		}
@@ -1146,7 +1108,7 @@ async function getTotalTokensStrict(fromDate: string, toDate: string): Promise<n
 export function normalizeEmbeddingProvider(
 	provider: unknown,
 ): HybridEmbeddingProvider {
-	if (provider === 'openai' || provider === 'gemini' || provider === 'qwen3') {
+	if (provider === 'openai' || provider === 'qwen3') {
 		return provider;
 	}
 	return 'qwen';
@@ -1210,9 +1172,6 @@ export function buildEmbeddingApiUrl(
 ): string {
 	const normalizedProvider = normalizeEmbeddingProvider(provider);
 	const apiBase = normalizeProviderApiDomain(normalizedProvider, domain);
-	if (normalizedProvider === 'gemini') {
-		return appendVersionedEndpoint(apiBase, 'v1beta', `models/${GEMINI_EMBED_MODEL}:batchEmbedContents`);
-	}
 	if (normalizedProvider === 'openai') {
 		return appendVersionedEndpoint(apiBase, 'v1', 'embeddings');
 	}
@@ -1242,10 +1201,6 @@ export function buildProviderApiUrl(
 		const apiBase = normalizeProviderApiDomain(normalizedProvider, domain);
 		return appendVersionedEndpoint(apiBase, 'v1', 'responses');
 	}
-	if (normalizedProvider === 'gemini') {
-		const apiBase = normalizeProviderApiDomain(normalizedProvider, domain);
-		return appendVersionedEndpoint(apiBase, 'v1beta', `models/${GEMINI_RERANK_MODEL}:generateContent`);
-	}
 	if (normalizedProvider === 'qwen3') {
 		const apiBase = normalizeProviderApiDomain(normalizedProvider, domain);
 		if (apiBase === EMBEDDING_PROVIDER_SPECS.qwen3.defaultDomain) {
@@ -1274,27 +1229,7 @@ export function buildEmbeddingRequestBody(
 		encoding_format: 'float';
 		text_type?: 'document' | 'query';
 		instruct?: string;
-	}
-	| {
-		requests: Array<{
-			model: string;
-			content: {
-				parts: Array<{ text: string }>;
-			};
-			outputDimensionality: number;
-		}>;
 	} {
-	if (normalizeEmbeddingProvider(provider) === 'gemini') {
-		return {
-			requests: texts.map((text) => ({
-				model: `models/${GEMINI_EMBED_MODEL}`,
-				content: {
-					parts: [{ text }],
-				},
-				outputDimensionality: EMBED_DIM,
-			})),
-		};
-	}
 	if (normalizeEmbeddingProvider(provider) === 'qwen3') {
 		return {
 			model: QWEN3_EMBED_MODEL,

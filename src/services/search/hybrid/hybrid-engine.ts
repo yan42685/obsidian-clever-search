@@ -305,8 +305,7 @@ export class HybridEngine {
   }
 
   private get indexEmbedBatchSize(): number {
-    return this.setting.hybrid.embeddingProvider === "openai" ||
-      this.setting.hybrid.embeddingProvider === "gemini"
+    return this.setting.hybrid.embeddingProvider === "openai"
       ? OPENAI_INDEX_EMBED_BATCH_SIZE
       : QWEN_INDEX_EMBED_BATCH_SIZE;
   }

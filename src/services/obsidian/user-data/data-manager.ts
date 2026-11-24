@@ -4779,8 +4779,7 @@ export class DataManager {
       Math.round(this.setting.hybrid.indexConcurrency ?? 3),
     );
     if (
-      this.setting.hybrid.embeddingProvider === "openai" ||
-      this.setting.hybrid.embeddingProvider === "gemini"
+      this.setting.hybrid.embeddingProvider === "openai"
     ) {
       return {
         maxFiles: Math.min(

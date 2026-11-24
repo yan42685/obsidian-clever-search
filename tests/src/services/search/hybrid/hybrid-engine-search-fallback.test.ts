@@ -337,11 +337,11 @@ describe("HybridEngine search fallback notices", () => {
 		expect(reranked.map((candidate: any) => candidate.score)).toEqual([0.95]);
 	});
 
-	test("Gemini provider finalizes with lexical and dense candidates through rerank", async () => {
+	test("Qwen3 provider finalizes with lexical and dense candidates through rerank", async () => {
 		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
 		const engine = new HybridEngine() as any;
 		const outerSetting = mockInstanceMap.get(require("src/globals/plugin-setting").OuterSetting);
-		outerSetting.hybrid.embeddingProvider = "gemini";
+		outerSetting.hybrid.embeddingProvider = "qwen3";
 		const prepared = createPreparedRecall();
 		engine.recallDenseDisplayCandidates = jest.fn().mockResolvedValue([
 			{
@@ -378,12 +378,12 @@ describe("HybridEngine search fallback notices", () => {
 		expect(finalized.fallbackToLexicalSearch).toBe(false);
 	});
 
-	test("Gemini provider prepares lexical lane candidates", async () => {
+	test("Qwen3 provider prepares lexical lane candidates", async () => {
 		const { HybridEngine } = require("src/services/search/hybrid/hybrid-engine");
 		const lexicalLane = require("src/services/search/hybrid/lexical-lane");
 		const engine = new HybridEngine() as any;
 		const outerSetting = mockInstanceMap.get(require("src/globals/plugin-setting").OuterSetting);
-		outerSetting.hybrid.embeddingProvider = "gemini";
+		outerSetting.hybrid.embeddingProvider = "qwen3";
 		engine._ready = true;
 		lexicalLane.buildHybridLexicalLaneFileShortlist.mockResolvedValue([
 			{ path: "notes/a.md" },
